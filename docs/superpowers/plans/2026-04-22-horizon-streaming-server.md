@@ -3773,6 +3773,12 @@ git commit -m "feat(app): player page with hls.js, quality overlay, keyboard con
 
 **Goal:** confirm server starts, scans the media file in the working directory, creates a session, FFmpeg spawns and is killed on disconnect.
 
+**NOTE — deviations found and fixed during E2E:**
+1. `buildTranscodeArgs` used per-stream `-vf:N` flags which break with `-var_stream_map` + single output template. Fixed with `filter_complex split=N` approach.
+2. `zscale` (libzimg) was not compiled into the system FFmpeg. Replaced with built-in `tonemap` filter (no libzimg required).
+3. hwaccel decode skipped when `needsToneMap`: HDR frames in VRAM cannot pass through CPU `tonemap` filter.
+4. Session directory UUID ≠ session ID (two `crypto.randomUUID()` calls). Segment files live at `os.tmpdir()/horizon/sessions/<dir-uuid>/`, not `<session-id>/`. Plan step 5 check command uses session ID — use `find` instead or watch the filesystem.
+
 - [ ] **Step 1: Start the server with the test media file**
 
 ```bash
