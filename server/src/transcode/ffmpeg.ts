@@ -51,11 +51,14 @@ function buildTranscodeArgs(
   const { filePath, seekPositionMs, sessionDir, needsToneMap } = session
   const seekSecs = seekPositionMs / 1000
   const canHevc = session.capabilities.videoCodecs.includes('hevc')
+  const n = profiles.length
 
   const args: string[] = []
   const renditionCodecs: string[] = []
 
-  if (hwAccel.hwaccelDecode.length > 0) {
+  // Hardware decode only when NOT tone-mapping: HDR frames live in VRAM and cannot
+  // pass through CPU software filters (tonemap). For non-HDR, hw decode is safe.
+  if (!needsToneMap && hwAccel.hwaccelDecode.length > 0) {
     args.push(...hwAccel.hwaccelDecode)
   }
 
@@ -65,31 +68,43 @@ function buildTranscodeArgs(
 
   args.push('-i', filePath)
 
-  for (let i = 0; i < profiles.length; i++) {
-    args.push('-map', '0:v:0', '-map', `0:a:${audioTrackIndex}`)
+  // Build filter_complex — required for multi-rendition HLS with per-rendition scale.
+  // Per-stream -vf:N flags do not work correctly with -var_stream_map + a single
+  // output-file template: FFmpeg only keeps the last -vf value for all streams.
+  //
+  // Tone-map chain: uses built-in `tonemap` filter (no zscale/libzimg required).
+  // `tonemap` accepts 10-bit input (p010le / yuv420p10le) and outputs yuv420p.
+  const scaleChain = (p: Profile) =>
+    `scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,` +
+    `pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2`
+
+  const toneMapPrefix = needsToneMap
+    ? 'tonemap=tonemap=hable:desat=0:peak=100,format=yuv420p,'
+    : ''
+
+  // split=N after optional tone-map, then per-label scale
+  const splitLabels = profiles.map((_, i) => `[tv${i}]`).join('')
+  const splitNode = `[0:v]${toneMapPrefix}split=${n}${splitLabels}`
+  const scaleNodes = profiles.map((p, i) => `[tv${i}]${scaleChain(p)}[sv${i}]`).join(';')
+  args.push('-filter_complex', `${splitNode};${scaleNodes}`)
+
+  // Map streams: [sv0] + audio, [sv1] + audio, …
+  for (let i = 0; i < n; i++) {
+    args.push('-map', `[sv${i}]`, '-map', `0:a:${audioTrackIndex}`)
   }
 
-  const scaleBase = (p: Profile) =>
-    `scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2`
-  const toneMapFilter =
-    'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p'
-
-  for (let i = 0; i < profiles.length; i++) {
+  // Per-rendition codec + bitrate settings
+  for (let i = 0; i < n; i++) {
     const p = profiles[i]
     const useHevc = canHevc && p.width >= 1920
     const vEncoder = useHevc ? hwAccel.hevcEncoder : hwAccel.h264Encoder
     renditionCodecs.push(useHevc ? 'hvc1.1.6.L150.90' : 'avc1.640028')
-
-    const vfValue = needsToneMap
-      ? `${toneMapFilter},${scaleBase(p)}`
-      : scaleBase(p)
 
     args.push(
       `-c:v:${i}`, vEncoder,
       `-b:v:${i}`, `${p.videoBitrate}k`,
       `-maxrate:v:${i}`, `${Math.round(p.videoBitrate * 1.1)}k`,
       `-bufsize:v:${i}`, `${p.videoBitrate * 2}k`,
-      `-vf:${i}`, vfValue,
       `-g:v:${i}`, '48',
       `-sc_threshold:v:${i}`, '0',
       `-c:a:${i}`, 'aac',
