@@ -1,0 +1,200 @@
+import type { Session } from '../session/types.ts'
+import type { SessionManager } from '../session/manager.ts'
+import type { Config } from '../config.ts'
+import type { HwAccel } from '../transcode/hwaccel.ts'
+import type { Profile } from '../transcode/profiles.ts'
+import { PROFILES } from '../transcode/profiles.ts'
+import { killFfmpeg, spawnFfmpeg, pauseFfmpeg, resumeFfmpeg } from '../transcode/ffmpeg.ts'
+import { rm } from 'node:fs/promises'
+import path from 'node:path'
+
+export interface AbrState {
+  currentProfileIndex: number  // index into PROFILES global array
+  lastChangeAt: number
+  cooldownMs: number
+  profiles: Profile[]          // must equal PROFILES for consistent indexing
+}
+
+export type AbrAction = 'up' | 'down' | 'emergency-down' | 'none'
+
+interface BandwidthReport {
+  kbps: number
+  bufferSeconds: number
+}
+
+export function computeAbrAction(report: BandwidthReport, state: AbrState, now: number): AbrAction {
+  const { kbps, bufferSeconds } = report
+  const { currentProfileIndex, lastChangeAt, cooldownMs, profiles } = state
+  const current = profiles[currentProfileIndex]
+  const inCooldown = now - lastChangeAt < cooldownMs
+
+  if (bufferSeconds < 4) return 'emergency-down'
+  if (inCooldown) return 'none'
+  if (bufferSeconds < 8) return 'down'
+  if (kbps < current.videoBitrate * 1.2) return 'down'
+  const nextUp = profiles[currentProfileIndex - 1]
+  if (nextUp && kbps > nextUp.videoBitrate * 1.5 && bufferSeconds > 15) return 'up'
+  return 'none'
+}
+
+function send(session: Session, msg: object) {
+  session.wsSocket?.send(JSON.stringify(msg))
+}
+
+async function restartFfmpegAtPosition(
+  session: Session,
+  hwAccel: HwAccel,
+  newProfile: Profile,
+) {
+  killFfmpeg(session)
+  // clean stale segments before restart
+  for (let r = 0; r < session.profiles.length; r++) {
+    await rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
+  }
+  session.profiles = [newProfile]
+  await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
+  send(session, {
+    type: 'quality-changed',
+    profile: newProfile,
+    reason: 'abr-restart',
+  })
+}
+
+// WeakMap: auto-GC'd when session object is released from manager
+const sessionAbrState = new WeakMap<Session, AbrState>()
+
+export function handleWsMessage(
+  msg: any,
+  session: Session,
+  sessions: SessionManager,
+  cfg: Config,
+  hwAccel: HwAccel,
+) {
+  switch (msg.type) {
+    case 'hello': {
+      // reconnect: verify token
+      if (msg.reconnectToken && msg.reconnectToken !== session.reconnectToken) {
+        session.wsSocket?.close(4401, 'invalid-reconnect-token')
+        return
+      }
+      clearTimeout(session.graceTimer)
+      session.state = 'active'
+      // re-send session-ready
+      send(session, {
+        type: 'session-ready',
+        method: session.method,
+        streamUrl: session.method === 'direct-play'
+          ? `/sessions/${session.id}/direct`
+          : `/sessions/${session.id}/stream.m3u8`,
+        profile: session.profiles[0],
+        reconnectToken: session.reconnectToken,
+      })
+      break
+    }
+
+    case 'bandwidth-report': {
+      if (session.method !== 'transcode') break // multi-rendition: informational only
+      if (session.profiles.length > 1) break    // multi-rendition: hls.js handles ABR
+
+      let abrState = sessionAbrState.get(session)
+      if (!abrState) {
+        const idx = PROFILES.findIndex(p => p.name === session.profiles[0].name)
+        abrState = { currentProfileIndex: idx < 0 ? 0 : idx, lastChangeAt: 0, cooldownMs: 15_000, profiles: PROFILES }
+        sessionAbrState.set(session, abrState)
+      }
+
+      const action = computeAbrAction(
+        { kbps: msg.kbps, bufferSeconds: msg.bufferSeconds },
+        abrState,
+        Date.now(),
+      )
+
+      if (action === 'none') break
+      const step = action === 'emergency-down' ? 2 : action === 'down' ? 1 : -1
+      const newIdx = Math.max(0, Math.min(PROFILES.length - 1, abrState.currentProfileIndex + step))
+      if (newIdx === abrState.currentProfileIndex) break
+
+      abrState.currentProfileIndex = newIdx
+      abrState.lastChangeAt = Date.now()
+
+      restartFfmpegAtPosition(session, hwAccel, PROFILES[newIdx]).catch(console.error)
+      send(session, {
+        type: 'quality-changed',
+        profile: PROFILES[newIdx],
+        reason: action === 'emergency-down' ? 'buffer-low' : action === 'down' ? 'bandwidth-drop' : 'bandwidth-increase',
+      })
+      break
+    }
+
+    case 'seek': {
+      const posMs = typeof msg.positionMs === 'number' ? msg.positionMs : 0
+      session.seekPositionMs = posMs
+      if (session.method === 'direct-play') break // client seeks natively
+      killFfmpeg(session)
+      // clean stale segments before restart
+      const seekClean = session.profiles.map((_, r) =>
+        rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
+      )
+      Promise.all(seekClean).then(() =>
+        spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
+      ).then(() => {
+        send(session, { type: 'seek-ready', positionMs: posMs })
+      }).catch(console.error)
+      break
+    }
+
+    case 'quality-override': {
+      if (session.method !== 'transcode') break
+      if (msg.bitrate === 0) {
+        // resume ABR: remove state so next report recomputes
+        sessionAbrState.delete(session)
+        break
+      }
+      const profile = PROFILES.find(p => p.videoBitrate <= msg.bitrate)
+      if (!profile) break
+      const idx = PROFILES.indexOf(profile)
+      const abrState = sessionAbrState.get(session)
+      if (abrState) abrState.currentProfileIndex = idx
+      restartFfmpegAtPosition(session, hwAccel, profile).catch(console.error)
+      send(session, { type: 'quality-changed', profile, reason: 'user-override' })
+      break
+    }
+
+    case 'audio-track': {
+      if (typeof msg.index !== 'number') break
+      session.selectedAudioTrack = msg.index
+      if (session.method === 'direct-play') {
+        send(session, { type: 'track-changed', audioTrackIndex: msg.index })
+        break
+      }
+      killFfmpeg(session)
+      const audioClean = session.profiles.map((_, r) =>
+        rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
+      )
+      Promise.all(audioClean).then(() =>
+        spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
+      ).then(() => {
+        send(session, { type: 'track-changed', audioTrackIndex: msg.index })
+      }).catch(console.error)
+      break
+    }
+
+    case 'subtitle-track': {
+      session.selectedSubtitleTrack = typeof msg.index === 'number' ? msg.index : null
+      send(session, { type: 'track-changed', subtitleTrackIndex: session.selectedSubtitleTrack })
+      break
+    }
+
+    case 'park': {
+      session.state = 'parked'
+      pauseFfmpeg(session)
+      break
+    }
+
+    case 'resume': {
+      session.state = 'active'
+      resumeFfmpeg(session)
+      break
+    }
+  }
+}
