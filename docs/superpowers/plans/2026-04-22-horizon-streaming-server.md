@@ -2771,13 +2771,14 @@ export function detectCapabilities(overrides?: Partial<ClientCapabilities>): Cli
   if (!videoCodecs.includes('h264')) videoCodecs.push('h264')
   if (!audioCodecs.includes('aac')) audioCodecs.push('aac')
 
+  // NOTE: do NOT spread `...overrides` after the explicit `?? fallback` lines —
+  // explicit `undefined` in overrides would clobber the computed value.
   return {
     videoCodecs: overrides?.videoCodecs ?? videoCodecs,
     audioCodecs: overrides?.audioCodecs ?? audioCodecs,
     hdr: overrides?.hdr ?? hdr,
     maxBitrate: overrides?.maxBitrate ?? 0,
     container: overrides?.container ?? container,
-    ...overrides,
   }
 }
 ```

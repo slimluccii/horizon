@@ -53,6 +53,5 @@ export function detectCapabilities(overrides?: Partial<ClientCapabilities>): Cli
     hdr: overrides?.hdr ?? hdr,
     maxBitrate: overrides?.maxBitrate ?? 0,
     container: overrides?.container ?? container,
-    ...overrides,
   }
 }
