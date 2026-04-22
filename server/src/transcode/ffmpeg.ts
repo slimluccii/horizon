@@ -74,12 +74,20 @@ function buildTranscodeArgs(
   //
   // Tone-map chain: uses built-in `tonemap` filter (no zscale/libzimg required).
   // `tonemap` accepts 10-bit input (p010le / yuv420p10le) and outputs yuv420p.
+  //
+  // Without libzimg we cannot do a proper PQ → linear → tonemap → BT.709 chain,
+  // so the output looks dim (midtones crushed). Compensate with:
+  //   • mobius operator + param=0.3  — gentler mid-roll than `hable`, brighter mids
+  //   • post-tonemap eq — gamma 1.25 lifts midtones, saturation 1.3 recovers color
+  //     loss from the simplified tonemap, contrast 1.05 restores local contrast
+  // For a correct HDR→SDR pipeline, install an ffmpeg built with --enable-libzimg.
   const scaleChain = (p: Profile) =>
     `scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,` +
     `pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2`
 
   const toneMapPrefix = needsToneMap
-    ? 'tonemap=tonemap=hable:desat=0:peak=100,format=yuv420p,'
+    ? 'tonemap=tonemap=mobius:param=0.3:desat=0:peak=100,format=yuv420p,'
+      + 'eq=gamma=1.25:saturation=1.3:contrast=1.05,'
     : ''
 
   // split=N after optional tone-map, then per-label scale
