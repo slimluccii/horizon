@@ -139,11 +139,15 @@ export function registerSessions(
     const playlistPath = path.join(session.sessionDir, `r${r}`, 'index.m3u8')
     if (!existsSync(playlistPath)) return reply.status(404).send({ error: 'Not ready', code: 'not-ready' })
     let content = await readFile(playlistPath, 'utf8')
-    // FFmpeg writes URI="init_N.mp4" relative to this playlist URL. The browser
-    // resolves that against /sessions/:id/renditions/ → 404. Prefix with the
-    // rendition index so the browser requests /sessions/:id/renditions/N/init_N.mp4
-    // which is handled by the existing :r/:seg route.
+    // FFmpeg writes segment URIs relative to the playlist URL. Since this
+    // playlist is served at /sessions/:id/renditions/:r.m3u8, the browser
+    // resolves bare names like "seg001.m4s" against /sessions/:id/renditions/,
+    // which has no route. Prefix every segment reference with the rendition
+    // index so requests land on the existing /sessions/:id/renditions/:r/:seg route.
+    //   URI="init_N.mp4"  →  URI="N/init_N.mp4"
+    //   seg001.m4s        →  N/seg001.m4s   (bare lines after #EXTINF)
     content = content.replace(/URI="(init_\d+\.mp4)"/g, `URI="${r}/$1"`)
+    content = content.replace(/^([^#\s][^\n]*\.m4s)$/gm, `${r}/$1`)
     return reply.header('Content-Type', 'application/vnd.apple.mpegurl').send(content)
   })
 

@@ -1,10 +1,19 @@
 {
   "name": "horizon",
   "private": true,
-  "workspaces": ["server", "sdk", "app"],
+  "workspaces": [
+    "server",
+    "sdk",
+    "app"
+  ],
   "scripts": {
     "dev:server": "npm -w server run dev",
     "dev:app": "npm -w app run dev",
-    "test": "npm -w server run test && npm -w sdk run test"
+    "test": "npm -w server run test && npm -w sdk run test",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   }
 }

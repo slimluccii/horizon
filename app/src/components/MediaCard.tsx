@@ -11,6 +11,7 @@ export default function MediaCard({ item, subtitle }: Props) {
 
   return (
     <div
+      data-testid="movie-card"
       onClick={() => navigate(`/play/${item.id}`)}
       style={{
         cursor: 'pointer', background: '#1a1a1a', borderRadius: 8,
