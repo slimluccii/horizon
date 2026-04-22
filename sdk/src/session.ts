@@ -44,7 +44,14 @@ export class PlaybackSession {
     this.sessionId = opts.sessionInfo.sessionId
     this.method = opts.sessionInfo.method
     this.streamUrl = `${opts.baseUrl}${opts.sessionInfo.streamUrl}`
-    this.wsUrl = `${opts.baseUrl.replace(/^http/, 'ws')}${opts.sessionInfo.wsUrl}`
+    // When baseUrl is empty (same-origin via Vite proxy), derive the WS origin
+    // from window.location — WebSocket constructor rejects relative URLs.
+    const wsOrigin = opts.baseUrl
+      ? opts.baseUrl.replace(/^http/, 'ws')
+      : (typeof window !== 'undefined'
+        ? `${window.location.protocol.replace('http', 'ws')}//${window.location.host}`
+        : '')
+    this.wsUrl = `${wsOrigin}${opts.sessionInfo.wsUrl}`
     this._profile = opts.sessionInfo.profiles?.[0] as QualityProfile
     this._connect()
     this._registerUnloadCleanup()
