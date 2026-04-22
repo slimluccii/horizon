@@ -3179,6 +3179,9 @@ git commit -m "feat(sdk): HorizonClient + PlaybackSession with WS lifecycle and 
 - Create: `app/src/main.tsx`
 - Create: `app/src/App.tsx`
 - Create: `app/src/horizon.ts`
+- Create stubs: `app/src/pages/Library.tsx`, `app/src/pages/Player.tsx` (replaced by Tasks 18+19)
+- Modify: `sdk/package.json` — add `"exports": { ".": "./src/index.ts" }` so Vite + tsc resolve SDK source directly (no SDK build step)
+- Modify: `app/tsconfig.json` — add `"allowImportingTsExtensions": true` (Bundler resolution + `.ts`/`.tsx` import extensions)
 
 - [ ] **Step 1: Create Vite config**
 
@@ -3260,10 +3263,42 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Stub pages so App.tsx typechecks before Tasks 18+19**
+
+```tsx
+// app/src/pages/Library.tsx
+export default function Library() { return null }
+```
+
+```tsx
+// app/src/pages/Player.tsx
+export default function Player() { return null }
+```
+
+- [ ] **Step 3: Wire SDK + relax tsconfig**
+
+Edit `sdk/package.json` — add (alongside existing `main`/`types`):
+```json
+"exports": { ".": "./src/index.ts" }
+```
+
+Edit `app/tsconfig.json` — add to `compilerOptions`:
+```json
+"allowImportingTsExtensions": true
+```
+
+- [ ] **Step 4: Verify**
+
+Run from repo root: `npm install` (wires workspace symlinks)
+Run from `app/`: `npx tsc --noEmit` — Expected: clean
+Run from repo root: `npm -w app run dev` — Expected: Vite serves on :5173 without error
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add app/vite.config.ts app/index.html app/src/main.tsx app/src/App.tsx app/src/horizon.ts
+git add app/vite.config.ts app/index.html app/src/main.tsx app/src/App.tsx \
+        app/src/horizon.ts app/src/pages/Library.tsx app/src/pages/Player.tsx \
+        app/tsconfig.json sdk/package.json
 git commit -m "feat(app): Vite + React scaffold with routing and server proxy"
 ```
 
