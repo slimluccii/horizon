@@ -205,17 +205,31 @@ export async function spawnFfmpeg(
     if (process.env.HORIZON_DEBUG) process.stderr.write(chunk)
   })
 
-  proc.on('exit', (code) => {
-    if (code !== 0 && code !== null) {
+  proc.on('error', (err) => {
+    // spawn-level failure (e.g. ffmpeg binary missing). Notify client; surface for caller via exit handler.
+    try {
       session.wsSocket?.send(JSON.stringify({
         type: 'error',
-        code: 'transcode-failed',
-        message: `FFmpeg exited with code ${code}`,
+        code: 'ffmpeg-spawn-failed',
+        message: err.message,
         fatal: true,
       }))
-    } else if (code === 0) {
-      session.wsSocket?.send(JSON.stringify({ type: 'ended' }))
-    }
+    } catch {/* socket may be gone */}
+  })
+
+  proc.on('exit', (code) => {
+    try {
+      if (code !== 0 && code !== null) {
+        session.wsSocket?.send(JSON.stringify({
+          type: 'error',
+          code: 'transcode-failed',
+          message: `FFmpeg exited with code ${code}`,
+          fatal: true,
+        }))
+      } else if (code === 0) {
+        session.wsSocket?.send(JSON.stringify({ type: 'ended' }))
+      }
+    } catch {/* socket may be gone */}
   })
 
   await waitForSegments(sessionDir, renditionCount, 3)
