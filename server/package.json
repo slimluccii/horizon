@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "node --watch --loader ts-node/esm src/index.ts",
-    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
