@@ -13,6 +13,7 @@ export async function createSessionDir(sessionId: string): Promise<string> {
 }
 
 export async function cleanupSessionDir(sessionDir: string): Promise<void> {
+  if (!sessionDir) return   // guard: dir not yet assigned (session destroyed before mkdir)
   await rm(sessionDir, { recursive: true, force: true })
 }
 

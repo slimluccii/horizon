@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify'
 import path from 'node:path'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import crypto from 'node:crypto'
 import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { LibraryIndex } from '../scanner/scanner.ts'
@@ -62,7 +61,8 @@ export function registerSessions(
       ? selectRenditionLadder(topProfile, cfg.maxRenditions, srcW)
       : [topProfile]
 
-    const sessionDir = await createSessionDir(crypto.randomUUID())
+    // Create session first so its ID is known, then create the session dir using
+    // that same ID — keeps session dir path and session ID in sync.
     const session = sessions.create({
       mediaId,
       filePath: media.filePath,
@@ -73,9 +73,11 @@ export function registerSessions(
       profiles,
       renditionCodecs: [],
       needsToneMap: decision.needsToneMap,
-      sessionDir,
+      sessionDir: '',   // filled in below
       sessionReady: false,
     })
+    const sessionDir = await createSessionDir(session.id)
+    session.sessionDir = sessionDir
 
     if (decision.method !== 'direct-play') {
       spawnFfmpeg(session, hwAccel, profiles, audioTrackIndex).then(() => {
