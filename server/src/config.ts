@@ -18,7 +18,7 @@ export function loadConfig(): Config {
     port: parseInt(process.env.HORIZON_PORT ?? '7777'),
     moviesRoots: (process.env.HORIZON_MOVIES_ROOT ?? '').split(':').filter(Boolean),
     showsRoots: (process.env.HORIZON_SHOWS_ROOT ?? '').split(':').filter(Boolean),
-    corsOrigins: (process.env.HORIZON_CORS_ORIGINS ?? '*').split(',').filter(Boolean),
+    corsOrigins: (process.env.HORIZON_CORS_ORIGINS || '*').split(',').filter(Boolean),
     cacheDir: process.env.HORIZON_CACHE_DIR ?? `${os.tmpdir()}/horizon-cache`,
     maxSessions: parseInt(process.env.HORIZON_MAX_SESSIONS ?? '4'),
     wsGraceMs: parseInt(process.env.HORIZON_WS_GRACE_MS ?? '10000'),
