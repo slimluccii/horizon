@@ -42,7 +42,10 @@ export function registerLibrary(app: FastifyInstance, index: LibraryIndex) {
     async (req, reply) => {
       const show = index.shows.get(req.params.show)
       if (!show) return reply.status(404).send({ error: 'Show not found', code: 'not-found' })
-      const season = parseInt(req.params.season)
+      const season = parseInt(req.params.season, 10)
+      if (!Number.isFinite(season)) {
+        return reply.status(400).send({ error: 'Invalid season', code: 'invalid-input' })
+      }
       const episodes = show.episodes
         .filter(e => e.season === season)
         .sort((a, b) => a.episode - b.episode)
