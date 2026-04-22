@@ -27,7 +27,8 @@ export function selectRenditionLadder(
   maxRenditions: number,
   sourceWidth: number,
 ): Profile[] {
-  const topIdx = PROFILES.indexOf(topProfile)
+  // If topProfile isn't a reference from PROFILES, fall back to top of ladder.
+  const topIdx = Math.max(0, PROFILES.indexOf(topProfile))
   const ladder = PROFILES
     .slice(topIdx, topIdx + maxRenditions)
     .filter(p => p.width <= sourceWidth)
