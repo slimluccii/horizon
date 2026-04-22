@@ -57,7 +57,9 @@ export function createSessionManager(cfg: Config): SessionManager {
     clearTimeout(session.attachTimer)
     clearTimeout(session.graceTimer)
     killFfmpeg(session)
-    await cleanupSessionDir(session.sessionDir)
+    await cleanupSessionDir(session.sessionDir).catch((err) => {
+      console.error(`Session ${id}: cleanup failed`, err)
+    })
     byToken.delete(session.reconnectToken)
     sessions.delete(id)
     session.state = 'destroyed' as SessionState
