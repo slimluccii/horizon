@@ -2910,6 +2910,7 @@ export class PlaybackSession {
   private _sampler = new BandwidthSampler()
   private _opts: PlaybackSessionOptions
   private _destroyed = false
+  private _unloadHandler: (() => void) | null = null
 
   constructor(opts: PlaybackSessionOptions) {
     this._opts = opts
@@ -2989,7 +2990,14 @@ export class PlaybackSession {
         break
       case 'error':
         this._opts.onError?.({ code: msg.code, message: msg.message, fatal: msg.fatal ?? true })
-        if (msg.fatal) { this._state = 'destroyed'; this._destroyed = true }
+        if (msg.fatal) {
+          // halt any pending reconnect — session is gone server-side
+          if (this._reconnectTimer) clearTimeout(this._reconnectTimer)
+          this._reconnectTimer = null
+          this._state = 'destroyed'
+          this._destroyed = true
+          this._removeUnloadCleanup()
+        }
         break
       case 'ended':
         this._opts.onEnded?.()
@@ -3037,9 +3045,12 @@ export class PlaybackSession {
   resume() { this._send({ type: 'resume' }) }
 
   disconnect() {
+    if (this._destroyed) return // idempotent — multiple calls are safe
     this._destroyed = true
     this._state = 'destroyed'
-    clearTimeout(this._reconnectTimer ?? undefined)
+    if (this._reconnectTimer) clearTimeout(this._reconnectTimer)
+    this._reconnectTimer = null
+    this._removeUnloadCleanup()
     this._ws?.close()
     // fire and forget DELETE
     fetch(`${this._opts.baseUrl}/sessions/${this.sessionId}`, { method: 'DELETE' }).catch(() => {})
@@ -3047,9 +3058,16 @@ export class PlaybackSession {
 
   private _registerUnloadCleanup() {
     if (typeof window === 'undefined') return
-    const handler = () => this.disconnect()
-    window.addEventListener('beforeunload', handler)
-    window.addEventListener('pagehide', handler)
+    this._unloadHandler = () => this.disconnect()
+    window.addEventListener('beforeunload', this._unloadHandler)
+    window.addEventListener('pagehide', this._unloadHandler)
+  }
+
+  private _removeUnloadCleanup() {
+    if (typeof window === 'undefined' || !this._unloadHandler) return
+    window.removeEventListener('beforeunload', this._unloadHandler)
+    window.removeEventListener('pagehide', this._unloadHandler)
+    this._unloadHandler = null
   }
 }
 ```
@@ -3133,8 +3151,10 @@ export class HorizonClient {
 // sdk/src/index.ts
 export { HorizonClient } from './client.ts'
 export { PlaybackSession } from './session.ts'
+export type { PlaybackSessionOptions, SessionState } from './session.ts'
 export { detectCapabilities } from './capabilities.ts'
 export { BandwidthSampler } from './bandwidth.ts'
+export type { BandwidthSample } from './bandwidth.ts'
 export type {
   ClientCapabilities, PlaybackMethod, QualityProfile,
   HorizonError, HorizonWarning, HorizonErrorCode,
