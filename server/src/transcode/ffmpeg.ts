@@ -150,6 +150,9 @@ function buildTranscodeArgs(
     '-start_number', String(session.currentStartSegment),
     '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
+    // %v in init filename — without this, the HLS muxer writes plain init.mp4
+    // for var_stream_map outputs, but our static playlist references init_0.mp4 etc.
+    '-hls_fmp4_init_filename', 'init_%v.mp4',
     '-hls_segment_filename', `${sessionDir}/r%v/seg%0${SEG_PAD}d.m4s`,
     '-var_stream_map', varStreamMap,
     `${sessionDir}/r%v/index.m3u8`,
@@ -176,6 +179,7 @@ function buildDirectStreamArgs(
     '-start_number', String(session.currentStartSegment),
     '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
+    '-hls_fmp4_init_filename', 'init_0.mp4',
     '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
   )
@@ -203,6 +207,7 @@ function buildPartialTranscodeArgs(
     '-start_number', String(session.currentStartSegment),
     '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
+    '-hls_fmp4_init_filename', 'init_0.mp4',
     '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
   )
