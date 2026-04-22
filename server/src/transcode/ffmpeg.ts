@@ -27,12 +27,19 @@ export function killFfmpeg(session: Session): void {
   }
 }
 
+function isAlive(session: Session): boolean {
+  const p = session.ffmpegProcess
+  return !!p && !p.killed && p.exitCode === null && p.signalCode === null
+}
+
 export function pauseFfmpeg(session: Session): void {
-  session.ffmpegProcess?.kill('SIGSTOP')
+  if (!isAlive(session)) return
+  try { session.ffmpegProcess?.kill('SIGSTOP') } catch {/* ESRCH: process gone */}
 }
 
 export function resumeFfmpeg(session: Session): void {
-  session.ffmpegProcess?.kill('SIGCONT')
+  if (!isAlive(session)) return
+  try { session.ffmpegProcess?.kill('SIGCONT') } catch {/* ESRCH: process gone */}
 }
 
 function buildTranscodeArgs(

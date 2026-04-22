@@ -1416,6 +1416,8 @@ export interface Session {
   sessionReady: boolean        // true once FFmpeg pre-buffer complete
   ffmpegPid?: number
   ffmpegProcess?: import('node:child_process').ChildProcess
+  /** Guard: drop concurrent restart requests so we never SIGTERM + spawn into the same dirs twice. */
+  ffmpegRestartInFlight?: boolean
   wsSocket?: import('ws').WebSocket
   reconnectToken: string
   attachTimer?: NodeJS.Timeout  // fires if WS not attached in time
@@ -1458,12 +1460,19 @@ export function killFfmpeg(session: Session): void {
   }
 }
 
+function isAlive(session: Session): boolean {
+  const p = session.ffmpegProcess
+  return !!p && !p.killed && p.exitCode === null && p.signalCode === null
+}
+
 export function pauseFfmpeg(session: Session): void {
-  session.ffmpegProcess?.kill('SIGSTOP')
+  if (!isAlive(session)) return
+  try { session.ffmpegProcess?.kill('SIGSTOP') } catch {/* ESRCH: process gone */}
 }
 
 export function resumeFfmpeg(session: Session): void {
-  session.ffmpegProcess?.kill('SIGCONT')
+  if (!isAlive(session)) return
+  try { session.ffmpegProcess?.kill('SIGCONT') } catch {/* ESRCH: process gone */}
 }
 
 function buildTranscodeArgs(
@@ -2257,22 +2266,42 @@ function send(session: Session, msg: object) {
   session.wsSocket?.send(JSON.stringify(msg))
 }
 
+/**
+ * Serialize ffmpeg restart paths. kill → rm → spawn is not concurrent-safe:
+ * SIGTERM returns immediately but the process can live up to 2s, and a second
+ * spawn races it on shared r{N}/ paths. Callers drop the request when another
+ * restart is in flight (client can retry). Add `ffmpegRestartInFlight?: boolean`
+ * to Session (session/types.ts).
+ */
+async function withRestartLock(session: Session, fn: () => Promise<void>): Promise<boolean> {
+  if (session.ffmpegRestartInFlight) return false
+  session.ffmpegRestartInFlight = true
+  try {
+    await fn()
+    return true
+  } finally {
+    session.ffmpegRestartInFlight = false
+  }
+}
+
 async function restartFfmpegAtPosition(
   session: Session,
   hwAccel: HwAccel,
   newProfile: Profile,
-) {
-  killFfmpeg(session)
-  // clean stale segments before restart
-  for (let r = 0; r < session.profiles.length; r++) {
-    await rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
-  }
-  session.profiles = [newProfile]
-  await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
-  send(session, {
-    type: 'quality-changed',
-    profile: newProfile,
-    reason: 'abr-restart',
+): Promise<boolean> {
+  return withRestartLock(session, async () => {
+    killFfmpeg(session)
+    // clean stale segments before restart
+    for (let r = 0; r < session.profiles.length; r++) {
+      await rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
+    }
+    session.profiles = [newProfile]
+    await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
+    send(session, {
+      type: 'quality-changed',
+      profile: newProfile,
+      reason: 'abr-restart',
+    })
   })
 }
 
@@ -2346,16 +2375,19 @@ export function handleWsMessage(
       const posMs = typeof msg.positionMs === 'number' ? msg.positionMs : 0
       session.seekPositionMs = posMs
       if (session.method === 'direct-play') break // client seeks natively
-      killFfmpeg(session)
-      // clean stale segments before restart
-      const seekClean = session.profiles.map((_, r) =>
-        rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
-      )
-      Promise.all(seekClean).then(() =>
-        spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
-      ).then(() => {
+      withRestartLock(session, async () => {
+        killFfmpeg(session)
+        await Promise.all(session.profiles.map((_, r) =>
+          rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
+        ))
+        await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
         send(session, { type: 'seek-ready', positionMs: posMs })
-      }).catch(console.error)
+      }).then(started => {
+        if (!started) send(session, { type: 'error', code: 'restart-busy', message: 'seek rejected: restart in progress' })
+      }).catch(err => {
+        console.error(`Session ${session.id}: seek failed`, err)
+        send(session, { type: 'error', code: 'seek-failed', message: String(err) })
+      })
       break
     }
 
@@ -2383,15 +2415,19 @@ export function handleWsMessage(
         send(session, { type: 'track-changed', audioTrackIndex: msg.index })
         break
       }
-      killFfmpeg(session)
-      const audioClean = session.profiles.map((_, r) =>
-        rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
-      )
-      Promise.all(audioClean).then(() =>
-        spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
-      ).then(() => {
+      withRestartLock(session, async () => {
+        killFfmpeg(session)
+        await Promise.all(session.profiles.map((_, r) =>
+          rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
+        ))
+        await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
         send(session, { type: 'track-changed', audioTrackIndex: msg.index })
-      }).catch(console.error)
+      }).then(started => {
+        if (!started) send(session, { type: 'error', code: 'restart-busy', message: 'audio-track rejected: restart in progress' })
+      }).catch(err => {
+        console.error(`Session ${session.id}: audio-track failed`, err)
+        send(session, { type: 'error', code: 'audio-track-failed', message: String(err) })
+      })
       break
     }
 
