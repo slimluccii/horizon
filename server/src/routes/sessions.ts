@@ -126,6 +126,9 @@ export function registerSessions(
   app.get<{ Params: { id: string; r: string } }>('/sessions/:id/renditions/:r.m3u8', async (req, reply) => {
     const session = sessions.get(req.params.id)
     if (!session) return reply.status(404).send({ error: 'Session not found', code: 'session-not-found' })
+    if (!/^\d+$/.test(req.params.r)) {
+      return reply.status(400).send({ error: 'Invalid rendition', code: 'invalid-input' })
+    }
     const playlistPath = path.join(session.sessionDir, `r${req.params.r}`, 'index.m3u8')
     if (!existsSync(playlistPath)) return reply.status(404).send({ error: 'Not ready', code: 'not-ready' })
     const content = await readFile(playlistPath, 'utf8')
@@ -137,6 +140,9 @@ export function registerSessions(
     async (req, reply) => {
       const session = sessions.get(req.params.id)
       if (!session) return reply.status(404).send({ error: 'Session not found', code: 'session-not-found' })
+      if (!/^\d+$/.test(req.params.r)) {
+        return reply.status(400).send({ error: 'Invalid rendition', code: 'invalid-input' })
+      }
       const segName = path.basename(req.params.seg)
       const segPath = path.join(session.sessionDir, `r${req.params.r}`, segName)
       if (!existsSync(segPath)) return reply.status(404).send({ error: 'Segment not found', code: 'not-found' })
@@ -172,6 +178,9 @@ export function registerSessions(
     async (req, reply) => {
       const session = sessions.get(req.params.id)
       if (!session) return reply.status(404).send({ error: 'Session not found', code: 'session-not-found' })
+      if (!/^\d+$/.test(req.params.trackIdx)) {
+        return reply.status(400).send({ error: 'Invalid track index', code: 'invalid-input' })
+      }
       const vttPath = path.join(session.sessionDir, `sub_${req.params.trackIdx}.vtt`)
       if (!existsSync(vttPath)) return reply.status(404).send({ error: 'Subtitle not ready', code: 'not-ready' })
       const content = await readFile(vttPath, 'utf8')
@@ -210,19 +219,17 @@ export function registerSessions(
     }
 
     socket.on('message', (raw: Buffer) => {
+      let msg: unknown
       try {
-        const msg = JSON.parse(raw.toString())
+        msg = JSON.parse(raw.toString())
+      } catch {
+        return // ignore malformed JSON
+      }
+      try {
         handleWsMessage(msg, session, sessions, cfg, hwAccel)
-      } catch { /* ignore malformed */ }
-    })
-
-    socket.on('close', () => {
-      if (session.state === 'destroyed') return
-      session.state = 'detached'
-      session.wsSocket = undefined
-      session.graceTimer = setTimeout(() => {
-        sessions.destroy(session.id)
-      }, cfg.wsGraceMs)
+      } catch (err) {
+        console.error(`Session ${session.id}: WS handler error`, err)
+      }
     })
 
     const pingInterval = setInterval(() => {
@@ -230,6 +237,15 @@ export function registerSessions(
         socket.ping()
       }
     }, 15_000)
-    socket.on('close', () => clearInterval(pingInterval))
+
+    socket.on('close', () => {
+      clearInterval(pingInterval)
+      if (session.state === 'destroyed') return
+      session.state = 'detached'
+      session.wsSocket = undefined
+      session.graceTimer = setTimeout(() => {
+        sessions.destroy(session.id)
+      }, cfg.wsGraceMs)
+    })
   })
 }
