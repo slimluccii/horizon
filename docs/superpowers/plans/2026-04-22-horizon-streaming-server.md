@@ -2795,6 +2795,8 @@ git add sdk/src/types.ts sdk/src/capabilities.ts sdk/test/capabilities.test.ts
 git commit -m "feat(sdk): shared types + MediaSource capability detection"
 ```
 
+> **Implementation note (2026-04-22):** the scaffolded `sdk/tsconfig.json` had `rootDir: "src"` while including `test/**/*`, so `tsc --noEmit` errored TS6059 for the new test file. Fixed inline by widening `rootDir` to `"."` and adding `allowImportingTsExtensions: true` + `noEmit: true` (mirroring `server/tsconfig.json`). A real bundler/build config will land with later SDK packaging work; staging the fix as part of this commit.
+
 ---
 
 ## Task 15: SDK — Bandwidth Measurement
