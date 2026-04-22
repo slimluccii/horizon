@@ -53,7 +53,10 @@ export class PlaybackSession {
         : '')
     this.wsUrl = `${wsOrigin}${opts.sessionInfo.wsUrl}`
     this._profile = opts.sessionInfo.profiles?.[0] as QualityProfile
-    this._connect()
+    // Defer WS creation by one microtask so the caller can call disconnect()
+    // synchronously (React StrictMode cleanup) before the socket is opened.
+    // _connect() checks _destroyed and bails if disconnect() already ran.
+    queueMicrotask(() => this._connect())
     this._registerUnloadCleanup()
   }
 
