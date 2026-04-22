@@ -1,10 +1,19 @@
 import { spawn } from 'node:child_process'
-import { mkdir, rm, readdir } from 'node:fs/promises'
+import { mkdir, rm, access } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import type { HwAccel } from './hwaccel.ts'
 import type { Profile } from './profiles.ts'
 import type { Session } from '../session/types.ts'
+
+/** HLS segment duration in seconds. Must match `-hls_time` below. */
+export const SEGMENT_DURATION_SEC = 4
+/** Segment number padding (5 digits → supports ~66 hours at 4 s/seg). */
+export const SEG_PAD = 5
+/** Render a segment filename, e.g. segmentName(42) → "seg00042.m4s". */
+export function segmentName(n: number): string {
+  return `seg${String(n).padStart(SEG_PAD, '0')}.m4s`
+}
 
 export async function createSessionDir(sessionId: string): Promise<string> {
   const dir = path.join(os.tmpdir(), 'horizon', 'sessions', sessionId)
@@ -125,12 +134,15 @@ function buildTranscodeArgs(
   const varStreamMap = profiles.map((_, i) => `v:${i},a:${i}`).join(' ')
   args.push(
     '-f', 'hls',
-    '-hls_time', '4',
+    '-hls_time', String(SEGMENT_DURATION_SEC),
     '-hls_list_size', '0',
-    '-hls_playlist_type', 'event',    // marks playlist as EVENT: seekable from start,
-    '-hls_flags', 'independent_segments', // EXT-X-ENDLIST added when encode finishes
+    // start_number is the first segment index ffmpeg writes. Matched to
+    // session.currentStartSegment so files on disk line up with the static
+    // VOD playlist's URI numbering (seek jumps to seg N → ffmpeg resumes at N).
+    '-start_number', String(session.currentStartSegment),
+    '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_type', 'fmp4',
-    '-hls_segment_filename', `${sessionDir}/r%v/seg%03d.m4s`,
+    '-hls_segment_filename', `${sessionDir}/r%v/seg%0${SEG_PAD}d.m4s`,
     '-var_stream_map', varStreamMap,
     `${sessionDir}/r%v/index.m3u8`,
   )
@@ -151,12 +163,12 @@ function buildDirectStreamArgs(
   args.push('-c:v', 'copy', '-c:a', 'copy')
   args.push(
     '-f', 'hls',
-    '-hls_time', '4',
+    '-hls_time', String(SEGMENT_DURATION_SEC),
     '-hls_list_size', '0',
-    '-hls_playlist_type', 'event',
-    '-hls_flags', 'independent_segments',
+    '-start_number', String(session.currentStartSegment),
+    '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_type', 'fmp4',
-    '-hls_segment_filename', `${sessionDir}/r0/seg%03d.m4s`,
+    '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
   )
   return args
@@ -178,31 +190,59 @@ function buildPartialTranscodeArgs(
   args.push('-c:v', 'copy', '-c:a', 'aac', `-b:a`, `${profile.audioBitrate}k`)
   args.push(
     '-f', 'hls',
-    '-hls_time', '4',
+    '-hls_time', String(SEGMENT_DURATION_SEC),
     '-hls_list_size', '0',
-    '-hls_playlist_type', 'event',
-    '-hls_flags', 'independent_segments',
+    '-start_number', String(session.currentStartSegment),
+    '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_type', 'fmp4',
-    '-hls_segment_filename', `${sessionDir}/r0/seg%03d.m4s`,
+    '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
   )
   return args
 }
 
-export async function waitForSegments(sessionDir: string, renditionCount: number, minSegments = 3): Promise<void> {
-  const deadline = Date.now() + 30_000
+/**
+ * Poll until a specific segment file exists (or ffmpeg exits / timeout).
+ * Used both for initial pre-buffer and for seek-triggered restarts where
+ * the segment handler waits for the newly-spawned ffmpeg to catch up.
+ */
+export async function waitForSegment(
+  session: Session,
+  renditionIdx: number,
+  segNum: number,
+  timeoutMs = 30_000,
+): Promise<boolean> {
+  const segPath = path.join(session.sessionDir, `r${renditionIdx}`, segmentName(segNum))
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    let allReady = true
-    for (let r = 0; r < renditionCount; r++) {
-      const dir = path.join(sessionDir, `r${r}`)
-      const files = await readdir(dir).catch(() => [])
-      const segs = files.filter(f => f.endsWith('.m4s'))
-      if (segs.length < minSegments) { allReady = false; break }
-    }
-    if (allReady) return
-    await new Promise(r => setTimeout(r, 500))
+    try {
+      await access(segPath)
+      return true
+    } catch {/* not yet */}
+    // Bail early if ffmpeg died
+    const p = session.ffmpegProcess
+    if (p && (p.exitCode !== null || p.signalCode !== null)) return false
+    await new Promise(r => setTimeout(r, 100))
   }
-  throw new Error('FFmpeg pre-buffer timeout')
+  return false
+}
+
+/**
+ * Wait for the first few segments from the current start offset — used on spawn
+ * to signal `session-ready` to the client once there's enough to begin playback.
+ */
+export async function waitForInitialSegments(
+  session: Session,
+  renditionCount: number,
+  minSegments = 3,
+): Promise<void> {
+  const start = session.currentStartSegment
+  for (let r = 0; r < renditionCount; r++) {
+    for (let s = 0; s < minSegments; s++) {
+      const ok = await waitForSegment(session, r, start + s, 30_000)
+      if (!ok) throw new Error(`FFmpeg pre-buffer timeout (r${r} seg${start + s})`)
+    }
+  }
 }
 
 export async function spawnFfmpeg(
@@ -266,5 +306,36 @@ export async function spawnFfmpeg(
     } catch {/* socket may be gone */}
   })
 
-  await waitForSegments(sessionDir, renditionCount, 3)
+  await waitForInitialSegments(session, renditionCount, 3)
+}
+
+/**
+ * Restart ffmpeg at a specific segment offset (used by seek). Caller MUST
+ * hold the restart lock. Updates session.currentStartSegment + seekPositionMs
+ * BEFORE spawning so concurrent segment requests in the same range will wait
+ * for this run to produce them rather than triggering another restart.
+ */
+export async function restartAtSegment(
+  session: Session,
+  hwAccel: HwAccel,
+  profiles: Profile[],
+  segNum: number,
+): Promise<void> {
+  killFfmpeg(session)
+  // Wait briefly for SIGTERM/exit so the next spawn doesn't race the dying
+  // process on shared output files.
+  const old = session.ffmpegProcess
+  if (old && old.exitCode === null && old.signalCode === null) {
+    await new Promise<void>(resolve => {
+      const t = setTimeout(resolve, 1500)
+      old.once('exit', () => { clearTimeout(t); resolve() })
+    })
+  }
+  // Wipe rendition dirs so no stale segs from the previous offset linger.
+  for (let r = 0; r < profiles.length; r++) {
+    await rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
+  }
+  session.currentStartSegment = segNum
+  session.seekPositionMs = segNum * SEGMENT_DURATION_SEC * 1000
+  await spawnFfmpeg(session, hwAccel, profiles, session.selectedAudioTrack)
 }

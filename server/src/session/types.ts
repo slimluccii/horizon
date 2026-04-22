@@ -17,6 +17,11 @@ export interface Session {
   needsToneMap: boolean
   sessionDir: string
   sessionReady: boolean
+  /** Total media duration in seconds — used to build static VOD playlist. */
+  durationSec: number
+  /** Segment number the current ffmpeg run started producing from.
+   *  Initial spawn = 0; seek-triggered restarts set this to the requested segment. */
+  currentStartSegment: number
   ffmpegPid?: number
   ffmpegProcess?: import('node:child_process').ChildProcess
   /** Side-channel ffmpeg for text-subtitle extraction. Killed on destroy. */

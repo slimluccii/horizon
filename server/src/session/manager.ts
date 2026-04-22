@@ -4,7 +4,7 @@ import type { Session, SessionState } from './types.ts'
 import { cleanupSessionDir, killFfmpeg } from '../transcode/ffmpeg.ts'
 
 export interface SessionManager {
-  create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs'>): Session
+  create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs' | 'currentStartSegment'>): Session
   get(id: string): Session | undefined
   getByReconnectToken(token: string): Session | undefined
   destroy(id: string): Promise<void>
@@ -15,7 +15,7 @@ export function createSessionManager(cfg: Config): SessionManager {
   const sessions = new Map<string, Session>()
   const byToken = new Map<string, string>()
 
-  function create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs'>): Session {
+  function create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs' | 'currentStartSegment'>): Session {
     if (sessions.size >= cfg.maxSessions) {
       throw Object.assign(new Error('Server at session capacity'), { code: 'max-sessions' })
     }
@@ -28,6 +28,7 @@ export function createSessionManager(cfg: Config): SessionManager {
       reconnectToken,
       state: 'pre-buffer',
       seekPositionMs: 0,
+      currentStartSegment: 0,
       createdAt: Date.now(),
     }
     sessions.set(id, session)

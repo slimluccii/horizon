@@ -10,9 +10,41 @@ import type { ClientCapabilities } from '../transcode/decision.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import { decidePlayback } from '../transcode/decision.ts'
 import { selectInitialProfile, selectRenditionLadder } from '../transcode/profiles.ts'
-import { createSessionDir, spawnFfmpeg } from '../transcode/ffmpeg.ts'
+import {
+  createSessionDir, spawnFfmpeg, restartAtSegment, waitForSegment,
+  SEGMENT_DURATION_SEC, segmentName,
+} from '../transcode/ffmpeg.ts'
 import { extractSubtitles } from '../transcode/subtitles.ts'
 import { handleWsMessage } from '../ws/handler.ts'
+
+/** Lookahead window: segs >= currentStartSegment and within this many ahead are
+ *  considered "current ffmpeg will get to them"; further-out segs trigger restart. */
+const SEEK_LOOKAHEAD_SEGMENTS = 250
+
+/** Build a static VOD-style rendition playlist covering the entire media duration.
+ *  Segments are listed by their deterministic filename — they may not yet exist
+ *  on disk; the segment route will spawn / wait for ffmpeg to produce them. */
+function buildRenditionPlaylist(renditionIdx: number, durationSec: number): string {
+  const totalSegs = Math.max(1, Math.ceil(durationSec / SEGMENT_DURATION_SEC))
+  const lines: string[] = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:6',
+    `#EXT-X-TARGETDURATION:${SEGMENT_DURATION_SEC}`,
+    '#EXT-X-MEDIA-SEQUENCE:0',
+    '#EXT-X-PLAYLIST-TYPE:VOD',
+    `#EXT-X-MAP:URI="${renditionIdx}/init_${renditionIdx}.mp4"`,
+  ]
+  for (let i = 0; i < totalSegs; i++) {
+    const isLast = i === totalSegs - 1
+    const dur = isLast
+      ? Math.max(0.001, durationSec - i * SEGMENT_DURATION_SEC)
+      : SEGMENT_DURATION_SEC
+    lines.push(`#EXTINF:${dur.toFixed(3)},`)
+    lines.push(`${renditionIdx}/${segmentName(i)}`)
+  }
+  lines.push('#EXT-X-ENDLIST')
+  return lines.join('\n')
+}
 
 interface CreateSessionBody {
   mediaId: string
@@ -75,6 +107,7 @@ export function registerSessions(
       needsToneMap: decision.needsToneMap,
       sessionDir: '',   // filled in below
       sessionReady: false,
+      durationSec: media.duration,
     })
     const sessionDir = await createSessionDir(session.id)
     session.sessionDir = sessionDir
@@ -122,8 +155,14 @@ export function registerSessions(
     const session = sessions.get(req.params.id)
     if (!session) return reply.status(404).send({ error: 'Session not found', code: 'session-not-found' })
     if (session.method === 'direct-stream' || session.method === 'partial-transcode') {
-      const content = await readFile(path.join(session.sessionDir, 'r0', 'index.m3u8'), 'utf8')
-      return reply.header('Content-Type', 'application/vnd.apple.mpegurl').send(content)
+      // Single rendition served as static VOD; segs resolve to /sessions/:id/renditions/0/...
+      // (relative path "renditions/0/segNNNNN.m4s" against /sessions/:id/stream.m3u8 URL).
+      const inner = buildRenditionPlaylist(0, session.durationSec)
+      // Rewrite bare "0/seg…" → "renditions/0/seg…" so browser resolution lands on the seg route.
+      const rewritten = inner
+        .replace(/^0\//gm, 'renditions/0/')
+        .replace(/URI="0\//g, 'URI="renditions/0/')
+      return reply.header('Content-Type', 'application/vnd.apple.mpegurl').send(rewritten)
     }
     const master = buildMasterPlaylist(session.id, session.profiles, session.renditionCodecs)
     return reply.header('Content-Type', 'application/vnd.apple.mpegurl').send(master)
@@ -135,19 +174,11 @@ export function registerSessions(
     if (!/^\d+$/.test(req.params.r)) {
       return reply.status(400).send({ error: 'Invalid rendition', code: 'invalid-input' })
     }
-    const r = req.params.r
-    const playlistPath = path.join(session.sessionDir, `r${r}`, 'index.m3u8')
-    if (!existsSync(playlistPath)) return reply.status(404).send({ error: 'Not ready', code: 'not-ready' })
-    let content = await readFile(playlistPath, 'utf8')
-    // FFmpeg writes segment URIs relative to the playlist URL. Since this
-    // playlist is served at /sessions/:id/renditions/:r.m3u8, the browser
-    // resolves bare names like "seg001.m4s" against /sessions/:id/renditions/,
-    // which has no route. Prefix every segment reference with the rendition
-    // index so requests land on the existing /sessions/:id/renditions/:r/:seg route.
-    //   URI="init_N.mp4"  →  URI="N/init_N.mp4"
-    //   seg001.m4s        →  N/seg001.m4s   (bare lines after #EXTINF)
-    content = content.replace(/URI="(init_\d+\.mp4)"/g, `URI="${r}/$1"`)
-    content = content.replace(/^([^#\s][^\n]*\.m4s)$/gm, `${r}/$1`)
+    // Static VOD playlist covering the entire media duration. Segments listed
+    // here may not yet exist on disk — the segment route below produces them
+    // on demand, restarting ffmpeg if a request lands outside the current run's
+    // segment range (= seek).
+    const content = buildRenditionPlaylist(parseInt(req.params.r, 10), session.durationSec)
     return reply.header('Content-Type', 'application/vnd.apple.mpegurl').send(content)
   })
 
@@ -159,9 +190,52 @@ export function registerSessions(
       if (!/^\d+$/.test(req.params.r)) {
         return reply.status(400).send({ error: 'Invalid rendition', code: 'invalid-input' })
       }
-      const segName = path.basename(req.params.seg)
-      const segPath = path.join(session.sessionDir, `r${req.params.r}`, segName)
-      if (!existsSync(segPath)) return reply.status(404).send({ error: 'Segment not found', code: 'not-found' })
+      const r = parseInt(req.params.r, 10)
+      const segReq = path.basename(req.params.seg)
+      const segPath = path.join(session.sessionDir, `r${r}`, segReq)
+
+      // Init segments live in the rendition dir but aren't sequenced; serve directly.
+      if (segReq.startsWith('init_')) {
+        if (!existsSync(segPath)) return reply.status(404).send({ error: 'Init not ready', code: 'not-ready' })
+        return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
+      }
+
+      // Parse "segNNNNN.m4s" → segment number
+      const m = /^seg(\d+)\.m4s$/.exec(segReq)
+      if (!m) return reply.status(400).send({ error: 'Invalid segment name', code: 'invalid-input' })
+      const segNum = parseInt(m[1], 10)
+
+      // Fast path: segment already on disk
+      if (existsSync(segPath)) {
+        return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
+      }
+
+      // Out-of-range request = seek. Trigger ffmpeg restart at the requested seg.
+      // In-range requests just wait for the current ffmpeg run to catch up.
+      const start = session.currentStartSegment
+      const inRange = segNum >= start && segNum < start + SEEK_LOOKAHEAD_SEGMENTS
+
+      if (!inRange && !session.ffmpegRestartInFlight) {
+        session.ffmpegRestartInFlight = true
+        try {
+          // Re-check inside lock — another concurrent request may have just restarted.
+          const stillStart = session.currentStartSegment
+          const stillInRange = segNum >= stillStart && segNum < stillStart + SEEK_LOOKAHEAD_SEGMENTS
+          if (!stillInRange) {
+            await restartAtSegment(session, hwAccel, session.profiles, segNum)
+          }
+        } catch (err) {
+          console.error(`Session ${session.id}: seek-restart failed`, err)
+          return reply.status(500).send({ error: 'Seek restart failed', code: 'seek-restart-failed' })
+        } finally {
+          session.ffmpegRestartInFlight = false
+        }
+      }
+
+      const ok = await waitForSegment(session, r, segNum, 30_000)
+      if (!ok || !existsSync(segPath)) {
+        return reply.status(404).send({ error: 'Segment not produced', code: 'not-ready' })
+      }
       return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
     },
   )

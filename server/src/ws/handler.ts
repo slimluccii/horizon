@@ -4,9 +4,16 @@ import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import { PROFILES } from '../transcode/profiles.ts'
-import { killFfmpeg, spawnFfmpeg, pauseFfmpeg, resumeFfmpeg } from '../transcode/ffmpeg.ts'
+import {
+  killFfmpeg, spawnFfmpeg, pauseFfmpeg, resumeFfmpeg, SEGMENT_DURATION_SEC,
+} from '../transcode/ffmpeg.ts'
 import { rm } from 'node:fs/promises'
 import path from 'node:path'
+
+/** Convert a time in ms to the matching segment index (floor — start of seg). */
+function msToSegment(ms: number): number {
+  return Math.max(0, Math.floor(ms / 1000 / SEGMENT_DURATION_SEC))
+}
 
 export interface AbrState {
   currentProfileIndex: number  // index into PROFILES global array
@@ -70,6 +77,10 @@ async function restartFfmpegAtPosition(
       await rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
     }
     session.profiles = [newProfile]
+    // ABR restart resumes from wherever the user is now. The client doesn't
+    // currently report playback position to us, so we restart from the last
+    // known seek offset (which is updated on every segment-route restart).
+    session.currentStartSegment = msToSegment(session.seekPositionMs)
     await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
     send(session, {
       type: 'quality-changed',
@@ -146,14 +157,20 @@ export function handleWsMessage(
     }
 
     case 'seek': {
+      // Note: with the static VOD playlist the client (hls.js) seeks
+      // autonomously via HTTP segment requests; the segment route handles
+      // ffmpeg restart. This WS path remains as an explicit hint for clients
+      // that want to pre-warm the encoder before issuing segment requests.
       const posMs = typeof msg.positionMs === 'number' ? msg.positionMs : 0
       session.seekPositionMs = posMs
       if (session.method === 'direct-play') break // client seeks natively
+      const segNum = msToSegment(posMs)
       withRestartLock(session, async () => {
         killFfmpeg(session)
         await Promise.all(session.profiles.map((_, r) =>
           rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
         ))
+        session.currentStartSegment = segNum
         await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
         send(session, { type: 'seek-ready', positionMs: posMs })
       }).then(started => {
@@ -194,6 +211,8 @@ export function handleWsMessage(
         await Promise.all(session.profiles.map((_, r) =>
           rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
         ))
+        // Resume from current playback position (best estimate = last seek offset).
+        session.currentStartSegment = msToSegment(session.seekPositionMs)
         await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
         send(session, { type: 'track-changed', audioTrackIndex: msg.index })
       }).then(started => {
