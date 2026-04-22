@@ -1,0 +1,10 @@
+{
+  "name": "horizon",
+  "private": true,
+  "workspaces": ["server", "sdk", "app"],
+  "scripts": {
+    "dev:server": "npm -w server run dev",
+    "dev:app": "npm -w app run dev",
+    "test": "npm -w server run test && npm -w sdk run test"
+  }
+}
