@@ -88,6 +88,14 @@ test('clicking a movie starts playback without 404 errors', async ({ page }) => 
     expect(currentTime).toBeGreaterThan(0)
   }).toPass({ timeout: 30_000, intervals: [1_000] })
 
+  // Verify no looping: currentTime must advance by ≥8s over the next 12s.
+  // A looping video would have currentTime ≤ one segment duration (~4s).
+  const t0 = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+  await page.waitForTimeout(12_000)
+  const t1 = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+  console.log(`[playback] currentTime: ${t0.toFixed(2)}s → ${t1.toFixed(2)}s (delta ${(t1 - t0).toFixed(2)}s)`)
+  expect(t1 - t0).toBeGreaterThan(8) // must advance ≥8s in 12s window (accounting for buffering)
+
   // Assert no broken HLS segment 404s occurred during the whole test
   const segment404s = get404s()
   expect(

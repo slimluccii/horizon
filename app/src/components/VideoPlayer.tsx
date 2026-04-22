@@ -31,6 +31,9 @@ export default function VideoPlayer({ session, onBufferUpdate, onQualityChange }
       enableWorker: true,
       lowLatencyMode: false,
       backBufferLength: 90,
+      // Force playback from position 0 even if the server hasn't added
+      // #EXT-X-ENDLIST yet (the playlist looks live until FFmpeg finishes).
+      startPosition: 0,
     })
     hlsRef.current = hls
     hls.loadSource(session.streamUrl)
