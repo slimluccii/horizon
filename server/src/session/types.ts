@@ -19,6 +19,8 @@ export interface Session {
   sessionReady: boolean
   ffmpegPid?: number
   ffmpegProcess?: import('node:child_process').ChildProcess
+  /** Side-channel ffmpeg for text-subtitle extraction. Killed on destroy. */
+  subtitleProcess?: import('node:child_process').ChildProcess
   /** Guard: drop concurrent restart requests so we never SIGTERM + spawn into the same dirs twice. */
   ffmpegRestartInFlight?: boolean
   wsSocket?: import('ws').WebSocket

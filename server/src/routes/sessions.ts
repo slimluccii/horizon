@@ -90,9 +90,9 @@ export function registerSessions(
             reconnectToken: session.reconnectToken,
           }))
         }
-        // extract text subtitles in background
-        extractSubtitles(media.filePath, media.subtitleTracks ?? [], session.sessionDir)
-          .catch(err => console.error('Subtitle extraction error:', err))
+        // extract text subtitles in background; track on session so destroy() can kill it
+        extractSubtitles(media.filePath, media.subtitleTracks ?? [], session.sessionDir, session)
+          .catch(err => console.error(`Session ${session.id}: subtitle extraction error`, err))
       }).catch(err => {
         sessions.destroy(session.id)
         console.error('FFmpeg start error:', err)

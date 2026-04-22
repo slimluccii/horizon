@@ -57,6 +57,10 @@ export function createSessionManager(cfg: Config): SessionManager {
     clearTimeout(session.attachTimer)
     clearTimeout(session.graceTimer)
     killFfmpeg(session)
+    // also reap subtitle extraction ffmpeg if still running
+    if (session.subtitleProcess && !session.subtitleProcess.killed) {
+      try { session.subtitleProcess.kill('SIGTERM') } catch {/* gone */}
+    }
     await cleanupSessionDir(session.sessionDir).catch((err) => {
       console.error(`Session ${id}: cleanup failed`, err)
     })
