@@ -51,7 +51,6 @@ function buildTranscodeArgs(
 ): { args: string[]; renditionCodecs: string[] } {
   const { filePath, seekPositionMs, sessionDir, needsToneMap } = session
   const seekSecs = seekPositionMs / 1000
-  const canHevc = session.capabilities.videoCodecs.includes('hevc')
   const n = profiles.length
 
   const args: string[] = []
@@ -94,12 +93,13 @@ function buildTranscodeArgs(
     args.push('-map', `[sv${i}]`, '-map', `0:a:${audioTrackIndex}`)
   }
 
-  // Per-rendition codec + bitrate settings
+  // Per-rendition codec + bitrate settings.
+  // Always H264: hevc_videotoolbox does not support per-stream -sc_threshold / -bufsize
+  // options in var_stream_map mode, producing broken fMP4 output on macOS.
   for (let i = 0; i < n; i++) {
     const p = profiles[i]
-    const useHevc = canHevc && p.width >= 1920
-    const vEncoder = useHevc ? hwAccel.hevcEncoder : hwAccel.h264Encoder
-    renditionCodecs.push(useHevc ? 'hvc1.1.6.L150.90' : 'avc1.640028')
+    const vEncoder = hwAccel.h264Encoder
+    renditionCodecs.push('avc1.640028')
 
     args.push(
       `-c:v:${i}`, vEncoder,
