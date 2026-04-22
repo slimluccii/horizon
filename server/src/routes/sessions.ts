@@ -204,7 +204,17 @@ export function registerSessions(
       const segPath = path.join(session.sessionDir, `r${r}`, segReq)
 
       // Init segments live in the rendition dir but aren't sequenced; serve directly.
+      // Briefly wait if not on disk yet — ffmpeg writes init alongside seg0.
       if (segReq.startsWith('init_')) {
+        if (!existsSync(segPath)) {
+          const deadline = Date.now() + 30_000
+          while (Date.now() < deadline) {
+            await new Promise(res => setTimeout(res, 100))
+            if (existsSync(segPath)) break
+            const p = session.ffmpegProcess
+            if (p && (p.exitCode !== null || p.signalCode !== null)) break
+          }
+        }
         if (!existsSync(segPath)) return reply.status(404).send({ error: 'Init not ready', code: 'not-ready' })
         return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
       }

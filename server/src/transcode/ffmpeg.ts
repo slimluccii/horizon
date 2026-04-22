@@ -99,11 +99,19 @@ function buildTranscodeArgs(
       + 'eq=gamma=1.25:saturation=1.3:contrast=1.05,'
     : ''
 
-  // split=N after optional tone-map, then per-label scale
-  const splitLabels = profiles.map((_, i) => `[tv${i}]`).join('')
-  const splitNode = `[0:v]${toneMapPrefix}split=${n}${splitLabels}`
-  const scaleNodes = profiles.map((p, i) => `[tv${i}]${scaleChain(p)}[sv${i}]`).join(';')
-  args.push('-filter_complex', `${splitNode};${scaleNodes}`)
+  // Build filter graph. For n>1 we need split=N to fan out to per-rendition scale.
+  // For n=1 (HDR-tonemap path now caps to single rendition) skip split — degenerate
+  // split=1 has tripped some ffmpeg builds; a straight chain is simpler anyway.
+  let filterGraph: string
+  if (n === 1) {
+    filterGraph = `[0:v]${toneMapPrefix}${scaleChain(profiles[0])}[sv0]`
+  } else {
+    const splitLabels = profiles.map((_, i) => `[tv${i}]`).join('')
+    const splitNode = `[0:v]${toneMapPrefix}split=${n}${splitLabels}`
+    const scaleNodes = profiles.map((p, i) => `[tv${i}]${scaleChain(p)}[sv${i}]`).join(';')
+    filterGraph = `${splitNode};${scaleNodes}`
+  }
+  args.push('-filter_complex', filterGraph)
 
   // Map streams: [sv0] + audio, [sv1] + audio, …
   for (let i = 0; i < n; i++) {
@@ -140,7 +148,7 @@ function buildTranscodeArgs(
     // session.currentStartSegment so files on disk line up with the static
     // VOD playlist's URI numbering (seek jumps to seg N → ffmpeg resumes at N).
     '-start_number', String(session.currentStartSegment),
-    '-hls_flags', 'independent_segments+temp_file',
+    '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
     '-hls_segment_filename', `${sessionDir}/r%v/seg%0${SEG_PAD}d.m4s`,
     '-var_stream_map', varStreamMap,
@@ -166,7 +174,7 @@ function buildDirectStreamArgs(
     '-hls_time', String(SEGMENT_DURATION_SEC),
     '-hls_list_size', '0',
     '-start_number', String(session.currentStartSegment),
-    '-hls_flags', 'independent_segments+temp_file',
+    '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
     '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
@@ -193,7 +201,7 @@ function buildPartialTranscodeArgs(
     '-hls_time', String(SEGMENT_DURATION_SEC),
     '-hls_list_size', '0',
     '-start_number', String(session.currentStartSegment),
-    '-hls_flags', 'independent_segments+temp_file',
+    '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
     '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
@@ -271,16 +279,27 @@ export async function spawnFfmpeg(
     return
   }
 
+  if (process.env.HORIZON_DEBUG) {
+    console.log(`Session ${session.id}: spawn ffmpeg ${['-y', ...args].join(' ')}`)
+  }
   const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
   session.ffmpegProcess = proc
   session.ffmpegPid = proc.pid
 
+  // Always retain a tail of stderr so we can dump it on failure / timeout.
+  // ffmpeg is chatty so a ring buffer of ~16 KB is plenty.
+  const STDERR_TAIL_BYTES = 16_384
+  let stderrTail = ''
   proc.stderr?.on('data', (chunk: Buffer) => {
+    const s = chunk.toString('utf8')
+    stderrTail = (stderrTail + s).slice(-STDERR_TAIL_BYTES)
     if (process.env.HORIZON_DEBUG) process.stderr.write(chunk)
   })
+  // Expose for waitForInitialSegments to dump on timeout.
+  ;(proc as any)._horizonStderrTail = () => stderrTail
 
   proc.on('error', (err) => {
-    // spawn-level failure (e.g. ffmpeg binary missing). Notify client; surface for caller via exit handler.
+    console.error(`Session ${session.id}: ffmpeg spawn error: ${err.message}`)
     try {
       session.wsSocket?.send(JSON.stringify({
         type: 'error',
@@ -291,25 +310,36 @@ export async function spawnFfmpeg(
     } catch {/* socket may be gone */}
   })
 
-  proc.on('exit', (code) => {
-    try {
-      if (code !== 0 && code !== null) {
+  proc.on('exit', (code, signal) => {
+    if (code !== 0 && code !== null) {
+      console.error(
+        `Session ${session.id}: ffmpeg exited code=${code} signal=${signal}\n` +
+        `=== ffmpeg stderr tail ===\n${stderrTail}\n=== end ===`,
+      )
+      try {
         session.wsSocket?.send(JSON.stringify({
           type: 'error',
           code: 'transcode-failed',
           message: `FFmpeg exited with code ${code}`,
           fatal: true,
         }))
-      } else if (code === 0) {
-        session.wsSocket?.send(JSON.stringify({ type: 'ended' }))
-      }
-    } catch {/* socket may be gone */}
+      } catch {/* socket may be gone */}
+    } else if (code === 0) {
+      try { session.wsSocket?.send(JSON.stringify({ type: 'ended' })) } catch {/* gone */}
+    }
   })
 
   // Only wait for 1 seg per rendition before signaling ready — getting the first
   // segment to disk usually means the HW encoder is fully warm and steady-state.
-  // Waiting for 3 added ~8s of cold-start latency for negligible safety gain.
-  await waitForInitialSegments(session, renditionCount, 1)
+  try {
+    await waitForInitialSegments(session, renditionCount, 1)
+  } catch (err) {
+    console.error(
+      `Session ${session.id}: pre-buffer failed — ${(err as Error).message}\n` +
+      `=== ffmpeg stderr tail ===\n${stderrTail}\n=== end ===`,
+    )
+    throw err
+  }
 }
 
 /**
