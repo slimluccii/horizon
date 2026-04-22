@@ -306,7 +306,10 @@ export async function spawnFfmpeg(
     } catch {/* socket may be gone */}
   })
 
-  await waitForInitialSegments(session, renditionCount, 3)
+  // Only wait for 1 seg per rendition before signaling ready — getting the first
+  // segment to disk usually means the HW encoder is fully warm and steady-state.
+  // Waiting for 3 added ~8s of cold-start latency for negligible safety gain.
+  await waitForInitialSegments(session, renditionCount, 1)
 }
 
 /**
@@ -321,21 +324,24 @@ export async function restartAtSegment(
   profiles: Profile[],
   segNum: number,
 ): Promise<void> {
-  killFfmpeg(session)
-  // Wait briefly for SIGTERM/exit so the next spawn doesn't race the dying
-  // process on shared output files.
+  const t0 = Date.now()
+  // SIGKILL not SIGTERM — we don't need ffmpeg to flush; we wipe its outputs.
+  // Saves up to 1.5s of grace-wait on every seek.
   const old = session.ffmpegProcess
-  if (old && old.exitCode === null && old.signalCode === null) {
+  if (old && !old.killed && old.exitCode === null && old.signalCode === null) {
+    try { old.kill('SIGKILL') } catch {/* gone */}
     await new Promise<void>(resolve => {
-      const t = setTimeout(resolve, 1500)
+      const t = setTimeout(resolve, 500)
       old.once('exit', () => { clearTimeout(t); resolve() })
     })
   }
-  // Wipe rendition dirs so no stale segs from the previous offset linger.
-  for (let r = 0; r < profiles.length; r++) {
-    await rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
-  }
+  // Parallel rm — was sequential, ~150ms saved on 4-rendition restarts.
+  await Promise.all(
+    profiles.map((_, r) => rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })),
+  )
   session.currentStartSegment = segNum
   session.seekPositionMs = segNum * SEGMENT_DURATION_SEC * 1000
+  console.log(`Session ${session.id}: restart at seg${segNum} (t=${Date.now() - t0}ms preamble)`)
   await spawnFfmpeg(session, hwAccel, profiles, session.selectedAudioTrack)
+  console.log(`Session ${session.id}: restart at seg${segNum} ready (t=${Date.now() - t0}ms total)`)
 }

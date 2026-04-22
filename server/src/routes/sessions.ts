@@ -88,8 +88,17 @@ export function registerSessions(
 
     const decision = decidePlayback(media, capabilities)
     const [srcW] = (media.resolution ?? '1920x1080').split('x').map(Number)
-    const topProfile = selectInitialProfile(capabilities.maxBitrate, srcW)
-    const profiles = decision.method === 'transcode'
+    let topProfile = selectInitialProfile(capabilities.maxBitrate, srcW)
+    // Tone-map runs on CPU (no zimg / no GPU tonemap on macOS) — 4K HDR
+    // tonemap is slower than real-time on most machines, blowing cold-start.
+    // Force 1080p for tonemapped streams; user gets full quality if they
+    // upgrade later via quality-override (which restarts at the new profile).
+    if (decision.needsToneMap && topProfile.width > 1920) {
+      topProfile = { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080 }
+    }
+    // Tonemap also caps to single rendition: parallel encodes share the same
+    // CPU-bound tonemap filter — adds latency without bandwidth benefit.
+    const profiles = decision.method === 'transcode' && !decision.needsToneMap
       ? selectRenditionLadder(topProfile, cfg.maxRenditions, srcW)
       : [topProfile]
 
@@ -216,6 +225,7 @@ export function registerSessions(
       const inRange = segNum >= start && segNum < start + SEEK_LOOKAHEAD_SEGMENTS
 
       if (!inRange && !session.ffmpegRestartInFlight) {
+        console.log(`Session ${session.id}: seek detected — req seg${segNum}, current start ${start}`)
         session.ffmpegRestartInFlight = true
         try {
           // Re-check inside lock — another concurrent request may have just restarted.
@@ -230,9 +240,11 @@ export function registerSessions(
         } finally {
           session.ffmpegRestartInFlight = false
         }
+      } else if (!inRange) {
+        console.log(`Session ${session.id}: seek waiting on in-flight restart (req seg${segNum}, current start ${start})`)
       }
 
-      const ok = await waitForSegment(session, r, segNum, 30_000)
+      const ok = await waitForSegment(session, r, segNum, 60_000)
       if (!ok || !existsSync(segPath)) {
         return reply.status(404).send({ error: 'Segment not produced', code: 'not-ready' })
       }
