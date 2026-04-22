@@ -12,6 +12,7 @@ import type { Profile } from '../transcode/profiles.ts'
 import { decidePlayback } from '../transcode/decision.ts'
 import { selectInitialProfile, selectRenditionLadder } from '../transcode/profiles.ts'
 import { createSessionDir, spawnFfmpeg } from '../transcode/ffmpeg.ts'
+import { extractSubtitles } from '../transcode/subtitles.ts'
 import { handleWsMessage } from '../ws/handler.ts'
 
 interface CreateSessionBody {
@@ -89,6 +90,9 @@ export function registerSessions(
             reconnectToken: session.reconnectToken,
           }))
         }
+        // extract text subtitles in background
+        extractSubtitles(media.filePath, media.subtitleTracks ?? [], session.sessionDir)
+          .catch(err => console.error('Subtitle extraction error:', err))
       }).catch(err => {
         sessions.destroy(session.id)
         console.error('FFmpeg start error:', err)
