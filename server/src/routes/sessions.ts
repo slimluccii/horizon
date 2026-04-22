@@ -18,8 +18,10 @@ import { extractSubtitles } from '../transcode/subtitles.ts'
 import { handleWsMessage } from '../ws/handler.ts'
 
 /** Lookahead window: segs >= currentStartSegment and within this many ahead are
- *  considered "current ffmpeg will get to them"; further-out segs trigger restart. */
-const SEEK_LOOKAHEAD_SEGMENTS = 250
+ *  considered "current ffmpeg will get to them"; further-out segs trigger restart.
+ *  30 segs = ~2 min of encoded content at 4 s/seg. Beyond that, a seek is faster
+ *  than waiting for the in-progress encoder to catch up. */
+const SEEK_LOOKAHEAD_SEGMENTS = 30
 
 /** Build a static VOD-style rendition playlist covering the entire media duration.
  *  Segments are listed by their deterministic filename — they may not yet exist
@@ -32,7 +34,7 @@ function buildRenditionPlaylist(renditionIdx: number, durationSec: number): stri
     `#EXT-X-TARGETDURATION:${SEGMENT_DURATION_SEC}`,
     '#EXT-X-MEDIA-SEQUENCE:0',
     '#EXT-X-PLAYLIST-TYPE:VOD',
-    `#EXT-X-MAP:URI="${renditionIdx}/init_${renditionIdx}.mp4"`,
+    `#EXT-X-MAP:URI="${renditionIdx}/init.mp4"`,
   ]
   for (let i = 0; i < totalSegs; i++) {
     const isLast = i === totalSegs - 1
@@ -205,7 +207,7 @@ export function registerSessions(
 
       // Init segments live in the rendition dir but aren't sequenced; serve directly.
       // Briefly wait if not on disk yet — ffmpeg writes init alongside seg0.
-      if (segReq.startsWith('init_')) {
+      if (segReq === 'init.mp4' || segReq.startsWith('init_')) {
         if (!existsSync(segPath)) {
           const deadline = Date.now() + 30_000
           while (Date.now() < deadline) {

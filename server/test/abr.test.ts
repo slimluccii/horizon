@@ -39,9 +39,12 @@ describe('computeAbrAction', () => {
     expect(action).toBe('none')
   })
 
-  it('ignores cooldown on emergency down', () => {
+  it('respects cooldown on emergency down too (prevents restart thrash)', () => {
+    // Previously emergency-down bypassed cooldown, which caused ffmpeg thrashing
+    // on cold starts: freshly-spawned run sees buffer=0 → emergency-down →
+    // kill+respawn → racing the still-warming first run.
     const stateRecent = { ...state, lastChangeAt: Date.now() - 1000 }
     const action = computeAbrAction({ kbps: 30000, bufferSeconds: 2 }, stateRecent, Date.now())
-    expect(action).toBe('emergency-down')
+    expect(action).toBe('none')
   })
 })

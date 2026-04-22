@@ -5,7 +5,7 @@ import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import { PROFILES } from '../transcode/profiles.ts'
 import {
-  killFfmpeg, spawnFfmpeg, pauseFfmpeg, resumeFfmpeg, SEGMENT_DURATION_SEC,
+  killFfmpeg, spawnFfmpeg, pauseFfmpeg, resumeFfmpeg, restartAtSegment, SEGMENT_DURATION_SEC,
 } from '../transcode/ffmpeg.ts'
 import { rm } from 'node:fs/promises'
 import path from 'node:path'
@@ -35,8 +35,11 @@ export function computeAbrAction(report: BandwidthReport, state: AbrState, now: 
   const current = profiles[currentProfileIndex]
   const inCooldown = now - lastChangeAt < cooldownMs
 
-  if (bufferSeconds < 4) return 'emergency-down'
+  // Cooldown applies to ALL actions, including emergency-down. Without this, a
+  // freshly-spawned ffmpeg run sees buffer=0 and immediately triggers another
+  // restart, racing the still-warming first run and dropping segment writes.
   if (inCooldown) return 'none'
+  if (bufferSeconds < 4) return 'emergency-down'
   if (bufferSeconds < 8) return 'down'
   if (kbps < current.videoBitrate * 1.2) return 'down'
   const nextUp = profiles[currentProfileIndex - 1]
@@ -71,17 +74,11 @@ async function restartFfmpegAtPosition(
   newProfile: Profile,
 ): Promise<boolean> {
   return withRestartLock(session, async () => {
-    killFfmpeg(session)
-    // clean stale segments before restart
-    for (let r = 0; r < session.profiles.length; r++) {
-      await rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
-    }
     session.profiles = [newProfile]
-    // ABR restart resumes from wherever the user is now. The client doesn't
-    // currently report playback position to us, so we restart from the last
-    // known seek offset (which is updated on every segment-route restart).
-    session.currentStartSegment = msToSegment(session.seekPositionMs)
-    await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
+    // Resume at the current run's start segment — we don't track exact playback
+    // position, but restarting from where this run began means the client's
+    // already-buffered segments through that point are still valid.
+    await restartAtSegment(session, hwAccel, session.profiles, session.currentStartSegment)
     send(session, {
       type: 'quality-changed',
       profile: newProfile,
@@ -123,36 +120,15 @@ export function handleWsMessage(
     }
 
     case 'bandwidth-report': {
-      if (session.method !== 'transcode') break // multi-rendition: informational only
-      if (session.profiles.length > 1) break    // multi-rendition: hls.js handles ABR
-
-      let abrState = sessionAbrState.get(session)
-      if (!abrState) {
-        const idx = PROFILES.findIndex(p => p.name === session.profiles[0].name)
-        abrState = { currentProfileIndex: idx < 0 ? 0 : idx, lastChangeAt: 0, cooldownMs: 15_000, profiles: PROFILES }
-        sessionAbrState.set(session, abrState)
-      }
-
-      const action = computeAbrAction(
-        { kbps: msg.kbps, bufferSeconds: msg.bufferSeconds },
-        abrState,
-        Date.now(),
-      )
-
-      if (action === 'none') break
-      const step = action === 'emergency-down' ? 2 : action === 'down' ? 1 : -1
-      const newIdx = Math.max(0, Math.min(PROFILES.length - 1, abrState.currentProfileIndex + step))
-      if (newIdx === abrState.currentProfileIndex) break
-
-      abrState.currentProfileIndex = newIdx
-      abrState.lastChangeAt = Date.now()
-
-      restartFfmpegAtPosition(session, hwAccel, PROFILES[newIdx]).catch(console.error)
-      send(session, {
-        type: 'quality-changed',
-        profile: PROFILES[newIdx],
-        reason: action === 'emergency-down' ? 'buffer-low' : action === 'down' ? 'bandwidth-drop' : 'bandwidth-increase',
-      })
+      // Server-driven ABR is currently disabled. Each ABR-triggered restart
+      // rewrites init.mp4 with a new codec config; MSE has already cached the
+      // first init's bytes and rejects the new segments with VTDecompression
+      // errors. Re-enable when we either:
+      //   • generate a stable init shared across qualities, or
+      //   • run multi-rendition encodes so the client can switch via HLS.
+      // The reports themselves are still useful as telemetry for the future
+      // implementation; we just don't act on them.
+      void msg
       break
     }
 

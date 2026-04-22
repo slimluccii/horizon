@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdir, rm, access } from 'node:fs/promises'
+import { mkdir, rm, access, readdir, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import type { HwAccel } from './hwaccel.ts'
@@ -77,6 +77,11 @@ function buildTranscodeArgs(
 
   args.push('-i', filePath)
 
+  // -copyts: preserve source timestamps on output. Required when restarting mid-stream
+  // for seek — otherwise output PTS resets to 0 and HLS playlist says segN = N*4s
+  // but segment data starts at t=0 → MSE sees discontinuity and decoder errors.
+  if (seekSecs > 0) args.push('-copyts')
+
   // Build filter_complex — required for multi-rendition HLS with per-rendition scale.
   // Per-stream -vf:N flags do not work correctly with -var_stream_map + a single
   // output-file template: FFmpeg only keeps the last -vf value for all streams.
@@ -152,7 +157,9 @@ function buildTranscodeArgs(
     '-hls_segment_type', 'fmp4',
     // %v in init filename — without this, the HLS muxer writes plain init.mp4
     // for var_stream_map outputs, but our static playlist references init_0.mp4 etc.
-    '-hls_fmp4_init_filename', 'init_%v.mp4',
+    // Note: %v is NOT substituted in hls_fmp4_init_filename (ffmpeg quirk).
+    // Each rendition writes to its own r{N}/ dir, so a constant init.mp4 is fine.
+    '-hls_fmp4_init_filename', 'init.mp4',
     '-hls_segment_filename', `${sessionDir}/r%v/seg%0${SEG_PAD}d.m4s`,
     '-var_stream_map', varStreamMap,
     `${sessionDir}/r%v/index.m3u8`,
@@ -170,6 +177,7 @@ function buildDirectStreamArgs(
   const args: string[] = []
   if (seekSecs > 0) args.push('-ss', seekSecs.toFixed(3))
   args.push('-i', filePath)
+  if (seekSecs > 0) args.push('-copyts')
   args.push('-map', '0:v:0', `-map`, `0:a:${audioTrackIndex}`)
   args.push('-c:v', 'copy', '-c:a', 'copy')
   args.push(
@@ -179,7 +187,7 @@ function buildDirectStreamArgs(
     '-start_number', String(session.currentStartSegment),
     '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
-    '-hls_fmp4_init_filename', 'init_0.mp4',
+    '-hls_fmp4_init_filename', 'init.mp4',
     '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
   )
@@ -198,6 +206,7 @@ function buildPartialTranscodeArgs(
   if (hwAccel.hwaccelDecode.length > 0) args.push(...hwAccel.hwaccelDecode)
   if (seekSecs > 0) args.push('-ss', seekSecs.toFixed(3))
   args.push('-i', filePath)
+  if (seekSecs > 0) args.push('-copyts')
   args.push('-map', '0:v:0', '-map', `0:a:${audioTrackIndex}`)
   args.push('-c:v', 'copy', '-c:a', 'aac', `-b:a`, `${profile.audioBitrate}k`)
   args.push(
@@ -207,7 +216,7 @@ function buildPartialTranscodeArgs(
     '-start_number', String(session.currentStartSegment),
     '-hls_flags', 'independent_segments',
     '-hls_segment_type', 'fmp4',
-    '-hls_fmp4_init_filename', 'init_0.mp4',
+    '-hls_fmp4_init_filename', 'init.mp4',
     '-hls_segment_filename', `${sessionDir}/r0/seg%0${SEG_PAD}d.m4s`,
     `${sessionDir}/r0/index.m3u8`,
   )
@@ -370,9 +379,22 @@ export async function restartAtSegment(
       old.once('exit', () => { clearTimeout(t); resolve() })
     })
   }
-  // Parallel rm — was sequential, ~150ms saved on 4-rendition restarts.
+  // Parallel cleanup — only wipe seg*.m4s + index.m3u8 stale files. Crucially
+  // KEEP init.mp4 from the previous run: MSE caches the codec-config from the
+  // very first init it loads and won't refetch it on a static MAP URI. If we
+  // overwrite with new init bytes (different SPS/PPS sequence) MSE rejects new
+  // segments with VTDecompressionOutput errors. ffmpeg with same params writes
+  // the same init each run, so keeping the old one is safe.
   await Promise.all(
-    profiles.map((_, r) => rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })),
+    profiles.map(async (_, r) => {
+      const dir = path.join(session.sessionDir, `r${r}`)
+      const files = await readdir(dir).catch(() => [] as string[])
+      await Promise.all(
+        files
+          .filter(f => f !== 'init.mp4')
+          .map(f => unlink(path.join(dir, f)).catch(() => {/* gone */})),
+      )
+    }),
   )
   session.currentStartSegment = segNum
   session.seekPositionMs = segNum * SEGMENT_DURATION_SEC * 1000
