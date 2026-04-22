@@ -135,9 +135,15 @@ export function registerSessions(
     if (!/^\d+$/.test(req.params.r)) {
       return reply.status(400).send({ error: 'Invalid rendition', code: 'invalid-input' })
     }
-    const playlistPath = path.join(session.sessionDir, `r${req.params.r}`, 'index.m3u8')
+    const r = req.params.r
+    const playlistPath = path.join(session.sessionDir, `r${r}`, 'index.m3u8')
     if (!existsSync(playlistPath)) return reply.status(404).send({ error: 'Not ready', code: 'not-ready' })
-    const content = await readFile(playlistPath, 'utf8')
+    let content = await readFile(playlistPath, 'utf8')
+    // FFmpeg writes URI="init_N.mp4" relative to this playlist URL. The browser
+    // resolves that against /sessions/:id/renditions/ → 404. Prefix with the
+    // rendition index so the browser requests /sessions/:id/renditions/N/init_N.mp4
+    // which is handled by the existing :r/:seg route.
+    content = content.replace(/URI="(init_\d+\.mp4)"/g, `URI="${r}/$1"`)
     return reply.header('Content-Type', 'application/vnd.apple.mpegurl').send(content)
   })
 
