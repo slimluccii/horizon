@@ -2820,7 +2820,8 @@ export class BandwidthSampler {
   private readonly windowSize = 5
 
   record(bytes: number, durationMs: number) {
-    if (durationMs <= 0) return
+    // skip uninformative samples — they would dilute the rolling estimate
+    if (durationMs <= 0 || bytes <= 0) return
     const kbps = Math.round((bytes * 8) / durationMs)  // bytes * 8 bits / ms = kbps
     this.samples.push({ kbps, segmentDownloadMs: durationMs, timestamp: Date.now() })
     if (this.samples.length > this.windowSize) this.samples.shift()
@@ -2840,7 +2841,13 @@ export class BandwidthSampler {
   }
 
   lastSample(): BandwidthSample | undefined {
-    return this.samples[this.samples.length - 1]
+    // return a shallow copy — caller must not mutate internal state
+    const last = this.samples[this.samples.length - 1]
+    return last ? { ...last } : undefined
+  }
+
+  reset(): void {
+    this.samples = []
   }
 }
 ```
