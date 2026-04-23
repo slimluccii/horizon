@@ -49,7 +49,6 @@ CREATE TABLE media_items (
 CREATE INDEX idx_media_kind   ON media_items(kind)                       WHERE deleted_at IS NULL;
 CREATE INDEX idx_media_parent ON media_items(parent_id, season, episode) WHERE deleted_at IS NULL;
 CREATE INDEX idx_media_title  ON media_items(title)                      WHERE deleted_at IS NULL;
-CREATE INDEX idx_media_path   ON media_items(file_path)                  WHERE deleted_at IS NULL;
 
 CREATE TABLE collections (
   id         TEXT PRIMARY KEY,
