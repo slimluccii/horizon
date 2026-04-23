@@ -8,7 +8,7 @@ import type { ClientCapabilities } from '../transcode/decision.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import { decidePlayback } from '../transcode/decision.ts'
 import { selectInitialProfile, selectRenditionLadder } from '../transcode/profiles.ts'
-import { createSessionDir, spawnFfmpeg } from '../transcode/ffmpeg.ts'
+import { SEGMENT_DURATION_SEC, createSessionDir, spawnFfmpeg } from '../transcode/ffmpeg.ts'
 import { extractSubtitles } from '../transcode/subtitles.ts'
 import { handleWsMessage } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
@@ -98,6 +98,13 @@ export function registerSessions(
       userId: req.body.userId ?? undefined,
     })
     session.sessionDir = await createSessionDir(session.id)
+
+    // Handle seek-on-create for resume playback
+    if (req.body.startPositionMs && req.body.startPositionMs > 0 && decision.method !== 'direct-play') {
+      const segNum = Math.floor(req.body.startPositionMs / 1000 / SEGMENT_DURATION_SEC)
+      session.currentStartSegment = segNum
+      session.seekPositionMs = req.body.startPositionMs
+    }
 
     if (decision.method !== 'direct-play') {
       spawnFfmpeg(session, hwAccel, profiles, audioTrackIndex).then(() => {
