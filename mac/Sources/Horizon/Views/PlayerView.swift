@@ -22,6 +22,8 @@ struct PlayerView: View {
     @State private var player: AVPlayer?
     @State private var socket = ProgressSocket()
     @State private var timeObserver: Any?
+    @State private var statusObserver: NSKeyValueObservation?
+    @State private var errorObserver: NSKeyValueObservation?
     @State private var error: String?
     @State private var startedAt: Date = .now
 
@@ -133,11 +135,37 @@ struct PlayerView: View {
     // MARK: - AVPlayer
 
     private func configurePlayer(with session: SessionInfo) {
-        let url = HorizonServer.baseURL.appendingPathComponent(session.streamUrl)
+        // streamUrl is an absolute server path (e.g. "/sessions/xxx/stream.m3u8").
+        // Resolve against baseURL so it becomes http://host:port/sessions/...
+        // `appendingPathComponent` percent-encodes leading `/` on some OS versions.
+        guard let url = URL(string: session.streamUrl, relativeTo: HorizonServer.baseURL)?
+            .absoluteURL
+        else {
+            self.error = "Invalid stream URL: \(session.streamUrl)"
+            return
+        }
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         p.automaticallyWaitsToMinimizeStalling = true
         self.player = p
+
+        // Surface AVPlayer errors to the UI instead of silent black screen.
+        statusObserver = item.observe(\.status, options: [.new]) { item, _ in
+            Task { @MainActor in
+                if item.status == .failed {
+                    let err = item.error as NSError?
+                    let msg = err?.localizedDescription ?? "Playback failed (\(err?.code ?? -1))"
+                    let underlying = (err?.userInfo[NSUnderlyingErrorKey] as? NSError)?.localizedDescription
+                    self.error = [msg, underlying].compactMap { $0 }.joined(separator: " — ")
+                    NSLog("[Horizon] AVPlayer failed: \(err?.userInfo ?? [:])")
+                }
+            }
+        }
+        errorObserver = item.observe(\.error, options: [.new]) { item, _ in
+            if let err = item.error {
+                NSLog("[Horizon] AVPlayer item.error: \(err)")
+            }
+        }
 
         // Progress reporter — every 5s while playing.
         let interval = CMTime(seconds: 5, preferredTimescale: 1)
@@ -155,6 +183,10 @@ struct PlayerView: View {
             p.removeTimeObserver(t)
         }
         timeObserver = nil
+        statusObserver?.invalidate()
+        statusObserver = nil
+        errorObserver?.invalidate()
+        errorObserver = nil
         player?.pause()
         socket.disconnect()
         if let id = session?.sessionId {
