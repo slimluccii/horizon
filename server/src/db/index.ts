@@ -1,8 +1,8 @@
-import DatabaseSync from 'better-sqlite3'
+import BetterSqlite3 from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 
-export type DatabaseSync = InstanceType<typeof DatabaseSync>
+export type DatabaseSync = InstanceType<typeof BetterSqlite3>
 
 /**
  * Open a SQLite database at `filePath` (or ':memory:'). Applies PRAGMAs we
@@ -13,7 +13,7 @@ export function openDatabase(filePath: string): DatabaseSync {
   if (filePath !== ':memory:') {
     mkdirSync(path.dirname(filePath), { recursive: true })
   }
-  const db = new DatabaseSync(filePath)
+  const db = new BetterSqlite3(filePath)
   db.exec('PRAGMA foreign_keys = ON')
   // WAL is a no-op on :memory: but safe to call.
   db.exec('PRAGMA journal_mode = WAL')

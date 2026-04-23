@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { openDatabase } from '../src/db/index.ts'
 
 describe('openDatabase', () => {
-  it('opens an in-memory DB with foreign_keys + WAL configured', async () => {
-    const { openDatabase } = await import('../src/db/index.ts')
+  it('opens an in-memory DB with foreign_keys + WAL configured', () => {
     const db = openDatabase(':memory:')
     const fk = db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }
     expect(fk.foreign_keys).toBe(1)
