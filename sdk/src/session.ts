@@ -52,7 +52,11 @@ export class PlaybackSession {
         ? `${window.location.protocol.replace('http', 'ws')}//${window.location.host}`
         : '')
     this.wsUrl = `${wsOrigin}${opts.sessionInfo.wsUrl}`
-    this._profile = opts.sessionInfo.profiles?.[0] as QualityProfile
+    // direct-play sessions arrive with profiles=[] — synthesize a sentinel so
+    // _profile is never undefined; consumers should check method first anyway.
+    this._profile = opts.sessionInfo.profiles[0] ?? {
+      videoBitrate: 0, audioBitrate: 0,
+    }
     // Defer WS creation by one microtask so the caller can call disconnect()
     // synchronously (React StrictMode cleanup) before the socket is opened.
     // _connect() checks _destroyed and bails if disconnect() already ran.
@@ -166,16 +170,37 @@ export class PlaybackSession {
     this._send({ type: 'seek', positionMs })
   }
 
-  setQuality(bitrateKbps: number | 'auto') {
-    this._send({ type: 'quality-override', bitrate: bitrateKbps === 'auto' ? 0 : bitrateKbps })
+  reportProgress(positionMs: number, durationMs: number): void {
+    this._send({ type: 'progress', positionMs, durationMs })
   }
 
-  setAudioTrack(index: number) {
-    this._send({ type: 'audio-track', index })
+  /** Switch quality, optionally resuming at `positionMs` playback position. */
+  setQuality(bitrateKbps: number | 'auto', positionMs?: number) {
+    this._send({
+      type: 'quality-override',
+      bitrate: bitrateKbps === 'auto' ? 0 : bitrateKbps,
+      ...(positionMs !== undefined ? { positionMs } : {}),
+    })
+  }
+
+  /** Switch audio track, optionally resuming at `positionMs` playback position. */
+  setAudioTrack(index: number, positionMs?: number) {
+    this._send({
+      type: 'audio-track',
+      index,
+      ...(positionMs !== undefined ? { positionMs } : {}),
+    })
   }
 
   setSubtitleTrack(index: number | null) {
     this._send({ type: 'subtitle-track', index })
+  }
+
+  /** URL for an extracted text subtitle track (WebVTT). Server lazily extracts
+   *  embeddable text subs after ffmpeg starts; URL may 404 briefly while the
+   *  extraction process is still running. */
+  subtitleUrl(index: number): string {
+    return `${this._opts.baseUrl}/sessions/${this.sessionId}/subtitles/${index}.vtt`
   }
 
   park() { this._send({ type: 'park' }) }
