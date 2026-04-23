@@ -18,6 +18,20 @@ let package = Package(
             path: "Sources/Horizon",
             resources: [
                 .process("Resources")
+            ],
+            linkerSettings: [
+                // Embed Info.plist directly into the binary via a Mach-O
+                // section. SPM executables have no bundle plist otherwise,
+                // which means CFBundleIdentifier is missing AND AVFoundation
+                // applies the strictest ATS policy (blocking http://127.0.0.1).
+                // `_main` tool, no NSBundle, so `__info_plist` is the only
+                // path that makes Launch Services + ATS see our keys.
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Info.plist"
+                ])
             ]
         )
     ]
