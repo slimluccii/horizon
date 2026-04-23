@@ -879,9 +879,9 @@ describe('mediaRepo.listMovies / listShows / getEpisodes', () => {
   it('getEpisodes orders by season then episode', () => {
     const { repo } = freshRepo()
     repo.upsertShow(show())
-    repo.upsertEpisode(episode({ id: 'e1', season: 1, episode: 2 }))
-    repo.upsertEpisode(episode({ id: 'e2', season: 1, episode: 1 }))
-    repo.upsertEpisode(episode({ id: 'e3', season: 2, episode: 1 }))
+    repo.upsertEpisode(episode({ id: 'e1', season: 1, episode: 2, filePath: '/shows/knight/s01e02.mkv' }))
+    repo.upsertEpisode(episode({ id: 'e2', season: 1, episode: 1, filePath: '/shows/knight/s01e01.mkv' }))
+    repo.upsertEpisode(episode({ id: 'e3', season: 2, episode: 1, filePath: '/shows/knight/s02e01.mkv' }))
     const eps = repo.getEpisodes('sh-1')
     expect(eps.map(e => e.id)).toEqual(['e2', 'e1', 'e3'])
   })
