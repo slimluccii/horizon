@@ -2,7 +2,18 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
+import HorizonMark from '../components/chrome/HorizonMark.tsx'
+import Icon from '../components/chrome/Icon.tsx'
 import type { User } from '@horizon/sdk'
+import './ProfilePicker.css'
+
+/** Deterministic per-user colour so picker tiles are visually distinct. */
+function userColor(name: string): string {
+  const palette = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
+  return palette[Math.abs(hash) % palette.length]
+}
 
 export default function ProfilePicker() {
   const navigate = useNavigate()
@@ -31,41 +42,67 @@ export default function ProfilePicker() {
     setAdding(false)
   }
 
-  if (loading) return <div style={{ color: '#888', padding: 40 }}>Loading profiles…</div>
+  if (loading) {
+    return (
+      <div className="pp">
+        <div className="pp__loading">Loading profiles…</div>
+      </div>
+    )
+  }
 
   return (
-    <div style={{ maxWidth: 800, margin: '80px auto', padding: '0 16px' }}>
-      <h1 style={{ fontSize: 24, marginBottom: 24 }}>Who's watching?</h1>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 16 }}>
-        {users.map(u => (
-          <button key={u.id} onClick={() => pick(u)}
-            style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-              background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 12,
-              padding: 20, cursor: 'pointer', color: '#fff',
-            }}>
-            <div style={{ width: 72, height: 72, borderRadius: '50%', background: '#2a2a2a',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
-              {u.avatar ?? u.name.charAt(0).toUpperCase()}
-            </div>
-            <div style={{ fontWeight: 600 }}>{u.name}</div>
-          </button>
-        ))}
-        <button onClick={() => setAdding(true)}
-          style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            background: 'transparent', border: '2px dashed #333', borderRadius: 12,
-            padding: 20, cursor: 'pointer', color: '#888', minHeight: 150,
-          }}>+ Add profile</button>
-      </div>
-      {adding && (
-        <div style={{ marginTop: 24, display: 'flex', gap: 8 }}>
-          <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Profile name"
-            style={{ padding: '10px 12px', borderRadius: 6, border: '1px solid #333', background: '#0a0a0a', color: '#fff', flex: 1 }} />
-          <button onClick={addUser}
-            style={{ padding: '10px 16px', borderRadius: 6, border: 'none', background: '#fff', color: '#000', cursor: 'pointer' }}>Create</button>
+    <div className="pp">
+      <div className="pp__bg" />
+      <div className="pp__content">
+        <div className="pp__header">
+          <HorizonMark size={44} />
+          <h1 className="pp__title">Who&apos;s watching?</h1>
+          <p className="pp__subtitle">Pick a profile to continue</p>
         </div>
-      )}
+
+        <div className="pp__grid">
+          {users.map(u => {
+            const color = userColor(u.name)
+            const initial = u.avatar ?? u.name.charAt(0).toUpperCase()
+            return (
+              <button key={u.id} className="pp__profile" onClick={() => pick(u)}>
+                <div
+                  className="pp__avatar"
+                  style={{ background: color, boxShadow: `0 24px 60px ${color}66` }}
+                >
+                  {initial}
+                </div>
+                <div className="pp__name">{u.name}</div>
+              </button>
+            )
+          })}
+
+          <button
+            className="pp__add"
+            onClick={() => setAdding(a => !a)}
+            aria-label="Add profile"
+          >
+            <div className="pp__add-avatar">
+              <Icon name="plus" size={36} color="var(--muted-hi)" />
+            </div>
+            <div className="pp__name pp__name--muted">Add profile</div>
+          </button>
+        </div>
+
+        {adding && (
+          <div className="pp__add-form">
+            <input
+              className="pp__input"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="Profile name"
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && addUser()}
+            />
+            <button className="pp__create" onClick={addUser}>Create</button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

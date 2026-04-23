@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import type { Config } from '../config.ts'
-import type { Session, SessionState } from './types.ts'
+import type { Session } from './types.ts'
 import { cleanupSessionDir, killFfmpeg } from '../transcode/ffmpeg.ts'
 
 export interface SessionManager {
@@ -67,7 +67,7 @@ export function createSessionManager(cfg: Config): SessionManager {
     })
     byToken.delete(session.reconnectToken)
     sessions.delete(id)
-    session.state = 'destroyed' as SessionState
+    session.state = 'destroyed'
   }
 
   return { create, get, getByReconnectToken, destroy, size: () => sessions.size }

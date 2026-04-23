@@ -1,0 +1,91 @@
+.poster {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #fff;
+  text-align: left;
+  font-family: var(--font-sans);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  transition: transform var(--dur-base) var(--ease-cinema);
+}
+
+.poster:hover { transform: translateY(-4px); }
+
+.poster__art {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+  transition: box-shadow var(--dur-base) var(--ease-cinema);
+}
+
+.poster:hover .poster__art,
+.poster:focus-visible .poster__art {
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 0 0 2px var(--accent),
+    0 0 0 6px var(--accent-dim);
+}
+
+.poster__badge {
+  position: absolute;
+  top: 10px; right: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.poster__nopo {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.poster__progress {
+  position: absolute;
+  left: 10%; right: 10%;
+  bottom: 10%;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+.poster__progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.poster__meta {
+  padding: 0 2px;
+}
+
+.poster__title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.poster__sub {
+  font-size: 12px;
+  color: var(--muted-hi);
+  margin-top: 2px;
+}
+
+.poster__sep { opacity: 0.6; }

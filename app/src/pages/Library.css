@@ -1,0 +1,208 @@
+.lib {
+  min-height: 100vh;
+  background: var(--bg);
+  color: #fff;
+  font-family: var(--font-sans);
+}
+
+/* ---------- Hero ---------- */
+
+.lib__hero {
+  position: relative;
+  height: min(68vh, 640px);
+  background-size: cover;
+  background-position: center 25%;
+  margin-top: -72px;   /* slide under the transparent top nav */
+  overflow: hidden;
+}
+
+.lib__hero-scrim-v {
+  position: absolute; inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 13, 22, 0.4) 0%,
+    rgba(0, 13, 22, 0) 30%,
+    rgba(0, 13, 22, 0) 55%,
+    rgba(0, 13, 22, 0.85) 92%,
+    var(--bg) 100%
+  );
+}
+.lib__hero-scrim-h {
+  position: absolute; inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(0, 13, 22, 0.85) 0%,
+    rgba(0, 13, 22, 0.4) 40%,
+    rgba(0, 13, 22, 0) 70%
+  );
+}
+
+.lib__hero-content {
+  position: absolute;
+  left: 64px; bottom: 72px;
+  max-width: 640px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.lib__hero-title {
+  margin: 0;
+  font-size: clamp(40px, 5vw, 72px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
+  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+}
+
+.lib__hero-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: var(--muted-hi);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.lib__dot { color: #334; }
+.lib__hero-badge {
+  border: 1px solid var(--border-hi);
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.lib__hero-overview {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 15px;
+  line-height: 1.55;
+  max-width: 540px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lib__hero-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.lib__cta-play,
+.lib__cta-info {
+  height: 52px;
+  padding: 0 28px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  letter-spacing: -0.01em;
+  border: none;
+  transition: transform var(--dur-fast), background var(--dur-fast);
+}
+.lib__cta-play { background: #fff; color: #000; }
+.lib__cta-play:hover { transform: translateY(-1px); background: #f4f4f4; }
+.lib__cta-info {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.lib__cta-info:hover { background: rgba(255, 255, 255, 0.22); }
+
+/* ---------- Body ---------- */
+
+.lib__body {
+  padding-top: 16px;
+  padding-bottom: 48px;
+}
+.lib__body--with-hero {
+  margin-top: -40px;
+  position: relative;
+  z-index: 3;
+}
+
+.lib__section {
+  padding: 24px 48px 0;
+}
+
+.lib__section-head {
+  margin-bottom: 20px;
+}
+
+.lib__section-title {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.lib__section-sub {
+  font-size: 13px;
+  color: var(--muted-hi);
+  margin-top: 4px;
+  letter-spacing: 0.01em;
+}
+
+.lib__tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.lib__pill {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.lib__pill:hover { background: rgba(255, 255, 255, 0.1); }
+.lib__pill.is-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: rgba(0, 158, 255, 0.4);
+  font-weight: 700;
+}
+
+.lib__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 28px 24px;
+}
+
+.lib__loading, .lib__empty {
+  color: var(--muted-hi);
+  font-size: 14px;
+  padding: 16px 0;
+}
+
+.lib__collections {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.lib__collection-title {
+  margin: 0 0 14px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}

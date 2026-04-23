@@ -131,6 +131,10 @@ export interface MediaItem {
   id: string
   title: string
   year?: number
+  /** Episode only — season number in the show. */
+  season?: number
+  /** Episode only — episode number within the season. */
+  episode?: number
   duration: number
   resolution: string
   videoCodec: string

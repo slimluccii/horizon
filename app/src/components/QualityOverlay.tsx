@@ -1,5 +1,5 @@
-// app/src/components/QualityOverlay.tsx
 import type { PlaybackMethod, QualityProfile } from '@horizon/sdk'
+import './QualityOverlay.css'
 
 interface QualityLogEntry {
   profile: QualityProfile
@@ -15,66 +15,61 @@ interface Props {
 }
 
 const METHOD_COLORS: Record<PlaybackMethod, string> = {
-  'direct-play': '#22c55e',
-  'direct-stream': '#3b82f6',
-  'partial-transcode': '#f59e0b',
-  'transcode': '#ef4444',
+  'direct-play':      'var(--good)',
+  'direct-stream':    'var(--accent)',
+  'partial-transcode':'var(--popcorn)',
+  'transcode':        'var(--danger)',
 }
 
 const METHOD_LABELS: Record<PlaybackMethod, string> = {
-  'direct-play': 'DIRECT PLAY',
-  'direct-stream': 'DIRECT STREAM',
-  'partial-transcode': 'PARTIAL TRANSCODE',
-  'transcode': 'TRANSCODE',
+  'direct-play':      'Direct play',
+  'direct-stream':    'Direct stream',
+  'partial-transcode':'Partial transcode',
+  'transcode':        'Transcode',
 }
 
+/** Small floating chip top-right of the player — live playback telemetry.
+ *  Click-through is on the quality log expansion; otherwise informational. */
 export default function QualityOverlay({ method, profile, bufferSeconds, qualityLog }: Props) {
   const bufferPct = Math.min(100, (bufferSeconds / 30) * 100)
+  const bufferColor =
+    bufferSeconds < 4 ? 'var(--danger)'
+    : bufferSeconds < 8 ? 'var(--popcorn)'
+    : 'var(--good)'
 
   return (
-    <div style={{
-      position: 'absolute', top: 16, right: 16, background: 'rgba(0,0,0,0.8)',
-      borderRadius: 8, padding: '10px 14px', minWidth: 220, fontSize: 12,
-      display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none',
-    }}>
-      {/* Method badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{
-          width: 8, height: 8, borderRadius: '50%',
-          background: METHOD_COLORS[method] ?? '#888',
-        }} />
-        <span style={{ fontWeight: 700, letterSpacing: 0.5 }}>{METHOD_LABELS[method]}</span>
+    <div className="qo">
+      <div className="qo__method">
+        <span className="qo__dot" style={{ background: METHOD_COLORS[method] }} />
+        <span className="qo__label">{METHOD_LABELS[method]}</span>
       </div>
 
-      {/* Quality */}
       {profile && (
-        <div style={{ color: '#ccc' }}>
-          {profile.height ? `${profile.height}p` : '—'} · {Math.round(profile.videoBitrate / 1000)} Mbps
+        <div className="qo__profile">
+          {profile.height ? `${profile.height}p` : '—'}
+          <span className="qo__dot-sep">·</span>
+          {Math.round(profile.videoBitrate / 1000)} Mbps
         </div>
       )}
 
-      {/* Buffer bar */}
-      <div>
-        <div style={{ color: '#666', marginBottom: 3 }}>
-          Buffer: {bufferSeconds.toFixed(1)}s
+      <div className="qo__buffer">
+        <div className="qo__buffer-head">
+          <span>Buffer</span>
+          <span className="qo__buffer-val">{bufferSeconds.toFixed(1)}s</span>
         </div>
-        <div style={{ height: 4, background: '#333', borderRadius: 2 }}>
-          <div style={{
-            height: '100%', borderRadius: 2,
-            width: `${bufferPct}%`,
-            background: bufferSeconds < 4 ? '#ef4444' : bufferSeconds < 8 ? '#f59e0b' : '#22c55e',
-            transition: 'width 0.5s',
-          }} />
+        <div className="qo__buffer-track">
+          <div className="qo__buffer-fill" style={{ width: `${bufferPct}%`, background: bufferColor }} />
         </div>
       </div>
 
-      {/* Quality log */}
       {qualityLog.length > 0 && (
-        <div style={{ borderTop: '1px solid #333', paddingTop: 8 }}>
-          <div style={{ color: '#666', marginBottom: 4 }}>Recent switches</div>
-          {qualityLog.slice(-5).reverse().map((entry, i) => (
-            <div key={i} style={{ color: '#aaa', fontSize: 11, lineHeight: 1.6 }}>
-              {entry.time.toLocaleTimeString()} — {entry.profile.height}p ({entry.reason})
+        <div className="qo__log">
+          <div className="qo__log-title">Recent switches</div>
+          {qualityLog.slice(-3).reverse().map((entry, i) => (
+            <div key={i} className="qo__log-item">
+              <span className="qo__log-time">{entry.time.toLocaleTimeString()}</span>
+              <span className="qo__log-profile">{entry.profile.height}p</span>
+              <span className="qo__log-reason">{entry.reason}</span>
             </div>
           ))}
         </div>

@@ -6,7 +6,9 @@ import { useActiveUser } from '../hooks/useActiveUser.ts'
 import VideoPlayer from '../components/VideoPlayer.tsx'
 import QualityOverlay from '../components/QualityOverlay.tsx'
 import TrackSelector from '../components/TrackSelector.tsx'
+import Icon from '../components/chrome/Icon.tsx'
 import type { PlaybackSession, QualityProfile, MediaItem } from '@horizon/sdk'
+import './Player.css'
 
 export default function Player() {
   const { mediaId } = useParams<{ mediaId: string }>()
@@ -145,10 +147,10 @@ export default function Player() {
   }, [mediaId, decision])
 
   if (error) return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 16 }}>
-      <div style={{ color: '#ef4444', fontSize: 18 }}>Playback error</div>
-      <div style={{ color: '#888' }}>{error}</div>
-      <button onClick={() => navigate('/')} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#fff', color: '#000' }}>← Back</button>
+    <div className="player player--error">
+      <div className="player__err-title">Playback error</div>
+      <div className="player__err-msg">{error}</div>
+      <button className="player__err-back" onClick={() => navigate('/')}>Back to library</button>
     </div>
   )
 
@@ -157,49 +159,30 @@ export default function Player() {
     : null
 
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#000' }}>
+    <div className="player">
       <button
+        className="player__back"
         onClick={() => { sessionRef.current?.disconnect(); navigate('/') }}
-        style={{
-          position: 'absolute', top: 16, left: 16, zIndex: 10,
-          background: 'rgba(0,0,0,0.7)', border: '1px solid #444',
-          color: '#fff', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13,
-        }}
       >
-        ← Library
+        <Icon name="back" size={14} /> Library
       </button>
 
       {decision === 'pending' && resume && (
-        <div style={{
-          position: 'absolute', top: 80, left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(0,0,0,0.85)', border: '1px solid #444', borderRadius: 8,
-          padding: '12px 16px', display: 'flex', gap: 12, alignItems: 'center', zIndex: 20,
-          color: '#fff', fontSize: 14,
-        }}>
-          <span>Resume from {fmtMs(resume.positionMs)}?</span>
-          <button
-            onClick={() => setDecision('resume')}
-            style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#2563eb', color: '#fff', fontSize: 13 }}
-          >
-            Resume
-          </button>
-          <button
-            onClick={() => setDecision('start-over')}
-            style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #555', cursor: 'pointer', background: 'transparent', color: '#ccc', fontSize: 13 }}
-          >
-            Start over
-          </button>
+        <div className="player__toast">
+          <div className="player__toast-text">
+            <div className="eyebrow">Continue</div>
+            <div className="player__toast-msg">Resume from {fmtMs(resume.positionMs)}?</div>
+          </div>
+          <button className="player__toast-primary" onClick={() => setDecision('resume')}>Resume</button>
+          <button className="player__toast-ghost" onClick={() => setDecision('start-over')}>Start over</button>
         </div>
       )}
 
       {!ready && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-          justifyContent: 'center', flexDirection: 'column', gap: 12, color: '#888',
-          zIndex: 5,
-        }}>
-          <div style={{ fontSize: 14 }}>Starting playback…</div>
-          {media && <div style={{ fontSize: 12 }}>{media.title}</div>}
+        <div className="player__loading">
+          <div className="player__spinner" />
+          <div className="player__loading-msg">Starting playback…</div>
+          {media && <div className="player__loading-title">{media.title}</div>}
         </div>
       )}
 

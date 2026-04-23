@@ -43,30 +43,54 @@ export interface ProbeResult {
 
 const TEXT_SUB_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text'])
 
+// ffprobe JSON shape — minimal subset we read. Defensive: every field optional
+// + verified at use site. See `ffprobe -print_format json -show_streams`.
+interface FfprobeSideData { side_data_type?: string; dv_profile?: number }
+interface FfprobeDisposition { default?: number; forced?: number }
+interface FfprobeTags { language?: string; title?: string }
+interface FfprobeStream {
+  codec_type?: string
+  codec_name?: string
+  width?: number
+  height?: number
+  bit_rate?: string
+  channels?: number
+  color_transfer?: string
+  side_data_list?: FfprobeSideData[]
+  disposition?: FfprobeDisposition
+  tags?: FfprobeTags
+}
+interface FfprobeFormat { duration?: string; bit_rate?: string; format_name?: string }
+interface FfprobeJson { streams?: FfprobeStream[]; format?: FfprobeFormat }
+
+const SIDE_DATA = {
+  DOVI: 'DOVI configuration record',
+  HDR10: 'Mastering display metadata',
+  HDR10PLUS: 'HDR Dynamic Metadata SMPTE2094-40 (HDR10+)',
+} as const
+
+function findSideData(stream: FfprobeStream | undefined, type: string): FfprobeSideData | undefined {
+  return stream?.side_data_list?.find(s => s.side_data_type === type)
+}
+
 export function parseProbeOutput(stdout: string): ProbeResult {
-  const data = JSON.parse(stdout)
-  const streams = data.streams as any[]
-  const format = data.format as any
+  const data = JSON.parse(stdout) as FfprobeJson
+  const streams = data.streams ?? []
+  const format = data.format ?? {}
 
   const video = streams.find(s => s.codec_type === 'video')
   const audioStreams = streams.filter(s => s.codec_type === 'audio')
   const subStreams = streams.filter(s => s.codec_type === 'subtitle')
 
-  const dvData = video?.side_data_list?.find(
-    (s: any) => s.side_data_type === 'DOVI configuration record'
-  )
-  const hdr10Data = video?.side_data_list?.find(
-    (s: any) => s.side_data_type === 'Mastering display metadata'
-  )
-  const hdr10plusData = video?.side_data_list?.find(
-    (s: any) => s.side_data_type === 'HDR Dynamic Metadata SMPTE2094-40 (HDR10+)'
-  )
+  const dvData = findSideData(video, SIDE_DATA.DOVI)
+  const hdr10Data = findSideData(video, SIDE_DATA.HDR10)
+  const hdr10plusData = findSideData(video, SIDE_DATA.HDR10PLUS)
 
   return {
-    duration: parseFloat(format.duration ?? '0'),
+    duration: parseFloat(format.duration ?? '0') || 0,
     resolution: `${video?.width ?? 0}x${video?.height ?? 0}`,
     videoCodec: video?.codec_name ?? 'unknown',
-    videoBitrate: parseInt(video?.bit_rate ?? format.bit_rate ?? '0'),
+    videoBitrate: parseInt(video?.bit_rate ?? format.bit_rate ?? '0', 10) || 0,
     hdr: {
       dv: !!dvData,
       dvProfile: dvData?.dv_profile,
@@ -75,20 +99,20 @@ export function parseProbeOutput(stdout: string): ProbeResult {
     },
     audioTracks: audioStreams.map((s, i) => ({
       index: i,
-      codec: s.codec_name,
-      channels: s.channels,
+      codec: s.codec_name ?? 'unknown',
+      channels: s.channels ?? 2,
       language: s.tags?.language ?? 'und',
       title: s.tags?.title ?? '',
       default: s.disposition?.default === 1,
     })),
     subtitleTracks: subStreams.map((s, i) => ({
       index: i,
-      codec: s.codec_name,
+      codec: s.codec_name ?? 'unknown',
       language: s.tags?.language ?? 'und',
       forced: s.disposition?.forced === 1,
-      embeddable: TEXT_SUB_CODECS.has(s.codec_name),
+      embeddable: TEXT_SUB_CODECS.has(s.codec_name ?? ''),
     })),
-    container: format.format_name,
+    container: format.format_name ?? 'unknown',
   }
 }
 

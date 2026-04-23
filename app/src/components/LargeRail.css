@@ -1,0 +1,24 @@
+.rail {
+  padding: 24px 0 36px;
+}
+
+.rail__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.rail__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: #fff;
+}
+
+.rail__strip {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+}

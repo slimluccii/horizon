@@ -1,0 +1,72 @@
+.lc {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #fff;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  text-align: left;
+  flex-shrink: 0;
+  transition: transform var(--dur-base) var(--ease-cinema);
+}
+
+.lc:hover { transform: translateY(-4px); }
+
+.lc__art {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+  transition: box-shadow var(--dur-base) var(--ease-cinema);
+}
+
+.lc:hover .lc__art,
+.lc:focus-visible .lc__art {
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 0 0 2px var(--accent);
+}
+
+.lc__gradient {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.85) 100%);
+}
+
+.lc__info {
+  position: absolute;
+  left: 16px; right: 16px; bottom: 18px;
+}
+
+.lc__title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lc__sub {
+  font-size: 12px;
+  color: var(--muted-hi);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lc__progress {
+  position: absolute;
+  left: 12px; right: 12px; bottom: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+
+.lc__progress-fill {
+  height: 100%;
+  background: var(--accent);
+}

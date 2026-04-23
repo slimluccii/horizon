@@ -1,0 +1,81 @@
+/* Player track/quality pickers — sit bottom-right over the <video>. */
+.ts {
+  position: absolute;
+  bottom: 80px;
+  right: 24px;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 10;
+  font-family: var(--font-sans);
+}
+
+.ts__group { position: relative; pointer-events: auto; }
+
+.ts__btn {
+  height: 36px;
+  padding: 0 12px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-bdr);
+  backdrop-filter: var(--chrome-blur);
+  -webkit-backdrop-filter: var(--chrome-blur);
+  border-radius: 18px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background var(--dur-fast);
+}
+.ts__btn:hover { background: rgba(36, 50, 66, 0.95); }
+
+.ts__menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: rgba(10, 22, 34, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px;
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ts__menu-title {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  padding: 10px 12px 6px;
+}
+
+.ts__item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ts__item:hover { background: rgba(255, 255, 255, 0.06); }
+.ts__item.is-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}

@@ -1,18 +1,43 @@
 import { spawn } from 'node:child_process'
-import { mkdir, rm, access, readdir, unlink } from 'node:fs/promises'
+import { mkdir, rm, access, stat } from 'node:fs/promises'
+import { watch } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import type { HwAccel } from './hwaccel.ts'
 import type { Profile } from './profiles.ts'
 import type { Session } from '../session/types.ts'
+import { buildToneMapPrefix } from './tonemap.ts'
 
-/** HLS segment duration in seconds. Must match `-hls_time` below. */
-export const SEGMENT_DURATION_SEC = 4
+/** HLS segment duration in seconds. Must match `-hls_time` below.
+ *  Shorter segments = faster first-byte for the player (seg0 arrives sooner)
+ *  at the cost of more files on disk + more playlist entries. 1s is
+ *  aggressive but works with -g set to match (24 at 24fps = 1s GOP). */
+export const SEGMENT_DURATION_SEC = 1
 /** Segment number padding (5 digits → supports ~66 hours at 4 s/seg). */
 export const SEG_PAD = 5
 /** Render a segment filename, e.g. segmentName(42) → "seg00042.m4s". */
 export function segmentName(n: number): string {
   return `seg${String(n).padStart(SEG_PAD, '0')}.m4s`
+}
+
+/** Pause between SIGTERM and SIGKILL. ffmpeg flushes its trailer here on
+ *  graceful shutdown; 2s is empirically enough on macOS HW encoders. */
+const SIGTERM_TO_SIGKILL_MS = 2000
+
+/** Bytes of ffmpeg stderr retained per process for diagnostic dumps. ffmpeg
+ *  is chatty so a ring buffer of ~16 KB is plenty to capture the last lines. */
+const STDERR_TAIL_BYTES = 16_384
+
+/**
+ * Per-process stderr tail accessor. Indexed by ChildProcess so multiple
+ * concurrent ffmpegs (transcode + subtitle extractor) don't clobber each other.
+ * Auto-GC'd when the process reference drops.
+ */
+const stderrTails = new WeakMap<import('node:child_process').ChildProcess, () => string>()
+
+/** Tail of stderr for the given process, or empty string if not tracked. */
+export function getFfmpegStderrTail(proc: import('node:child_process').ChildProcess): string {
+  return stderrTails.get(proc)?.() ?? ''
 }
 
 export async function createSessionDir(sessionId: string): Promise<string> {
@@ -27,14 +52,15 @@ export async function cleanupSessionDir(sessionDir: string): Promise<void> {
 }
 
 export function killFfmpeg(session: Session): void {
-  if (session.ffmpegProcess && !session.ffmpegProcess.killed) {
-    session.ffmpegProcess.kill('SIGTERM')
-    setTimeout(() => {
-      if (session.ffmpegProcess && !session.ffmpegProcess.killed) {
-        session.ffmpegProcess.kill('SIGKILL')
-      }
-    }, 2000)
-  }
+  const proc = session.ffmpegProcess
+  if (!proc || proc.killed) return
+  proc.kill('SIGTERM')
+  // Schedule SIGKILL fallback. Cancel on early exit so we don't fire on a
+  // dead process (benign but wastes a timer slot).
+  const t = setTimeout(() => {
+    if (!proc.killed && proc.exitCode === null) proc.kill('SIGKILL')
+  }, SIGTERM_TO_SIGKILL_MS)
+  proc.once('exit', () => clearTimeout(t))
 }
 
 function isAlive(session: Session): boolean {
@@ -75,6 +101,10 @@ function buildTranscodeArgs(
     args.push('-ss', seekSecs.toFixed(3))
   }
 
+  // -thread_queue_size: ffmpeg's default (8) starves the encoder when the
+  // demuxer briefly outpaces decode (large GOPs, big files on slow disks).
+  // Bumping to 512 covers a few seconds of frames; cheap on memory.
+  args.push('-thread_queue_size', '512')
   args.push('-i', filePath)
 
   // -copyts: preserve source timestamps on output. Required when restarting mid-stream
@@ -82,27 +112,18 @@ function buildTranscodeArgs(
   // but segment data starts at t=0 → MSE sees discontinuity and decoder errors.
   if (seekSecs > 0) args.push('-copyts')
 
-  // Build filter_complex — required for multi-rendition HLS with per-rendition scale.
-  // Per-stream -vf:N flags do not work correctly with -var_stream_map + a single
-  // output-file template: FFmpeg only keeps the last -vf value for all streams.
+  // Build filter_complex — required for multi-rendition HLS with per-rendition
+  // scale. Per-stream `-vf:N` flags do not work correctly with `-var_stream_map`
+  // + a single output template (ffmpeg only keeps the last `-vf` value).
   //
-  // Tone-map chain: uses built-in `tonemap` filter (no zscale/libzimg required).
-  // `tonemap` accepts 10-bit input (p010le / yuv420p10le) and outputs yuv420p.
-  //
-  // Without libzimg we cannot do a proper PQ → linear → tonemap → BT.709 chain,
-  // so the output looks dim (midtones crushed). Compensate with:
-  //   • mobius operator + param=0.3  — gentler mid-roll than `hable`, brighter mids
-  //   • post-tonemap eq — gamma 1.25 lifts midtones, saturation 1.3 recovers color
-  //     loss from the simplified tonemap, contrast 1.05 restores local contrast
-  // For a correct HDR→SDR pipeline, install an ffmpeg built with --enable-libzimg.
+  // Tone-map chain — see transcode/tonemap.ts for operator selection details.
+  // We can't do a proper PQ → linear → tonemap → BT.709 chain without libzimg,
+  // so the chosen operator drives both the curve and the post-correction.
   const scaleChain = (p: Profile) =>
     `scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,` +
     `pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2`
 
-  const toneMapPrefix = needsToneMap
-    ? 'tonemap=tonemap=mobius:param=0.3:desat=0:peak=100,format=yuv420p,'
-      + 'eq=gamma=1.25:saturation=1.3:contrast=1.05,'
-    : ''
+  const toneMapPrefix = needsToneMap ? buildToneMapPrefix(session.toneMap) : ''
 
   // Build filter graph. For n>1 we need split=N to fan out to per-rendition scale.
   // For n=1 (HDR-tonemap path now caps to single rendition) skip split — degenerate
@@ -136,7 +157,15 @@ function buildTranscodeArgs(
       `-b:v:${i}`, `${p.videoBitrate}k`,
       `-maxrate:v:${i}`, `${Math.round(p.videoBitrate * 1.1)}k`,
       `-bufsize:v:${i}`, `${p.videoBitrate * 2}k`,
-      `-g:v:${i}`, '48',
+      // GOP in frames. Assumes ~24fps source (common for film content). Matches
+      // SEGMENT_DURATION_SEC so every seg starts with a keyframe — required for
+      // independent_segments HLS. Higher-fps sources will just have more
+      // keyframes than strictly needed; still correct, slightly larger segs.
+      `-g:v:${i}`, String(SEGMENT_DURATION_SEC * 24),
+      // Force keyframe exactly at the segment boundary timestamp. Some encoders
+      // ignore this (h264_videotoolbox usually honours it) but providing it
+      // hardens seg cuts for any framerate the source happens to use.
+      `-force_key_frames:v:${i}`, `expr:gte(t,n_forced*${SEGMENT_DURATION_SEC})`,
       `-sc_threshold:v:${i}`, '0',
       `-c:a:${i}`, 'aac',
       `-b:a:${i}`, `${p.audioBitrate}k`,
@@ -176,6 +205,7 @@ function buildDirectStreamArgs(
   const seekSecs = seekPositionMs / 1000
   const args: string[] = []
   if (seekSecs > 0) args.push('-ss', seekSecs.toFixed(3))
+  args.push('-thread_queue_size', '512')
   args.push('-i', filePath)
   if (seekSecs > 0) args.push('-copyts')
   args.push('-map', '0:v:0', `-map`, `0:a:${audioTrackIndex}`)
@@ -205,6 +235,7 @@ function buildPartialTranscodeArgs(
   const args: string[] = []
   if (hwAccel.hwaccelDecode.length > 0) args.push(...hwAccel.hwaccelDecode)
   if (seekSecs > 0) args.push('-ss', seekSecs.toFixed(3))
+  args.push('-thread_queue_size', '512')
   args.push('-i', filePath)
   if (seekSecs > 0) args.push('-copyts')
   args.push('-map', '0:v:0', '-map', `0:a:${audioTrackIndex}`)
@@ -223,30 +254,119 @@ function buildPartialTranscodeArgs(
   return args
 }
 
+/** Backstop poll interval. fs.watch is the primary signal; this catches the
+ *  case where the watcher misses an event (filesystems where rename != change,
+ *  case-folded volumes) and as the only signal when the parent dir doesn't
+ *  exist yet. */
+const WAIT_POLL_MS = 250
+
+/** Window required for a file's size to stay constant before we call it
+ *  "fully written". Segments are written in append mode: ffmpeg opens the
+ *  file → writes N MB → closes. fs.watch fires on every write(), so seeing
+ *  the file isn't enough; a static size for this window means no more
+ *  appends are in-flight. 50ms is tight (hls.js tolerates fast arrivals)
+ *  but long enough that ffmpeg's next buffered write lands first. */
+const STABLE_WINDOW_MS = 50
+
+/**
+ * Wait for a file under sessionDir to exist AND finish being written. Uses
+ * fs.watch on the parent dir as a low-latency signal (~ms) plus a size-
+ * stability check so we don't serve a half-written segment. Bails early if
+ * ffmpeg has exited.
+ *
+ * Why size-stability instead of +temp_file: ffmpeg's `-hls_flags +temp_file`
+ * option interacts poorly with `-hls_segment_type fmp4` — segments arrive
+ * renamed but with partial mdat boxes, causing hls.js `fragParsingError`.
+ * Checking size-stable is safer and works across all muxer configs.
+ */
+async function waitForFile(session: Session, absPath: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+
+  /** Returns true when file exists and its size has been stable for the window. */
+  async function isStable(): Promise<boolean> {
+    try {
+      const s1 = await stat(absPath)
+      if (s1.size === 0) return false
+      await new Promise(res => setTimeout(res, STABLE_WINDOW_MS))
+      const s2 = await stat(absPath)
+      return s2.size === s1.size
+    } catch {
+      return false
+    }
+  }
+
+  // Fast path: file already there AND stable.
+  if (await isStable()) return true
+
+  return new Promise<boolean>((resolve) => {
+    let done = false
+    const finish = (ok: boolean) => {
+      if (done) return
+      done = true
+      clearInterval(pollTimer)
+      clearTimeout(deadlineTimer)
+      try { watcher?.close() } catch {/* already closed */}
+      resolve(ok)
+    }
+
+    const checkStable = () => {
+      if (done) return
+      isStable().then(ok => {
+        if (ok) finish(true)
+        else {
+          const p = session.ffmpegProcess
+          if (p && (p.exitCode !== null || p.signalCode !== null) && Date.now() >= deadline) {
+            finish(false)
+          }
+        }
+      })
+    }
+
+    const dir = path.dirname(absPath)
+    const target = path.basename(absPath)
+    let watcher: ReturnType<typeof watch> | null = null
+    try {
+      watcher = watch(dir, (_evt, name) => {
+        if (name === target) checkStable()
+      })
+      watcher.on('error', () => {/* ignore — poller is the backstop */})
+    } catch {/* dir doesn't exist yet — poller handles it */}
+
+    // Backstop: re-check periodically.
+    const pollTimer = setInterval(checkStable, WAIT_POLL_MS)
+    const deadlineTimer = setTimeout(() => finish(false), timeoutMs)
+  })
+}
+
 /**
  * Poll until a specific segment file exists (or ffmpeg exits / timeout).
  * Used both for initial pre-buffer and for seek-triggered restarts where
  * the segment handler waits for the newly-spawned ffmpeg to catch up.
  */
-export async function waitForSegment(
+export function waitForSegment(
   session: Session,
   renditionIdx: number,
   segNum: number,
   timeoutMs = 30_000,
 ): Promise<boolean> {
-  const segPath = path.join(session.sessionDir, `r${renditionIdx}`, segmentName(segNum))
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      await access(segPath)
-      return true
-    } catch {/* not yet */}
-    // Bail early if ffmpeg died
-    const p = session.ffmpegProcess
-    if (p && (p.exitCode !== null || p.signalCode !== null)) return false
-    await new Promise(r => setTimeout(r, 100))
-  }
-  return false
+  return waitForFile(
+    session,
+    path.join(session.sessionDir, `r${renditionIdx}`, segmentName(segNum)),
+    timeoutMs,
+  )
+}
+
+/** Poll until a rendition's init.mp4 exists. ffmpeg writes it alongside seg0. */
+export function waitForInit(
+  session: Session,
+  renditionIdx: number,
+  timeoutMs = 30_000,
+): Promise<boolean> {
+  return waitForFile(
+    session,
+    path.join(session.sessionDir, `r${renditionIdx}`, 'init.mp4'),
+    timeoutMs,
+  )
 }
 
 /**
@@ -274,6 +394,7 @@ export async function spawnFfmpeg(
   audioTrackIndex: number,
 ): Promise<void> {
   const { sessionDir, method } = session
+  const t0 = Date.now()
 
   const renditionCount = method === 'transcode' ? profiles.length : 1
   for (let r = 0; r < renditionCount; r++) {
@@ -299,18 +420,15 @@ export async function spawnFfmpeg(
   const proc = spawn('ffmpeg', ['-y', ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
   session.ffmpegProcess = proc
   session.ffmpegPid = proc.pid
+  session.spawnedAt = Date.now()
 
   // Always retain a tail of stderr so we can dump it on failure / timeout.
-  // ffmpeg is chatty so a ring buffer of ~16 KB is plenty.
-  const STDERR_TAIL_BYTES = 16_384
   let stderrTail = ''
   proc.stderr?.on('data', (chunk: Buffer) => {
-    const s = chunk.toString('utf8')
-    stderrTail = (stderrTail + s).slice(-STDERR_TAIL_BYTES)
+    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_BYTES)
     if (process.env.HORIZON_DEBUG) process.stderr.write(chunk)
   })
-  // Expose for waitForInitialSegments to dump on timeout.
-  ;(proc as any)._horizonStderrTail = () => stderrTail
+  stderrTails.set(proc, () => stderrTail)
 
   proc.on('error', (err) => {
     console.error(`Session ${session.id}: ffmpeg spawn error: ${err.message}`)
@@ -343,62 +461,12 @@ export async function spawnFfmpeg(
     }
   })
 
-  // Only wait for 1 seg per rendition before signaling ready — getting the first
-  // segment to disk usually means the HW encoder is fully warm and steady-state.
-  try {
-    await waitForInitialSegments(session, renditionCount, 1)
-  } catch (err) {
-    console.error(
-      `Session ${session.id}: pre-buffer failed — ${(err as Error).message}\n` +
-      `=== ffmpeg stderr tail ===\n${stderrTail}\n=== end ===`,
-    )
-    throw err
-  }
+  // Previously: `await waitForInitialSegments(session, renditionCount, 1)` —
+  // held the caller until ffmpeg produced seg0 (≈ SEGMENT_DURATION_SEC at best).
+  // That wait is redundant: the segment route waits for init.mp4 / segN itself
+  // via waitForInit / waitForSegment, so the browser can start requesting as
+  // soon as the playlist arrives — which doesn't depend on ffmpeg at all.
+  // Resolving early cuts cold-start by one full segment duration.
+  console.log(`Session ${session.id}: ffmpeg spawned (${Date.now() - t0}ms setup)`)
 }
 
-/**
- * Restart ffmpeg at a specific segment offset (used by seek). Caller MUST
- * hold the restart lock. Updates session.currentStartSegment + seekPositionMs
- * BEFORE spawning so concurrent segment requests in the same range will wait
- * for this run to produce them rather than triggering another restart.
- */
-export async function restartAtSegment(
-  session: Session,
-  hwAccel: HwAccel,
-  profiles: Profile[],
-  segNum: number,
-): Promise<void> {
-  const t0 = Date.now()
-  // SIGKILL not SIGTERM — we don't need ffmpeg to flush; we wipe its outputs.
-  // Saves up to 1.5s of grace-wait on every seek.
-  const old = session.ffmpegProcess
-  if (old && !old.killed && old.exitCode === null && old.signalCode === null) {
-    try { old.kill('SIGKILL') } catch {/* gone */}
-    await new Promise<void>(resolve => {
-      const t = setTimeout(resolve, 500)
-      old.once('exit', () => { clearTimeout(t); resolve() })
-    })
-  }
-  // Parallel cleanup — only wipe seg*.m4s + index.m3u8 stale files. Crucially
-  // KEEP init.mp4 from the previous run: MSE caches the codec-config from the
-  // very first init it loads and won't refetch it on a static MAP URI. If we
-  // overwrite with new init bytes (different SPS/PPS sequence) MSE rejects new
-  // segments with VTDecompressionOutput errors. ffmpeg with same params writes
-  // the same init each run, so keeping the old one is safe.
-  await Promise.all(
-    profiles.map(async (_, r) => {
-      const dir = path.join(session.sessionDir, `r${r}`)
-      const files = await readdir(dir).catch(() => [] as string[])
-      await Promise.all(
-        files
-          .filter(f => f !== 'init.mp4')
-          .map(f => unlink(path.join(dir, f)).catch(() => {/* gone */})),
-      )
-    }),
-  )
-  session.currentStartSegment = segNum
-  session.seekPositionMs = segNum * SEGMENT_DURATION_SEC * 1000
-  console.log(`Session ${session.id}: restart at seg${segNum} (t=${Date.now() - t0}ms preamble)`)
-  await spawnFfmpeg(session, hwAccel, profiles, session.selectedAudioTrack)
-  console.log(`Session ${session.id}: restart at seg${segNum} ready (t=${Date.now() - t0}ms total)`)
-}

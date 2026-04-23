@@ -1,0 +1,109 @@
+/* Large top nav — desktop / web form factor. 72px tall. Chrome + tabs + profile.
+ * See LargeTopNav.tsx for usage. Hero screens pass `transparent` so the nav
+ * floats; non-hero screens get a solid blurred bar with a hairline border. */
+
+.top-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 72px;
+  background: rgba(0, 13, 22, 0.82);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--font-sans);
+}
+
+.top-nav--transparent {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-bottom: none;
+}
+
+/* Dark gradient scrim under the chrome on hero screens. Guarantees tab + button
+ * legibility no matter how bright the hero art behind it is. */
+.top-nav__scrim {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 160px;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 8, 14, 0.78) 0%,
+    rgba(0, 8, 14, 0.35) 60%,
+    rgba(0, 8, 14, 0) 100%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+.top-nav__inner {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 32px;
+}
+
+.top-nav__logo {
+  cursor: pointer;
+}
+
+.top-nav__tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.top-nav__tab {
+  background: transparent;
+  border: none;
+  color: #fff;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+
+.top-nav--transparent .top-nav__tab {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+}
+
+.top-nav__tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.top-nav__tab.is-active {
+  background: #fff;
+  color: #000;
+  font-weight: 700;
+  text-shadow: none;
+}
+
+.top-nav__spacer { flex: 1; }
+
+.top-nav__icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-bdr);
+  backdrop-filter: var(--chrome-blur);
+  -webkit-backdrop-filter: var(--chrome-blur);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--dur-fast) ease;
+}
+
+.top-nav__icon-btn:hover {
+  background: rgba(36, 50, 66, 0.95);
+}
