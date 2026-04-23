@@ -9,6 +9,8 @@ export default defineConfig({
       '/library': 'http://localhost:7777',
       '/sessions': { target: 'http://localhost:7777', ws: true },
       '/health': 'http://localhost:7777',
+      '/metadata': 'http://localhost:7777',
+      '/users': 'http://localhost:7777',
     },
   },
 })
