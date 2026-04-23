@@ -1,5 +1,3 @@
-import type { MovieItem } from './scanner.ts'
-
 const ROMAN = /\b(II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/i
 const COLLECTION_TOKENS = [
   /\s+Part\s+\w+(?:\s*[-–—]\s*.+)?$/i,
@@ -17,14 +15,18 @@ export function stripCollectionSuffix(title: string): string {
   return t
 }
 
-export interface Collection {
+export interface CollectionCandidate {
   id: string
-  name: string
-  movies: MovieItem[]
+  title: string
 }
 
-export function detectCollections(movies: MovieItem[]): Collection[] {
-  const groups = new Map<string, MovieItem[]>()
+export interface DetectedCollection<T extends CollectionCandidate = CollectionCandidate> {
+  name: string
+  movies: T[]
+}
+
+export function detectCollections<T extends CollectionCandidate>(movies: T[]): DetectedCollection<T>[] {
+  const groups = new Map<string, T[]>()
 
   for (const movie of movies) {
     const base = stripCollectionSuffix(movie.title)
@@ -33,12 +35,16 @@ export function detectCollections(movies: MovieItem[]): Collection[] {
     groups.set(base, existing)
   }
 
-  const collections: Collection[] = []
+  const collections: DetectedCollection<T>[] = []
   for (const [base, members] of groups) {
     if (members.length < 2) continue
-    const sorted = [...members].sort((a, b) => a.year - b.year)
+    // Sort by year if available (duck-typed); stable otherwise.
+    const sorted = [...members].sort((a, b) => {
+      const ya = (a as any).year ?? (a as any).sortYear ?? 0
+      const yb = (b as any).year ?? (b as any).sortYear ?? 0
+      return ya - yb
+    })
     collections.push({
-      id: Buffer.from(base).toString('hex').slice(0, 16),
       name: base,
       movies: sorted,
     })

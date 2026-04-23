@@ -1,47 +1,52 @@
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { probe, type ProbeResult } from './probe.ts'
-import { detectCollections, type Collection } from './collections.ts'
-import type { Config } from '../config.ts'
+import { probe } from './probe.ts'
+import { detectCollections } from './collections.ts'
+import { parseIdsFromPath, parseIds, mergeIds } from './ids.ts'
+import { pMap } from './concurrency.ts'
+import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../repos/media.ts'
+import type { CollectionsRepo, Collection } from '../repos/collections.ts'
+import type { TmdbProvider } from '../metadata/tmdb.ts'
 
-export interface MovieItem extends ProbeResult {
-  id: string
-  title: string
-  year: number
-  filePath: string
+export interface ScanConfig {
+  moviesRoots: string[]
+  showsRoots: string[]
+  cacheDir: string
+  scanConcurrency: number
 }
 
-export interface EpisodeItem extends ProbeResult {
-  id: string
-  showId: string
-  showTitle: string
-  season: number
-  episode: number
-  title: string
-  filePath: string
-}
-
-export interface ShowSummary {
-  id: string
-  title: string
-  seasons: { number: number; episodeCount: number }[]
-}
-
-export interface LibraryIndex {
-  movies: MovieItem[]
-  shows: Map<string, { summary: ShowSummary; episodes: EpisodeItem[] }>
-  collections: Collection[]
-  byId: Map<string, MovieItem | EpisodeItem>
-  rescan(): Promise<void>
-}
-
-function movieId(filePath: string) {
-  return crypto.createHash('sha1').update(filePath).digest('hex').slice(0, 16)
+export interface ScanDeps {
+  media: MediaRepo
+  collections: CollectionsRepo
+  tmdb: TmdbProvider | null
 }
 
 const MOVIE_RE = /^(.+?)\s*\((\d{4})\)/
 const EPISODE_RE = /S(\d{2})E(\d{2})/i
+
+function hashId(input: string): string {
+  return crypto.createHash('sha1').update(input).digest('hex').slice(0, 16)
+}
+
+/** Strip trailing metadata tags like `{tvdb-123}` / `[source]` + year parens
+ *  from a directory or filename title. */
+function cleanTitle(raw: string): string {
+  return raw
+    .replace(/\s*\{[^}]+\}/g, '')      // {tvdb-123}, {tmdb-456}
+    .replace(/\s*\[[^\]]+\]/g, '')     // [source], [HMAX]
+    .replace(/\s*\(\d{4}\)/, '')       // year
+    .trim()
+}
+
+/** Derive an episode display title from its filename. Looks for the segment
+ *  immediately following `SxxExx - `; falls back to a cleaned-up basename. */
+function episodeTitle(basename: string): string {
+  const stripped = basename.replace(/\.[^.]+$/, '')
+  const m = /S\d{2}E\d{2}\s*-\s*([^[]+?)(?:\s*\[|\s*-\s*\[|$)/i.exec(stripped)
+  if (m) return m[1].trim()
+  return cleanTitle(stripped)
+}
 
 async function walkDir(dir: string): Promise<string[]> {
   const files: string[] = []
@@ -54,101 +59,214 @@ async function walkDir(dir: string): Promise<string[]> {
   return files
 }
 
-async function scanMovies(roots: string[], cacheDir: string): Promise<MovieItem[]> {
-  const movies: MovieItem[] = []
-  for (const root of roots) {
-    const files = await walkDir(root).catch(() => [])
-    for (const file of files) {
-      const basename = path.basename(file, path.extname(file))
-      const match = MOVIE_RE.exec(basename)
-      if (!match) continue
-      const probeResult = await probe(file, cacheDir).catch(() => null)
-      if (!probeResult) continue
-      movies.push({
-        ...probeResult,
-        id: movieId(file),
-        title: match[1].trim(),
-        year: parseInt(match[2]),
-        filePath: file,
-      })
+/** Walk a movies root, probe, upsert into media_items.
+ *  Returns the set of ids that were seen (for soft-delete reconciliation). */
+async function scanMoviesRoot(
+  root: string,
+  cfg: ScanConfig,
+  media: MediaRepo,
+): Promise<Set<string>> {
+  const seen = new Set<string>()
+  const files = await walkDir(root).catch(() => [])
+  const candidates = files
+    .map(file => {
+      const base = path.basename(file, path.extname(file))
+      const m = MOVIE_RE.exec(base)
+      return m ? { file, base, m } : null
+    })
+    .filter((x): x is NonNullable<typeof x> => !!x)
+
+  const { stat } = await import('node:fs/promises')
+  await pMap(candidates, cfg.scanConcurrency, async ({ file, m }) => {
+    const p = await probe(file, cfg.cacheDir).catch(() => null)
+    if (!p) return
+    const st = await stat(file)
+    const id = hashId(file)
+    const upsert: MovieUpsert = {
+      id,
+      filePath: file,
+      title: m[1].trim(),
+      sortYear: parseInt(m[2], 10),
+      durationSec: p.duration,
+      resolution: p.resolution,
+      videoCodec: p.videoCodec,
+      container: p.container,
+      hdr: p.hdr,
+      audioTracks: p.audioTracks,
+      subtitleTracks: p.subtitleTracks,
+      mtimeMs: st.mtimeMs,
+      sizeBytes: st.size,
+      externalIds: parseIdsFromPath(file),
+      metadata: null,
     }
-  }
-  return movies
+    media.upsertMovie(upsert)
+    seen.add(id)
+  })
+  return seen
 }
 
-async function scanShows(
-  roots: string[],
-  cacheDir: string,
-): Promise<Map<string, { summary: ShowSummary; episodes: EpisodeItem[] }>> {
-  const shows = new Map<string, { summary: ShowSummary; episodes: EpisodeItem[] }>()
-  for (const root of roots) {
-    const showDirs = await readdir(root, { withFileTypes: true }).catch(() => [])
-    for (const showDir of showDirs) {
-      if (!showDir.isDirectory()) continue
-      const showTitle = showDir.name
-      const showId = movieId(path.join(root, showDir.name))
-      const files = await walkDir(path.join(root, showDir.name)).catch(() => [])
-      const episodes: EpisodeItem[] = []
-      for (const file of files) {
-        const basename = path.basename(file)
-        const epMatch = EPISODE_RE.exec(basename)
-        if (!epMatch) continue
-        const probeResult = await probe(file, cacheDir).catch(() => null)
-        if (!probeResult) continue
-        episodes.push({
-          ...probeResult,
-          id: movieId(file),
-          showId,
-          showTitle,
-          season: parseInt(epMatch[1]),
-          episode: parseInt(epMatch[2]),
-          title: basename.replace(/\.[^.]+$/, ''),
-          filePath: file,
+async function scanShowsRoot(
+  root: string,
+  cfg: ScanConfig,
+  media: MediaRepo,
+): Promise<Set<string>> {
+  const seen = new Set<string>()
+  const showDirs = await readdir(root, { withFileTypes: true }).catch(() => [])
+  const { stat } = await import('node:fs/promises')
+  for (const showDirEnt of showDirs) {
+    if (!showDirEnt.isDirectory()) continue
+    const showDirAbs = path.join(root, showDirEnt.name)
+    const showId = hashId(showDirAbs)
+    media.upsertShow({
+      id: showId,
+      title: cleanTitle(showDirEnt.name),
+      sortYear: null,
+      externalIds: parseIds(showDirEnt.name),
+      metadata: null,
+    })
+    seen.add(showId)
+
+    const files = await walkDir(showDirAbs).catch(() => [])
+    const epCands = files
+      .map(file => {
+        const base = path.basename(file)
+        const em = EPISODE_RE.exec(base)
+        return em ? { file, base, em } : null
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x)
+
+    await pMap(epCands, cfg.scanConcurrency, async ({ file, base, em }) => {
+      const p = await probe(file, cfg.cacheDir).catch(() => null)
+      if (!p) return
+      const st = await stat(file)
+      const id = hashId(file)
+      const insert: EpisodeUpsert = {
+        id,
+        parentId: showId,
+        filePath: file,
+        title: episodeTitle(base),
+        season: parseInt(em[1], 10),
+        episode: parseInt(em[2], 10),
+        durationSec: p.duration,
+        resolution: p.resolution,
+        videoCodec: p.videoCodec,
+        container: p.container,
+        hdr: p.hdr,
+        audioTracks: p.audioTracks,
+        subtitleTracks: p.subtitleTracks,
+        mtimeMs: st.mtimeMs,
+        sizeBytes: st.size,
+        externalIds: mergeIds(parseIds(showDirEnt.name), parseIds(base)),
+        metadata: null,
+      }
+      media.upsertEpisode(insert)
+      seen.add(id)
+    })
+  }
+  return seen
+}
+
+/** One-shot scan: walks roots, upserts rows, soft-deletes missing, rebuilds
+ *  collections. TMDB enrichment happens after (background). */
+export async function rescan(cfg: ScanConfig, deps: ScanDeps): Promise<void> {
+  const t0 = Date.now()
+  const seen = new Set<string>()
+  for (const r of cfg.moviesRoots) {
+    for (const id of await scanMoviesRoot(r, cfg, deps.media)) seen.add(id)
+  }
+  for (const r of cfg.showsRoots) {
+    for (const id of await scanShowsRoot(r, cfg, deps.media)) seen.add(id)
+  }
+  deps.media.softDeleteMissing(seen)
+
+  const movies = deps.media.listMovies()
+  const detected = detectCollections(movies)
+  const collections: Collection[] = detected.map(c => ({
+    id: hashId(c.name),
+    name: c.name,
+    movieIds: c.movies.map(m => m.id),
+  }))
+  deps.collections.replaceAll(collections)
+  console.log(`Library: ${movies.length} movies, ${deps.media.listShows().length} shows (scan ${Date.now() - t0}ms)`)
+
+  if (deps.tmdb) void backgroundEnrich(deps.tmdb, deps.media)
+}
+
+async function backgroundEnrich(tmdb: TmdbProvider, media: MediaRepo): Promise<void> {
+  const t0 = Date.now()
+  const movies = media.listMovies()
+  const shows = media.listShows()
+  const tasks: Promise<void>[] = []
+
+  for (const mv of movies) {
+    tasks.push((async () => {
+      const ids = mv.externalIds
+      let m = ids.tmdb ? await tmdb.movieByTmdbId(ids.tmdb) : null
+      if (!m && ids.imdb) m = await tmdb.movieByImdbId(ids.imdb)
+      if (!m) m = await tmdb.searchMovie(mv.title, mv.sortYear ?? undefined)
+      if (m) {
+        media.upsertMovie({
+          id: mv.id,
+          filePath: mv.filePath!,
+          title: mv.title,
+          sortYear: mv.sortYear,
+          durationSec: mv.durationSec!,
+          resolution: mv.resolution!,
+          videoCodec: mv.videoCodec!,
+          container: mv.container!,
+          hdr: mv.hdr!,
+          audioTracks: mv.audioTracks!,
+          subtitleTracks: mv.subtitleTracks!,
+          mtimeMs: mv.mtimeMs!,
+          sizeBytes: mv.sizeBytes!,
+          externalIds: mv.externalIds,
+          metadata: m,
         })
       }
-      if (episodes.length === 0) continue
-      const seasonMap = new Map<number, number>()
-      for (const ep of episodes) {
-        seasonMap.set(ep.season, (seasonMap.get(ep.season) ?? 0) + 1)
-      }
-      shows.set(showId, {
-        summary: {
-          id: showId,
-          title: showTitle,
-          seasons: [...seasonMap.entries()]
-            .map(([number, episodeCount]) => ({ number, episodeCount }))
-            .sort((a, b) => a.number - b.number),
-        },
-        episodes,
+    })())
+  }
+
+  for (const sh of shows) {
+    tasks.push((async () => {
+      const ids = sh.externalIds
+      let s = ids.tmdb ? await tmdb.showByTmdbId(ids.tmdb) : null
+      if (!s && ids.tvdb) s = await tmdb.showByTvdbId(ids.tvdb)
+      if (!s) s = await tmdb.searchShow(sh.title)
+      if (!s) return
+      media.upsertShow({
+        id: sh.id,
+        title: sh.title,
+        sortYear: sh.sortYear,
+        externalIds: sh.externalIds,
+        metadata: s,
       })
-    }
+      const eps = media.getEpisodes(sh.id)
+      await Promise.all(eps.map(async ep => {
+        const epMeta = s!.tmdbId ? await tmdb.episode(s!.tmdbId, ep.season!, ep.episode!) : null
+        if (!epMeta) return
+        media.upsertEpisode({
+          id: ep.id,
+          parentId: sh.id,
+          filePath: ep.filePath!,
+          title: epMeta.title ?? ep.title,
+          season: ep.season!,
+          episode: ep.episode!,
+          durationSec: ep.durationSec!,
+          resolution: ep.resolution!,
+          videoCodec: ep.videoCodec!,
+          container: ep.container!,
+          hdr: ep.hdr!,
+          audioTracks: ep.audioTracks!,
+          subtitleTracks: ep.subtitleTracks!,
+          mtimeMs: ep.mtimeMs!,
+          sizeBytes: ep.sizeBytes!,
+          externalIds: ep.externalIds,
+          metadata: epMeta,
+        })
+      }))
+    })())
   }
-  return shows
-}
 
-export async function createScanner(cfg: Config): Promise<LibraryIndex> {
-  let movies: MovieItem[] = []
-  let shows = new Map<string, { summary: ShowSummary; episodes: EpisodeItem[] }>()
-  let collections: Collection[] = []
-  const byId = new Map<string, MovieItem | EpisodeItem>()
-
-  const index: LibraryIndex = { movies, shows, collections, byId, rescan }
-
-  async function rescan() {
-    movies = await scanMovies(cfg.moviesRoots, cfg.cacheDir)
-    shows = await scanShows(cfg.showsRoots, cfg.cacheDir)
-    collections = detectCollections(movies)
-    byId.clear()
-    for (const m of movies) byId.set(m.id, m)
-    for (const show of shows.values()) {
-      for (const ep of show.episodes) byId.set(ep.id, ep)
-    }
-    index.movies = movies
-    index.shows = shows
-    index.collections = collections
-    console.log(`Library: ${movies.length} movies, ${shows.size} shows`)
-  }
-
-  await rescan()
-  return index
+  await Promise.all(tasks.map(p => p.catch(() => {/* non-fatal */})))
+  console.log(`Metadata enriched in ${Date.now() - t0}ms (background)`)
 }
