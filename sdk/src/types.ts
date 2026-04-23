@@ -62,6 +62,71 @@ export interface SubtitleTrack {
   embeddable: boolean
 }
 
+export interface ExternalIds {
+  tmdb?: number
+  tvdb?: number
+  imdb?: string
+}
+
+export interface Person {
+  name: string
+  role?: string
+  profilePath?: string | null
+}
+
+export interface MovieMetadata {
+  kind: 'movie'
+  tmdbId?: number
+  imdbId?: string
+  title: string
+  originalTitle?: string
+  tagline?: string
+  overview?: string
+  releaseDate?: string
+  runtimeMinutes?: number
+  rating?: number
+  ratingCount?: number
+  genres?: string[]
+  posterPath?: string | null
+  backdropPath?: string | null
+  cast?: Person[]
+  directors?: Person[]
+}
+
+export interface ShowMetadataInfo {
+  kind: 'show'
+  tmdbId?: number
+  tvdbId?: number
+  imdbId?: string
+  title: string
+  originalTitle?: string
+  tagline?: string
+  overview?: string
+  firstAirDate?: string
+  status?: string
+  rating?: number
+  ratingCount?: number
+  genres?: string[]
+  posterPath?: string | null
+  backdropPath?: string | null
+  network?: string
+}
+
+export interface EpisodeMetadata {
+  kind: 'episode'
+  tmdbId?: number
+  showTmdbId?: number
+  season: number
+  episode: number
+  title?: string
+  overview?: string
+  airDate?: string
+  rating?: number
+  ratingCount?: number
+  runtimeMinutes?: number
+  stillPath?: string | null
+}
+
 export interface MediaItem {
   id: string
   title: string
@@ -73,4 +138,50 @@ export interface MediaItem {
   audioTracks: AudioTrack[]
   subtitleTracks: SubtitleTrack[]
   container: string
+  externalIds?: ExternalIds
+  /** Provider-enriched metadata. Movie items get MovieMetadata, episode items
+   *  get EpisodeMetadata. Optional — absent when no provider configured / no
+   *  match found. */
+  metadata?: MovieMetadata | EpisodeMetadata
+}
+
+export interface SeasonSummary {
+  number: number
+  episodeCount: number
+}
+
+export interface ShowSummary {
+  id: string
+  title: string
+  seasons: SeasonSummary[]
+  externalIds?: ExternalIds
+  metadata?: ShowMetadataInfo
+}
+
+export interface User {
+  id: string
+  name: string
+  avatar: string | null
+  preferences: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+export interface WatchProgress {
+  mediaId: string
+  positionMs: number
+  durationMs: number
+  watched: boolean
+  updatedAt: number
+}
+
+export interface ContinueWatchingItem {
+  mediaId: string
+  kind: 'movie' | 'episode'
+  positionMs: number
+  durationMs: number
+  percent: number
+  updatedAt: number
+  media: MediaItem
+  show?: MediaItem
 }

@@ -9,4 +9,8 @@ export type {
   ClientCapabilities, PlaybackMethod, QualityProfile,
   HorizonError, HorizonWarning, HorizonErrorCode,
   SessionInfo, MediaItem, AudioTrack, SubtitleTrack,
+  ShowSummary, SeasonSummary,
+  ExternalIds, MovieMetadata, ShowMetadataInfo, EpisodeMetadata, Person,
+  User, WatchProgress, ContinueWatchingItem,
 } from './types.ts'
+export { tmdbImageUrl } from './metadata.ts'
