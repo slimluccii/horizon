@@ -8,3 +8,9 @@ playwright-report/
 media/
 .env
 .env.local
+
+# Swift build artifacts
+mac/.build/
+mac/.swiftpm/
+mac/*.xcodeproj/
+mac/DerivedData/
