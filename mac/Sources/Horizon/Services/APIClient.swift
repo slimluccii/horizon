@@ -3,7 +3,9 @@ import Foundation
 /// Base URL for the Horizon server. Overridable at launch via
 /// `HORIZON_SERVER_URL` env var so devs can point at a staging host.
 enum HorizonServer {
-    static let defaultUrl = "http://localhost:7777"
+    // Use 127.0.0.1 not `localhost`: macOS resolves `localhost` to ::1 first,
+    // and the server binds IPv4 only — `localhost` fails with ECONNREFUSED.
+    static let defaultUrl = "http://127.0.0.1:7777"
 
     static var baseURL: URL {
         let raw = ProcessInfo.processInfo.environment["HORIZON_SERVER_URL"] ?? defaultUrl
