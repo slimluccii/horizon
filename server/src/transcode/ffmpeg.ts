@@ -91,9 +91,11 @@ function buildTranscodeArgs(
   const args: string[] = []
   const renditionCodecs: string[] = []
 
-  // Hardware decode only when NOT tone-mapping: HDR frames live in VRAM and cannot
-  // pass through CPU software filters (tonemap). For non-HDR, hw decode is safe.
-  if (!needsToneMap && hwAccel.hwaccelDecode.length > 0) {
+  // Hardware decode — even when tonemapping. Decoded frames sit in GPU memory
+  // by default; the filter chain prepends `hwdownload` before the CPU tonemap
+  // when needed (see filterGraph below). For non-tonemap paths ffmpeg
+  // auto-downloads as required by the scale filter.
+  if (hwAccel.hwaccelDecode.length > 0) {
     args.push(...hwAccel.hwaccelDecode)
   }
 
@@ -123,14 +125,24 @@ function buildTranscodeArgs(
     `scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,` +
     `pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2`
 
+  // macOS videotoolbox hwaccel decodes directly to system memory (p010le for
+  // 10-bit HDR), so no hwdownload is needed — the comment about HDR frames
+  // being stuck in VRAM applied to CUDA/VAAPI, not VT. Tonemap consumes the
+  // software frames directly.
   const toneMapPrefix = needsToneMap ? buildToneMapPrefix(session.toneMap) : ''
 
-  // Build filter graph. For n>1 we need split=N to fan out to per-rendition scale.
-  // For n=1 (HDR-tonemap path now caps to single rendition) skip split — degenerate
-  // split=1 has tripped some ffmpeg builds; a straight chain is simpler anyway.
+  // Build filter graph. Scale FIRST, then tonemap — tonemap is CPU-bound and
+  // ~quadratic in pixel count, so scaling 4K→1080p up front cuts the work by
+  // ~4x. For n>1 we split after scale so every rendition shares the same
+  // tonemap pass. For n=1 (HDR-tonemap path caps to single rendition) skip
+  // split — degenerate split=1 has tripped some ffmpeg builds.
   let filterGraph: string
   if (n === 1) {
-    filterGraph = `[0:v]${toneMapPrefix}${scaleChain(profiles[0])}[sv0]`
+    filterGraph = `[0:v]${scaleChain(profiles[0])},${toneMapPrefix.replace(/,$/, '')}[sv0]`
+    if (!needsToneMap) {
+      // No tonemap — trailing comma from toneMapPrefix is gone; trim trailing `,`.
+      filterGraph = `[0:v]${scaleChain(profiles[0])}[sv0]`
+    }
   } else {
     const splitLabels = profiles.map((_, i) => `[tv${i}]`).join('')
     const splitNode = `[0:v]${toneMapPrefix}split=${n}${splitLabels}`

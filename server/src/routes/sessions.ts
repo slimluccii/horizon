@@ -42,8 +42,13 @@ function selectProfilesForPlayback(
 ): Profile[] {
   const [srcW] = (resolution ?? '1920x1080').split('x').map(s => parseInt(s, 10))
   let topProfile = selectInitialProfile(capabilities.maxBitrate, srcW)
-  if (decision.needsToneMap && topProfile.width > 1920) {
-    topProfile = { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080 }
+  if (decision.needsToneMap && topProfile.width > 1280) {
+    // Cap tonemap path to 720p: the software tonemap filter is CPU-bound and
+    // scales with pixel count. At 1080p we measure ~0.8x realtime on an Apple
+    // Silicon machine, which is not enough for AVPlayer to stay ahead of the
+    // buffer. At 720p we land at ~1x realtime. Once a GPU tonemap is wired in
+    // (libplacebo / zscale) this cap can come off.
+    topProfile = { name: '720p', videoBitrate: 4000, audioBitrate: 160, width: 1280, height: 720 }
   }
   return decision.method === 'transcode' && !decision.needsToneMap
     ? selectRenditionLadder(topProfile, maxRenditions, srcW)
