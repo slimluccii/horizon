@@ -246,8 +246,9 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
      */
     softDeleteMissing(seenIds) {
       const now = Date.now()
-      db.exec('CREATE TEMP TABLE seen (id TEXT PRIMARY KEY)')
+      db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
       try {
+        db.exec('DELETE FROM seen')
         const ins = db.prepare('INSERT OR IGNORE INTO seen (id) VALUES (?)')
         for (const id of seenIds) ins.run(id)
         const res = db.prepare(
@@ -258,7 +259,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
         ).run(now)
         return res.changes
       } finally {
-        db.exec('DROP TABLE seen')
+        db.exec('DROP TABLE IF EXISTS seen')
       }
     },
 

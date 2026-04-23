@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { MediaRepo } from '../repos/media.ts'
+import type { UserRepo } from '../repos/users.ts'
 import type { ProgressRepo } from '../repos/progress.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { ClientCapabilities } from '../transcode/decision.ts'
@@ -56,12 +57,20 @@ export function registerSessions(
   media: MediaRepo,
   sessions: SessionManager,
   progressRepo: ProgressRepo,
+  userRepo: UserRepo,
 ) {
   app.post<{ Body: CreateSessionBody }>('/sessions', async (req, reply) => {
     const { mediaId, capabilities, audioTrackIndex = 0, subtitleTrackIndex = null } = req.body
 
     const mediaItem = media.getById(mediaId)
     if (!mediaItem) return sendNotFound(reply, 'media-not-found', 'Media not found')
+
+    if (req.body.userId !== undefined) {
+      if (!userRepo.get(req.body.userId)) {
+        return reply.status(400).send({ error: 'User not found', code: 'no-user' })
+      }
+    }
+
     if (sessions.size() >= cfg.maxSessions) return overCapacity(reply, 'max-sessions', 'Server at capacity')
 
     // Build a ProbeResult-compatible view of the MediaItem. videoBitrate is

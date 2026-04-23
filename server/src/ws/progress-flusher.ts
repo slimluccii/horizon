@@ -25,11 +25,15 @@ export function createProgressFlusher(
     const cur = session.lastProgress
     if (!cur) return
     if (cur.positionMs === lastFlushedPos) return
-    progress.setProgress(session.userId, session.mediaId, {
-      positionMs: cur.positionMs,
-      durationMs: cur.durationMs,
-    })
-    lastFlushedPos = cur.positionMs
+    try {
+      progress.setProgress(session.userId, session.mediaId, {
+        positionMs: cur.positionMs,
+        durationMs: cur.durationMs,
+      })
+      lastFlushedPos = cur.positionMs
+    } catch (err) {
+      console.warn(`Session ${session.id}: progress flush failed — ${(err as Error).message}`)
+    }
   }
 
   const timer = setInterval(doFlush, FLUSH_INTERVAL_MS)
