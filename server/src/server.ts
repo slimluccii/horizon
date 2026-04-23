@@ -39,7 +39,7 @@ export async function buildServer(
 
   registerHealth(app, hwAccel)
   registerLibrary(app, repos.mediaRepo, repos.collectionsRepo)
-  registerSessions(app, cfg, hwAccel, repos.mediaRepo, sessions)
+  registerSessions(app, cfg, hwAccel, repos.mediaRepo, sessions, repos.progressRepo)
   registerPlaylists(app, sessions)
   registerSegments(app, hwAccel, sessions)
   registerMetadata(app, cfg)

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { MediaRepo } from '../repos/media.ts'
+import type { ProgressRepo } from '../repos/progress.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { ClientCapabilities } from '../transcode/decision.ts'
 import type { Profile } from '../transcode/profiles.ts'
@@ -10,6 +11,7 @@ import { selectInitialProfile, selectRenditionLadder } from '../transcode/profil
 import { createSessionDir, spawnFfmpeg } from '../transcode/ffmpeg.ts'
 import { extractSubtitles } from '../transcode/subtitles.ts'
 import { handleWsMessage } from '../ws/handler.ts'
+import { createProgressFlusher } from '../ws/progress-flusher.ts'
 import { sendNotFound, overCapacity } from './errors.ts'
 
 interface CreateSessionBody {
@@ -17,6 +19,8 @@ interface CreateSessionBody {
   capabilities: ClientCapabilities
   audioTrackIndex?: number
   subtitleTrackIndex?: number | null
+  userId?: string
+  startPositionMs?: number
 }
 
 const WS_PING_INTERVAL_MS = 15_000
@@ -51,6 +55,7 @@ export function registerSessions(
   hwAccel: HwAccel,
   media: MediaRepo,
   sessions: SessionManager,
+  progressRepo: ProgressRepo,
 ) {
   app.post<{ Body: CreateSessionBody }>('/sessions', async (req, reply) => {
     const { mediaId, capabilities, audioTrackIndex = 0, subtitleTrackIndex = null } = req.body
@@ -90,6 +95,7 @@ export function registerSessions(
       sessionDir: '',
       sessionReady: false,
       durationSec: mediaItem.durationSec ?? 0,
+      userId: req.body.userId ?? undefined,
     })
     session.sessionDir = await createSessionDir(session.id)
 
@@ -160,6 +166,8 @@ export function registerSessions(
       }))
     }
 
+    session._flusher = createProgressFlusher(session, progressRepo)
+
     socket.on('message', (raw: Buffer) => {
       let parsed: unknown
       try { parsed = JSON.parse(raw.toString()) } catch { return }
@@ -175,6 +183,9 @@ export function registerSessions(
     }, WS_PING_INTERVAL_MS)
 
     socket.on('close', () => {
+      session._flusher?.finalFlush()
+      session._flusher?.stop()
+      session._flusher = undefined
       clearInterval(pingInterval)
       if (session.state === 'destroyed') return
       session.state = 'detached'

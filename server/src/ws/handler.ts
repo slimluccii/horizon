@@ -4,11 +4,9 @@ import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import { PROFILES } from '../transcode/profiles.ts'
-import {
-  killFfmpeg, spawnFfmpeg, pauseFfmpeg, resumeFfmpeg, restartAtSegment, SEGMENT_DURATION_SEC,
-} from '../transcode/ffmpeg.ts'
-import { rm } from 'node:fs/promises'
-import path from 'node:path'
+import { pauseFfmpeg, resumeFfmpeg, SEGMENT_DURATION_SEC } from '../transcode/ffmpeg.ts'
+import { restartAtSegment, restartWithReset, withRestartLock } from '../transcode/restart.ts'
+import { parseWsMessage, type WsMessage } from './messages.ts'
 
 /** Convert a time in ms to the matching segment index (floor — start of seg). */
 function msToSegment(ms: number): number {
@@ -47,175 +45,172 @@ export function computeAbrAction(report: BandwidthReport, state: AbrState, now: 
   return 'none'
 }
 
-function send(session: Session, msg: object) {
+function send(session: Session, msg: object): void {
   session.wsSocket?.send(JSON.stringify(msg))
 }
 
-/**
- * Serialize ffmpeg restart paths. The kill → rm → spawn sequence is not safe
- * to run concurrently: SIGTERM is delivered synchronously but the process may
- * live up to 2s, and a second spawn would race it on shared r{N}/ paths.
- * Callers drop the request if another restart is in flight (client will retry).
- */
-async function withRestartLock(session: Session, fn: () => Promise<void>): Promise<boolean> {
-  if (session.ffmpegRestartInFlight) return false
-  session.ffmpegRestartInFlight = true
-  try {
-    await fn()
-    return true
-  } finally {
-    session.ffmpegRestartInFlight = false
-  }
+function sendError(session: Session, code: string, message: string): void {
+  send(session, { type: 'error', code, message })
 }
 
-async function restartFfmpegAtPosition(
+/**
+ * Restart ffmpeg with a new profile, resuming at `segNum` so the client
+ * doesn't jump back to the beginning on a quality switch.
+ */
+async function restartWithProfile(
   session: Session,
   hwAccel: HwAccel,
   newProfile: Profile,
+  segNum: number,
 ): Promise<boolean> {
   return withRestartLock(session, async () => {
     session.profiles = [newProfile]
-    // Resume at the current run's start segment — we don't track exact playback
-    // position, but restarting from where this run began means the client's
-    // already-buffered segments through that point are still valid.
-    await restartAtSegment(session, hwAccel, session.profiles, session.currentStartSegment)
-    send(session, {
-      type: 'quality-changed',
-      profile: newProfile,
-      reason: 'abr-restart',
-    })
+    await restartAtSegment(session, hwAccel, session.profiles, segNum)
+    send(session, { type: 'quality-changed', profile: newProfile, reason: 'user-override' })
   })
 }
 
-// WeakMap: auto-GC'd when session object is released from manager
+// WeakMap: auto-GC'd when session object is released from manager.
 const sessionAbrState = new WeakMap<Session, AbrState>()
 
+type Handler = (msg: WsMessage, ctx: Ctx) => void | Promise<void>
+
+interface Ctx {
+  session: Session
+  sessions: SessionManager
+  cfg: Config
+  hwAccel: HwAccel
+}
+
+const handlers: { [K in WsMessage['type']]: Handler } = {
+  hello(msg, { session }) {
+    if (msg.type !== 'hello') return
+    if (msg.reconnectToken && msg.reconnectToken !== session.reconnectToken) {
+      session.wsSocket?.close(4401, 'invalid-reconnect-token')
+      return
+    }
+    clearTimeout(session.graceTimer)
+    session.state = 'active'
+    send(session, {
+      type: 'session-ready',
+      method: session.method,
+      streamUrl: session.method === 'direct-play'
+        ? `/sessions/${session.id}/direct`
+        : `/sessions/${session.id}/stream.m3u8`,
+      profile: session.profiles[0],
+      reconnectToken: session.reconnectToken,
+    })
+  },
+
+  'bandwidth-report'() {
+    // Server-driven ABR is currently disabled. Each ABR-triggered restart
+    // rewrites init.mp4 with a new codec config; MSE has already cached the
+    // first init's bytes and rejects new segments with VTDecompression errors.
+    // Re-enable when we either:
+    //   • generate a stable init shared across qualities, or
+    //   • run multi-rendition encodes so the client can switch via HLS.
+    // The reports themselves are still useful as telemetry for the future
+    // implementation; we just don't act on them.
+  },
+
+  seek(msg, { session, hwAccel }) {
+    if (msg.type !== 'seek') return
+    // With the static VOD playlist the client (hls.js) seeks autonomously via
+    // HTTP segment requests; the segment route handles ffmpeg restart. This WS
+    // path remains as an explicit hint for clients that want to pre-warm the
+    // encoder before issuing segment requests.
+    session.seekPositionMs = msg.positionMs
+    if (session.method === 'direct-play') return
+    const segNum = msToSegment(msg.positionMs)
+    void withRestartLock(session, async () => {
+      await restartWithReset(session, hwAccel, session.profiles, session.selectedAudioTrack, segNum)
+      send(session, { type: 'seek-ready', positionMs: msg.positionMs })
+    }).then(started => {
+      if (!started) sendError(session, 'restart-busy', 'seek rejected: restart in progress')
+    }).catch(err => {
+      console.error(`Session ${session.id}: seek failed`, err)
+      sendError(session, 'seek-failed', String(err))
+    })
+  },
+
+  'quality-override'(msg, { session, hwAccel }) {
+    if (msg.type !== 'quality-override') return
+    if (session.method !== 'transcode') return
+    if (msg.bitrate === 0) {
+      sessionAbrState.delete(session)
+      return
+    }
+    const profile = PROFILES.find(p => p.videoBitrate <= msg.bitrate)
+    if (!profile) return
+    const idx = PROFILES.indexOf(profile)
+    const abrState = sessionAbrState.get(session)
+    if (abrState) abrState.currentProfileIndex = idx
+    // Resume at the caller-provided playback position; fall back to the current
+    // run's start segment if the client didn't report one.
+    const segNum = msg.positionMs !== undefined
+      ? msToSegment(msg.positionMs)
+      : session.currentStartSegment
+    restartWithProfile(session, hwAccel, profile, segNum).then(started => {
+      if (!started) sendError(session, 'restart-busy', 'quality-override rejected: restart in progress')
+    }).catch(err => {
+      console.error(`Session ${session.id}: quality-override failed`, err)
+      sendError(session, 'quality-failed', String(err))
+    })
+  },
+
+  'audio-track'(msg, { session, hwAccel }) {
+    if (msg.type !== 'audio-track') return
+    session.selectedAudioTrack = msg.index
+    if (session.method === 'direct-play') {
+      send(session, { type: 'track-changed', audioTrackIndex: msg.index })
+      return
+    }
+    // Prefer client-reported playback position; fall back to last seek offset.
+    const segNum = msg.positionMs !== undefined
+      ? msToSegment(msg.positionMs)
+      : msToSegment(session.seekPositionMs)
+    void withRestartLock(session, async () => {
+      await restartWithReset(session, hwAccel, session.profiles, msg.index, segNum)
+      send(session, { type: 'track-changed', audioTrackIndex: msg.index })
+    }).then(started => {
+      if (!started) sendError(session, 'restart-busy', 'audio-track rejected: restart in progress')
+    }).catch(err => {
+      console.error(`Session ${session.id}: audio-track failed`, err)
+      sendError(session, 'audio-track-failed', String(err))
+    })
+  },
+
+  'subtitle-track'(msg, { session }) {
+    if (msg.type !== 'subtitle-track') return
+    session.selectedSubtitleTrack = msg.index
+    send(session, { type: 'track-changed', subtitleTrackIndex: msg.index })
+  },
+
+  park(_msg, { session }) {
+    session.state = 'parked'
+    pauseFfmpeg(session)
+  },
+
+  resume(_msg, { session }) {
+    session.state = 'active'
+    resumeFfmpeg(session)
+  },
+
+  progress(msg, { session }) {
+    if (msg.type !== 'progress') return
+    session._flusher?.record(msg.positionMs, msg.durationMs)
+  },
+}
+
 export function handleWsMessage(
-  msg: any,
+  raw: unknown,
   session: Session,
   sessions: SessionManager,
   cfg: Config,
   hwAccel: HwAccel,
-) {
-  switch (msg.type) {
-    case 'hello': {
-      // reconnect: verify token
-      if (msg.reconnectToken && msg.reconnectToken !== session.reconnectToken) {
-        session.wsSocket?.close(4401, 'invalid-reconnect-token')
-        return
-      }
-      clearTimeout(session.graceTimer)
-      session.state = 'active'
-      // re-send session-ready
-      send(session, {
-        type: 'session-ready',
-        method: session.method,
-        streamUrl: session.method === 'direct-play'
-          ? `/sessions/${session.id}/direct`
-          : `/sessions/${session.id}/stream.m3u8`,
-        profile: session.profiles[0],
-        reconnectToken: session.reconnectToken,
-      })
-      break
-    }
-
-    case 'bandwidth-report': {
-      // Server-driven ABR is currently disabled. Each ABR-triggered restart
-      // rewrites init.mp4 with a new codec config; MSE has already cached the
-      // first init's bytes and rejects the new segments with VTDecompression
-      // errors. Re-enable when we either:
-      //   • generate a stable init shared across qualities, or
-      //   • run multi-rendition encodes so the client can switch via HLS.
-      // The reports themselves are still useful as telemetry for the future
-      // implementation; we just don't act on them.
-      void msg
-      break
-    }
-
-    case 'seek': {
-      // Note: with the static VOD playlist the client (hls.js) seeks
-      // autonomously via HTTP segment requests; the segment route handles
-      // ffmpeg restart. This WS path remains as an explicit hint for clients
-      // that want to pre-warm the encoder before issuing segment requests.
-      const posMs = typeof msg.positionMs === 'number' ? msg.positionMs : 0
-      session.seekPositionMs = posMs
-      if (session.method === 'direct-play') break // client seeks natively
-      const segNum = msToSegment(posMs)
-      withRestartLock(session, async () => {
-        killFfmpeg(session)
-        await Promise.all(session.profiles.map((_, r) =>
-          rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
-        ))
-        session.currentStartSegment = segNum
-        await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
-        send(session, { type: 'seek-ready', positionMs: posMs })
-      }).then(started => {
-        if (!started) send(session, { type: 'error', code: 'restart-busy', message: 'seek rejected: restart in progress' })
-      }).catch(err => {
-        console.error(`Session ${session.id}: seek failed`, err)
-        send(session, { type: 'error', code: 'seek-failed', message: String(err) })
-      })
-      break
-    }
-
-    case 'quality-override': {
-      if (session.method !== 'transcode') break
-      if (msg.bitrate === 0) {
-        // resume ABR: remove state so next report recomputes
-        sessionAbrState.delete(session)
-        break
-      }
-      const profile = PROFILES.find(p => p.videoBitrate <= msg.bitrate)
-      if (!profile) break
-      const idx = PROFILES.indexOf(profile)
-      const abrState = sessionAbrState.get(session)
-      if (abrState) abrState.currentProfileIndex = idx
-      restartFfmpegAtPosition(session, hwAccel, profile).catch(console.error)
-      send(session, { type: 'quality-changed', profile, reason: 'user-override' })
-      break
-    }
-
-    case 'audio-track': {
-      if (typeof msg.index !== 'number') break
-      session.selectedAudioTrack = msg.index
-      if (session.method === 'direct-play') {
-        send(session, { type: 'track-changed', audioTrackIndex: msg.index })
-        break
-      }
-      withRestartLock(session, async () => {
-        killFfmpeg(session)
-        await Promise.all(session.profiles.map((_, r) =>
-          rm(path.join(session.sessionDir, `r${r}`), { recursive: true, force: true })
-        ))
-        // Resume from current playback position (best estimate = last seek offset).
-        session.currentStartSegment = msToSegment(session.seekPositionMs)
-        await spawnFfmpeg(session, hwAccel, session.profiles, session.selectedAudioTrack)
-        send(session, { type: 'track-changed', audioTrackIndex: msg.index })
-      }).then(started => {
-        if (!started) send(session, { type: 'error', code: 'restart-busy', message: 'audio-track rejected: restart in progress' })
-      }).catch(err => {
-        console.error(`Session ${session.id}: audio-track failed`, err)
-        send(session, { type: 'error', code: 'audio-track-failed', message: String(err) })
-      })
-      break
-    }
-
-    case 'subtitle-track': {
-      session.selectedSubtitleTrack = typeof msg.index === 'number' ? msg.index : null
-      send(session, { type: 'track-changed', subtitleTrackIndex: session.selectedSubtitleTrack })
-      break
-    }
-
-    case 'park': {
-      session.state = 'parked'
-      pauseFfmpeg(session)
-      break
-    }
-
-    case 'resume': {
-      session.state = 'active'
-      resumeFfmpeg(session)
-      break
-    }
-  }
+): void {
+  const msg = parseWsMessage(raw)
+  if (!msg) return // unknown / malformed → silently drop (telemetry could log here)
+  const handler = handlers[msg.type]
+  void handler(msg, { session, sessions, cfg, hwAccel })
 }
