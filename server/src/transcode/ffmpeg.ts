@@ -157,6 +157,23 @@ function buildTranscodeArgs(
       `-b:v:${i}`, `${p.videoBitrate}k`,
       `-maxrate:v:${i}`, `${Math.round(p.videoBitrate * 1.1)}k`,
       `-bufsize:v:${i}`, `${p.videoBitrate * 2}k`,
+      // Force 8-bit 4:2:0 at the encoder — filter_complex already emits yuv420p
+      // but some VideoToolbox builds re-derive pix_fmt from input metadata and
+      // emit 10-bit when the source was HDR. That breaks avc1.640028 clients
+      // (AVFoundation) which expect 8-bit only and fails silently with -12927.
+      `-pix_fmt:v:${i}`, 'yuv420p',
+      // Explicit SDR/BT.709 color tags on the output stream. Without these,
+      // the encoder copies BT.2020 / SMPTE2084 from the HDR source into the
+      // avcC box even after tonemap — AVFoundation then refuses the stream
+      // because the declared avc1.640028 codec string can't carry HDR.
+      `-color_primaries:v:${i}`, 'bt709',
+      `-color_trc:v:${i}`, 'bt709',
+      `-colorspace:v:${i}`, 'bt709',
+      `-color_range:v:${i}`, 'tv',
+      // Pin H.264 profile/level to High@4.0 so the avcC box matches the
+      // codec string advertised in the master playlist.
+      `-profile:v:${i}`, 'high',
+      `-level:v:${i}`, '4.0',
       // GOP in frames. Assumes ~24fps source (common for film content). Matches
       // SEGMENT_DURATION_SEC so every seg starts with a keyframe — required for
       // independent_segments HLS. Higher-fps sources will just have more

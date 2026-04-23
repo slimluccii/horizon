@@ -10,9 +10,13 @@ export function registerPlaylists(app: FastifyInstance, sessions: SessionManager
     const session = sessions.get(req.params.id)
     if (!session) return sendNotFound(reply, 'session-not-found', 'Session not found')
 
-    if (session.method === 'direct-stream' || session.method === 'partial-transcode') {
-      // Single-rendition served as static VOD; segment URIs resolve under
-      // /sessions/:id/renditions/0/... thanks to the explicit path prefix.
+    // When there's exactly one rendition, skip the master wrapper and serve
+    // the variant playlist directly. AVFoundation silently refuses any
+    // multivariant playlist pointing at our fMP4 variants with -12927 even
+    // though the same variant plays fine when loaded directly — the master
+    // step adds zero value for a single rendition. hls.js treats a
+    // variant-as-master equivalently.
+    if (session.profiles.length <= 1) {
       const playlist = buildRenditionPlaylist(session.durationSec, 'renditions/0/')
       return reply.header('Content-Type', HLS_CONTENT_TYPE).send(playlist)
     }

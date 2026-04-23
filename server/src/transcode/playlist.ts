@@ -35,17 +35,25 @@ export function buildRenditionPlaylist(durationSec: number, segPathPrefix = ''):
 
 /** Build a HLS master playlist that points at one rendition variant per profile. */
 export function buildMasterPlaylist(
-  sessionId: string,
+  _sessionId: string,
   profiles: Profile[],
   renditionCodecs: string[],
 ): string {
+  // Variant URIs are relative to the master playlist URL. Some clients
+  // (AVFoundation) refuse absolute-path variants and fail silently with
+  // CoreMediaErrorDomain -12927 — hls.js and ffplay accept either.
   const lines = ['#EXTM3U', '#EXT-X-VERSION:6', '']
   for (let i = 0; i < profiles.length; i++) {
     const p = profiles[i]
     const bw = (p.videoBitrate + p.audioBitrate) * 1000
-    const vCodec = renditionCodecs[i] ?? 'avc1.640028'
-    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${p.width}x${p.height},CODECS="${vCodec},mp4a.40.2"`)
-    lines.push(`/sessions/${sessionId}/renditions/${i}.m3u8`)
+    // Deliberately NOT emitting CODECS: h264_videotoolbox writes an avcC box
+    // without a valid profile/level in some builds, so AVFoundation fails
+    // strict CODECS validation (`avc1.640028` declared but init.mp4 reports
+    // profile=unknown) with CoreMediaErrorDomain -12927. Letting the player
+    // probe the init segment is slower but correct on every client.
+    void renditionCodecs
+    lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${bw},RESOLUTION=${p.width}x${p.height}`)
+    lines.push(`renditions/${i}.m3u8`)
   }
   return lines.join('\n')
 }
