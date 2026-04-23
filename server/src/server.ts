@@ -15,6 +15,7 @@ import { registerPlaylists } from './routes/playlists.ts'
 import { registerSegments } from './routes/segments.ts'
 import { registerMetadata } from './routes/metadata.ts'
 import { registerUsers } from './routes/users.ts'
+import { registerProgress } from './routes/progress.ts'
 
 export interface Repos {
   mediaRepo: MediaRepo
@@ -43,6 +44,7 @@ export async function buildServer(
   registerSegments(app, hwAccel, sessions)
   registerMetadata(app, cfg)
   registerUsers(app, repos.userRepo)
+  registerProgress(app, repos.userRepo, repos.progressRepo)
 
   return app
 }
