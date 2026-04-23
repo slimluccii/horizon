@@ -27,7 +27,7 @@ CREATE TABLE media_items (
   season          INTEGER,
   episode         INTEGER,
 
-  file_path       TEXT UNIQUE,
+  file_path       TEXT,
   duration_sec    REAL,
   resolution      TEXT,
   video_codec     TEXT,
