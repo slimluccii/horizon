@@ -36,3 +36,25 @@ describe('config', () => {
     expect(cfg.maxSessions).toBe(2)
   })
 })
+
+describe('loadConfig — database', () => {
+  it('defaults dbPath to <cacheDir>/horizon.db and threshold to 90', () => {
+    delete process.env.HORIZON_DB_PATH
+    delete process.env.HORIZON_WATCHED_THRESHOLD_PCT
+    const { loadConfig } = require('../src/config.ts')
+    const cfg = loadConfig()
+    expect(cfg.dbPath.endsWith('/horizon.db')).toBe(true)
+    expect(cfg.watchedThresholdPct).toBe(90)
+  })
+
+  it('respects overrides', () => {
+    process.env.HORIZON_DB_PATH = '/tmp/custom.db'
+    process.env.HORIZON_WATCHED_THRESHOLD_PCT = '75'
+    const { loadConfig } = require('../src/config.ts')
+    const cfg = loadConfig()
+    expect(cfg.dbPath).toBe('/tmp/custom.db')
+    expect(cfg.watchedThresholdPct).toBe(75)
+    delete process.env.HORIZON_DB_PATH
+    delete process.env.HORIZON_WATCHED_THRESHOLD_PCT
+  })
+})
