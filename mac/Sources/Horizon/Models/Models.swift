@@ -22,6 +22,7 @@ struct HdrFlags: Codable, Hashable {
     let dv: Bool
     let hdr10: Bool
     let hdr10plus: Bool
+    let dvProfile: Int?
 }
 
 struct AudioTrack: Codable, Hashable {
@@ -107,21 +108,32 @@ struct LooseMetadata: Codable, Hashable {
     let tmdbId: Int?
 }
 
+/// Matches the unified `media_items` row the server returns. Most fields are
+/// optional because the server uses the same shape for movies (file-backed),
+/// shows (container, no file) and episodes (file-backed with parent link).
+/// Clients inspect `kind` to decide which fields to read.
 struct MediaItem: Codable, Identifiable, Hashable {
     let id: String
+    let kind: String                 // "movie" | "show" | "episode"
     let title: String
-    let year: Int?
+    let parentId: String?
+    let sortYear: Int?
     let season: Int?
     let episode: Int?
-    let duration: Double
-    let resolution: String
-    let videoCodec: String
-    let hdr: HdrFlags
-    let audioTracks: [AudioTrack]
-    let subtitleTracks: [SubtitleTrack]
-    let container: String
+    let durationSec: Double?
+    let resolution: String?
+    let videoCodec: String?
+    let container: String?
+    let hdr: HdrFlags?
+    let audioTracks: [AudioTrack]?
+    let subtitleTracks: [SubtitleTrack]?
     let externalIds: ExternalIds?
     let metadata: LooseMetadata?
+
+    // Convenience — view code reads these; keeps call sites clean.
+    var year: Int? { sortYear }
+    var duration: Double { durationSec ?? 0 }
+    var hasDolbyVision: Bool { hdr?.dv ?? false }
 }
 
 struct SeasonSummary: Codable, Hashable {

@@ -275,13 +275,15 @@ struct EpisodeRow: View {
 
                 HStack(spacing: 10) {
                     Text("\(Int(episode.duration / 60))m")
-                    dot
-                    Text(episode.resolution)
-                    if episode.hdr.dv {
+                    if let res = episode.resolution, !res.isEmpty {
+                        dot
+                        Text(res)
+                    }
+                    if episode.hasDolbyVision {
                         dot
                         Text("Dolby Vision").foregroundStyle(Color(red: 167/255, green: 139/255, blue: 250/255)).bold()
                     }
-                    if let codec = episode.audioTracks.first?.codec {
+                    if let codec = episode.audioTracks?.first?.codec {
                         dot
                         Text(codec.uppercased())
                     }

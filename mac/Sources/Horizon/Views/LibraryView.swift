@@ -115,12 +115,14 @@ struct LibraryView: View {
                 if let y = hero.year { Text("\(String(y))").foregroundStyle(.horizonMutedHi) }
                 dot
                 Text("\(Int(hero.duration / 60)) min").foregroundStyle(.horizonMutedHi)
-                if hero.hdr.dv {
+                if hero.hasDolbyVision {
                     dot
                     badge("Dolby Vision")
                 }
-                dot
-                Text(hero.videoCodec.uppercased()).foregroundStyle(.horizonMutedHi)
+                if let codec = hero.videoCodec, !codec.isEmpty {
+                    dot
+                    Text(codec.uppercased()).foregroundStyle(.horizonMutedHi)
+                }
             }
             .font(.horizon(size: 13, weight: .regular))
 
@@ -191,7 +193,7 @@ struct LibraryView: View {
                 HStack(spacing: 16) {
                     ForEach(cwItems) { item in
                         NavigationLink(value: Route.play(item.mediaId)) {
-                            LandscapeCard(item: item, width: 300, onTap: {})
+                            LandscapeCard(item: item, width: 300)
                         }
                         .buttonStyle(.plain)
                     }
@@ -264,7 +266,7 @@ struct LibraryView: View {
                     LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 28) {
                         ForEach(movies) { m in
                             NavigationLink(value: Route.play(m.id)) {
-                                LargePoster(source: .movie(m), width: 180, showMeta: true, onTap: {})
+                                LargePoster(source: .movie(m), width: 180, showMeta: true)
                             }
                             .buttonStyle(.plain)
                         }
@@ -277,7 +279,7 @@ struct LibraryView: View {
                     LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 28) {
                         ForEach(shows) { s in
                             NavigationLink(value: Route.show(s.id)) {
-                                LargePoster(source: .show(s), width: 180, showMeta: true, onTap: {})
+                                LargePoster(source: .show(s), width: 180, showMeta: true)
                             }
                             .buttonStyle(.plain)
                         }
@@ -296,7 +298,7 @@ struct LibraryView: View {
                                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 28) {
                                     ForEach(col.movies) { m in
                                         NavigationLink(value: Route.play(m.id)) {
-                                            LargePoster(source: .movie(m), width: 170, showMeta: true, onTap: {})
+                                            LargePoster(source: .movie(m), width: 170, showMeta: true)
                                         }
                                         .buttonStyle(.plain)
                                     }
@@ -327,7 +329,7 @@ struct LibraryView: View {
         async let sh = try? client.api.listShows()
         async let co = try? client.api.listCollections()
         async let cw: [ContinueWatchingItem]? = {
-            guard let id = client.activeUser?.id else { return nil }
+            guard let id = await client.activeUser?.id else { return nil }
             return try? await client.api.continueWatching(userId: id)
         }()
         let (mv, sv, cv, cwv) = await (m, sh, co, cw)
