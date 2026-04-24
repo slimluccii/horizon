@@ -11,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import network.luuk.horizontv.app.LocalAppState
+import network.luuk.horizontv.ui.LibraryScreen
 import network.luuk.horizontv.ui.ProfileListScreen
 import network.luuk.horizontv.ui.Routes
 
@@ -30,7 +31,10 @@ class MainActivity : ComponentActivity() {
                         })
                     }
                     composable(Routes.LIBRARY) {
-                        Text("library — wired in Task 9")
+                        LibraryScreen(
+                            onShowClick  = { id -> nav.navigate(Routes.showDetail(id)) },
+                            onMovieClick = { id, resume -> nav.navigate(Routes.player(id, resume)) },
+                        )
                     }
                     composable(
                         Routes.SHOW_DETAIL,
