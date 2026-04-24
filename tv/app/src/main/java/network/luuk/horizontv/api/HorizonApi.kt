@@ -24,6 +24,13 @@ class HorizonApi(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
+    @Volatile
+    private var activeUserId: String? = null
+
+    fun setActiveUser(id: String?) {
+        activeUserId = id
+    }
+
     // ----- users -----
     suspend fun listUsers(): List<User> = get("/users", serializer())
     suspend fun createUser(body: CreateUserBody): User = post("/users", body, serializer())
@@ -32,18 +39,18 @@ class HorizonApi(
     // ----- library -----
     suspend fun listMovies(): List<MediaItem> = get("/library/movies", serializer())
     suspend fun listShows(): List<ShowSummary> = get("/library/shows", serializer())
-    suspend fun listCollections(): List<Collection> = get("/library/collections", serializer())
+    suspend fun listCollections(): List<Collection> = get("/library/movies/collections", serializer())
 
     suspend fun getShow(id: String): ShowSummary = get("/library/shows/$id", serializer())
     suspend fun listEpisodes(showId: String, season: Int): List<MediaItem> =
-        get("/library/shows/$showId/seasons/$season/episodes", serializer())
+        get("/library/shows/$showId/seasons/$season", serializer())
 
     // ----- progress -----
     suspend fun continueWatching(userId: String): List<ContinueWatchingItem> =
-        get("/progress/continue-watching?userId=$userId", serializer())
+        get("/users/$userId/continue-watching", serializer())
 
     suspend fun getProgress(userId: String, mediaId: String): WatchProgress? =
-        try { get("/progress/$userId/$mediaId", serializer<WatchProgress>()) }
+        try { get("/users/$userId/progress/$mediaId", serializer<WatchProgress>()) }
         catch (e: ApiException) { if (e.status == 404) null else throw e }
 
     // ----- sessions -----
@@ -75,7 +82,7 @@ class HorizonApi(
 
     private suspend fun <T> exec(req: Request.Builder, ser: KSerializer<T>): T =
         withContext(Dispatchers.IO) {
-            val userId = currentUserIdHeader.get()
+            val userId = activeUserId
             if (userId != null) req.header("X-Horizon-User", userId)
             okHttp.newCall(req.build()).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
@@ -92,11 +99,6 @@ class HorizonApi(
         }
 
     companion object {
-        /** Per-thread active user id — set by AppState, picked up by each request. */
-        private val currentUserIdHeader = ThreadLocal<String?>()
-
-        fun setActiveUserForRequests(id: String?) { currentUserIdHeader.set(id) }
-
         fun defaultClient(): OkHttpClient {
             val logger = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
             return OkHttpClient.Builder()
