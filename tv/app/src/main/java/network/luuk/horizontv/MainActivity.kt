@@ -14,6 +14,7 @@ import network.luuk.horizontv.app.LocalAppState
 import network.luuk.horizontv.ui.LibraryScreen
 import network.luuk.horizontv.ui.ProfileListScreen
 import network.luuk.horizontv.ui.Routes
+import network.luuk.horizontv.ui.ShowDetailScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,8 +40,12 @@ class MainActivity : ComponentActivity() {
                     composable(
                         Routes.SHOW_DETAIL,
                         arguments = listOf(navArgument("showId") { type = NavType.StringType }),
-                    ) {
-                        Text("show detail — wired in Task 10")
+                    ) { entry ->
+                        val id = entry.arguments!!.getString("showId")!!
+                        ShowDetailScreen(
+                            showId = id,
+                            onPlayEpisode = { episodeId -> nav.navigate(Routes.player(episodeId)) },
+                        )
                     }
                     composable(
                         Routes.PLAYER,
