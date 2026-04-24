@@ -11,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import network.luuk.horizontv.app.LocalAppState
+import network.luuk.horizontv.ui.ProfileListScreen
 import network.luuk.horizontv.ui.Routes
 
 class MainActivity : ComponentActivity() {
@@ -22,7 +23,11 @@ class MainActivity : ComponentActivity() {
                 val nav = rememberNavController()
                 NavHost(nav, startDestination = Routes.PROFILE_LIST) {
                     composable(Routes.PROFILE_LIST) {
-                        Text("profile list — wired in Task 8")
+                        ProfileListScreen(onUserPicked = {
+                            nav.navigate(Routes.LIBRARY) {
+                                popUpTo(Routes.PROFILE_LIST) { inclusive = true }
+                            }
+                        })
                     }
                     composable(Routes.LIBRARY) {
                         Text("library — wired in Task 9")
