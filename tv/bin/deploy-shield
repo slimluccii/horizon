@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SHIELD_IP="${SHIELD_IP:-${1:-}}"
+if [ -z "${SHIELD_IP}" ]; then
+  echo "usage: SHIELD_IP=<ip> $0   OR   $0 <ip>" >&2
+  exit 2
+fi
+
+cd "$(dirname "$0")/.."
+
+adb connect "${SHIELD_IP}:5555"
+./gradlew :app:installDebug
+adb -s "${SHIELD_IP}:5555" shell monkey \
+  -p network.luuk.horizontv \
+  -c android.intent.category.LEANBACK_LAUNCHER 1
