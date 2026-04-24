@@ -1224,7 +1224,7 @@ class AppState(
 
     fun setActiveUser(user: User?) {
         activeUser = user
-        HorizonApi.setActiveUserForRequests(user?.id)
+        api.setActiveUser(user?.id)
     }
 }
 
