@@ -72,7 +72,7 @@ fun LibraryScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LibraryTab.values().forEach { t ->
+            LibraryTab.entries.forEach { t ->
                 FilterChip(
                     selected = tab == t,
                     onClick = { tab = t },

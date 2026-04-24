@@ -38,8 +38,10 @@ fun ShowDetailScreen(
         try {
             val s = state.api.getShow(showId)
             show = s
+            // Let the season-keyed LaunchedEffect below fetch episodes — it
+            // fires on the null→firstSeason transition. Doing the fetch here
+            // too would double the initial request.
             season = s.seasons.firstOrNull()?.number
-            if (season != null) episodes = state.api.listEpisodes(showId, season!!)
         } catch (e: Throwable) { error = e.message }
     }
 
