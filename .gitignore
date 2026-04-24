@@ -14,3 +14,13 @@ mac/.build/
 mac/.swiftpm/
 mac/*.xcodeproj/
 mac/DerivedData/
+
+# Android TV client build artifacts
+tv/.gradle/
+tv/.idea/
+tv/build/
+tv/app/build/
+tv/local.properties
+tv/captures/
+tv/*.iml
+tv/app/*.iml
