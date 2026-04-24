@@ -3,7 +3,6 @@ package network.luuk.horizontv
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -12,6 +11,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import network.luuk.horizontv.app.LocalAppState
 import network.luuk.horizontv.ui.LibraryScreen
+import network.luuk.horizontv.ui.PlayerScreen
 import network.luuk.horizontv.ui.ProfileListScreen
 import network.luuk.horizontv.ui.Routes
 import network.luuk.horizontv.ui.ShowDetailScreen
@@ -56,8 +56,14 @@ class MainActivity : ComponentActivity() {
                                 defaultValue = false
                             },
                         ),
-                    ) {
-                        Text("player — wired in Task 12")
+                    ) { entry ->
+                        val id = entry.arguments!!.getString("mediaId")!!
+                        val resume = entry.arguments!!.getBoolean("resume", false)
+                        PlayerScreen(
+                            mediaId = id,
+                            resumeDefault = resume,
+                            onBack = { nav.popBackStack() },
+                        )
                     }
                 }
             }
