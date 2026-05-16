@@ -1,0 +1,228 @@
+/**
+ * PlaybackOrchestrator — owns the create-Session flow end-to-end. Sits above
+ * SessionManager (storage) and below the HTTP route (transport).
+ *
+ * Inputs: a StartPlaybackInput (mediaId + capabilities + options).
+ * Output: { info, ready }. `info` is synchronous and includes the streamUrl;
+ *         `ready` is a Promise that resolves after ffmpeg signals
+ *         session-ready (or rejects on spawn failure, after the Session has
+ *         already been destroyed).
+ *
+ * Validation errors surface as `Error & { code }`:
+ *   - 'media-not-found' → 404
+ *   - 'user-not-found'  → 400
+ *   - 'max-sessions'    → 503
+ *
+ * The Spawner type is the seam for tests — production wires it to
+ * `spawnFfmpeg`; tests inject a fake that resolves/rejects on cue.
+ *
+ * See CONTEXT.md → PlaybackOrchestrator / Spawner / ProbeView.
+ */
+import type { Config } from '../config.ts'
+import type { HwAccel } from '../transcode/hwaccel.ts'
+import type { MediaRepo, MediaItemRow } from '../repos/media.ts'
+import type { UserRepo } from '../repos/users.ts'
+import type { SessionManager } from './manager.ts'
+import type { Session } from './types.ts'
+import type { ProbeResult } from '../scanner/probe.ts'
+import type { Profile } from '../transcode/profiles.ts'
+import type { PlaybackPlan, ClientCapabilities, PlaybackMethod } from '../transcode/plan.ts'
+import type { RenderContext } from '../transcode/render.ts'
+import { buildPlan } from '../transcode/plan.ts'
+import {
+  createSessionDir,
+  spawnFfmpeg as defaultSpawnFfmpeg,
+} from '../transcode/ffmpeg.ts'
+import { extractSubtitles as defaultExtractSubtitles } from '../transcode/subtitles.ts'
+import { createSessionRuntime } from './runtime.ts'
+
+export interface StartPlaybackInput {
+  mediaId: string
+  capabilities: ClientCapabilities
+  audioTrackIndex?: number
+  subtitleTrackIndex?: number | null
+  userId?: string
+  startPositionMs?: number
+}
+
+export interface PlaybackSessionInfo {
+  sessionId: string
+  method: PlaybackMethod
+  streamUrl: string
+  wsUrl: string
+  profiles: Profile[]
+  selectedAudioTrack: number
+  selectedSubtitleTrack: number | null
+  reconnectToken: string
+}
+
+export interface StartPlaybackResult {
+  info: PlaybackSessionInfo
+  /** Resolves when ffmpeg has produced enough output for the client to begin
+   *  playback, or immediately for direct-play. Rejects on spawn failure
+   *  (Session is already destroyed by the time this rejects). */
+  ready: Promise<void>
+}
+
+export interface PlaybackOrchestrator {
+  startPlayback(input: StartPlaybackInput): StartPlaybackResult
+}
+
+/** Spawn primitive — the injection seam. Real impl is `spawnFfmpeg`; tests
+ *  pass a fake. */
+export type Spawner = (
+  session: Session,
+  hwAccel: HwAccel,
+  plan: PlaybackPlan,
+  ctx: RenderContext,
+) => Promise<void>
+
+export type SubtitleExtractor = typeof defaultExtractSubtitles
+
+export interface PlaybackOrchestratorDeps {
+  cfg: Config
+  hwAccel: HwAccel
+  media: MediaRepo
+  users: UserRepo
+  sessions: SessionManager
+  /** Injection point for tests. Defaults to the real `spawnFfmpeg`. */
+  spawner?: Spawner
+  /** Injection point for tests. Defaults to the real `extractSubtitles`. */
+  extractSubtitles?: SubtitleExtractor
+}
+
+class PlaybackError extends Error {
+  constructor(public code: 'media-not-found' | 'user-not-found' | 'max-sessions', message: string) {
+    super(message)
+  }
+}
+
+export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): PlaybackOrchestrator {
+  const { cfg, hwAccel, media, users, sessions } = deps
+  const spawner: Spawner = deps.spawner ?? defaultSpawnFfmpeg
+  const extractSubtitles: SubtitleExtractor = deps.extractSubtitles ?? defaultExtractSubtitles
+
+  return {
+    startPlayback(input) {
+      // Orchestrator needs filePath for ffmpeg spawn — use getInternal.
+      // Routes never see this row; they fetch via getById which returns
+      // the domain projection.
+      const mediaItem = media.getInternal(input.mediaId)
+      if (!mediaItem) throw new PlaybackError('media-not-found', 'Media not found')
+
+      if (input.userId !== undefined && !users.get(input.userId)) {
+        throw new PlaybackError('user-not-found', 'User not found')
+      }
+
+      if (sessions.size() >= cfg.maxSessions) {
+        throw new PlaybackError('max-sessions', 'Server at session capacity')
+      }
+
+      const audioTrackIndex = input.audioTrackIndex ?? 0
+      const subtitleTrackIndex = input.subtitleTrackIndex ?? null
+
+      const plan = buildPlan({
+        probe: mediaItemToProbeView(mediaItem),
+        capabilities: input.capabilities,
+        hwAccel,
+        audioTrackIndex,
+        maxRenditions: cfg.maxRenditions,
+        toneMap: cfg.toneMap,
+      })
+
+      const session = sessions.create({
+        mediaId: input.mediaId,
+        filePath: mediaItem.filePath!,
+        plan,
+        selectedSubtitleTrack: subtitleTrackIndex,
+        renditionCodecs: [],
+        sessionDir: '',
+        sessionReady: false,
+        durationSec: mediaItem.durationSec ?? 0,
+        userId: input.userId ?? undefined,
+      })
+
+      const profiles = plan.renditions.map(r => r.profile)
+      const initialProfile = profiles[0] ?? { name: 'direct', videoBitrate: 0, audioBitrate: 0, width: 0, height: 0 }
+
+      const info: PlaybackSessionInfo = {
+        sessionId: session.id,
+        method: plan.method,
+        streamUrl: plan.method === 'direct-play'
+          ? `/sessions/${session.id}/direct`
+          : `/sessions/${session.id}/stream.m3u8`,
+        wsUrl: `/sessions/${session.id}/ws`,
+        profiles: profiles.length > 0 ? profiles : [initialProfile],
+        selectedAudioTrack: audioTrackIndex,
+        selectedSubtitleTrack: subtitleTrackIndex,
+        reconnectToken: session.reconnectToken,
+      }
+
+      const runtime = createSessionRuntime({ session, hwAccel })
+      sessions.attachRuntime(session.id, runtime)
+
+      const ready = (async () => {
+        session.sessionDir = await createSessionDir(session.id)
+
+        // Seek-on-create: prepare ffmpeg to begin output at the requested
+        // segment so the client can resume mid-stream without a separate
+        // restart roundtrip. Direct-play has no segmenter, so skip.
+        if (
+          input.startPositionMs && input.startPositionMs > 0 &&
+          plan.method !== 'direct-play'
+        ) {
+          runtime.initializeSeek(input.startPositionMs)
+        }
+
+        if (plan.method === 'direct-play') {
+          session.sessionReady = true
+          session.state = 'active'
+          return
+        }
+
+        const ctx: RenderContext = {
+          sourceFilePath: session.filePath,
+          sessionDir: session.sessionDir,
+          startSegment: session.currentStartSegment,
+          seekPositionMs: session.seekPositionMs,
+        }
+
+        try {
+          await spawner(session, hwAccel, plan, ctx)
+        } catch (err) {
+          // Reap the half-created session so callers don't have to.
+          await sessions.destroy(session.id).catch(() => {/* already gone */})
+          throw err
+        }
+
+        session.sessionReady = true
+        session.state = 'active'
+
+        extractSubtitles(
+          mediaItem.filePath!,
+          mediaItem.subtitleTracks ?? [],
+          session.sessionDir,
+          session,
+        ).catch(err => console.error(`Session ${session.id}: subtitle extraction error`, err))
+      })()
+
+      return { info, ready }
+    },
+  }
+}
+
+/** Project a MediaItemRow into the ProbeResult shape `buildPlan` consumes.
+ *  videoBitrate isn't stored in media_items — default 0 so the bitrate check
+ *  is permissive. */
+function mediaItemToProbeView(item: MediaItemRow): ProbeResult {
+  return {
+    duration: item.durationSec ?? 0,
+    resolution: item.resolution ?? '1920x1080',
+    videoCodec: item.videoCodec ?? '',
+    videoBitrate: 0,
+    hdr: item.hdr ?? { dv: false, hdr10: false, hdr10plus: false },
+    audioTracks: item.audioTracks ?? [],
+    subtitleTracks: item.subtitleTracks ?? [],
+    container: item.container ?? '',
+  }
+}

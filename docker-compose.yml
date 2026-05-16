@@ -1,0 +1,79 @@
+# Horizon — single-host stack (Dockge / TrueNAS Apps friendly).
+#
+# Two ways to use this file:
+#   (A) Build the image on the host:    docker compose build
+#       (requires the source tree on the host, e.g. /opt/horizon-src)
+#   (B) Pull a pre-built image:         comment `build:`, set `image:` to your registry tag.
+#
+# After deploy, see docs/DEPLOY.md for TrueNAS + Dockge specifics.
+
+services:
+  horizon:
+    container_name: horizon
+    # --- (A) Build from local source ---
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    image: horizon:latest
+    # --- (B) Pull instead of build ---
+    # image: ghcr.io/<you>/horizon:latest
+
+    restart: unless-stopped
+
+    # Run as the user that owns /data on the host (TrueNAS apps user is 568:568).
+    # Override via .env. Movies/shows mounts are read-only so their ownership doesn't matter.
+    user: "${PUID:-568}:${PGID:-568}"
+
+    ports:
+      - "${HORIZON_PORT:-7777}:7777"
+
+    environment:
+      # Required
+      HORIZON_PORT: "7777"
+      HORIZON_MOVIES_ROOT: "/media/movies"
+      HORIZON_SHOWS_ROOT: "/media/shows"
+      HORIZON_CACHE_DIR: "/data/cache"
+      HORIZON_DB_PATH: "/data/horizon.db"
+      # Optional — set in .env
+      HORIZON_TMDB_TOKEN: "${HORIZON_TMDB_TOKEN:-}"
+      HORIZON_CORS_ORIGINS: "${HORIZON_CORS_ORIGINS:-*}"
+      HORIZON_MAX_SESSIONS: "${HORIZON_MAX_SESSIONS:-4}"
+      HORIZON_MAX_RENDITIONS: "${HORIZON_MAX_RENDITIONS:-3}"
+      HORIZON_FORCE_ENCODER: "${HORIZON_FORCE_ENCODER:-}"
+      HORIZON_TONEMAP_OPERATOR: "${HORIZON_TONEMAP_OPERATOR:-hable}"
+      HORIZON_SCAN_CONCURRENCY: "${HORIZON_SCAN_CONCURRENCY:-4}"
+      HORIZON_WATCHED_THRESHOLD_PCT: "${HORIZON_WATCHED_THRESHOLD_PCT:-90}"
+      # Rescan engine
+      HORIZON_SCAN_CRON_HOUR: "${HORIZON_SCAN_CRON_HOUR:-3}"
+      HORIZON_WATCH_FS: "${HORIZON_WATCH_FS:-1}"
+      HORIZON_WATCH_DEBOUNCE_MS: "${HORIZON_WATCH_DEBOUNCE_MS:-5000}"
+      # Metadata refresh
+      HORIZON_METADATA_BATCH_SIZE: "${HORIZON_METADATA_BATCH_SIZE:-50}"
+      HORIZON_METADATA_MAX_AGE_MOVIE_DAYS: "${HORIZON_METADATA_MAX_AGE_MOVIE_DAYS:-30}"
+      HORIZON_METADATA_MAX_AGE_SHOW_DAYS: "${HORIZON_METADATA_MAX_AGE_SHOW_DAYS:-7}"
+      HORIZON_METADATA_MAX_AGE_EPISODE_DAYS: "${HORIZON_METADATA_MAX_AGE_EPISODE_DAYS:-60}"
+      TZ: "${TZ:-Europe/Amsterdam}"
+
+    volumes:
+      # Movies & shows libraries — host paths set in .env (TrueNAS: /mnt/<pool>/...)
+      - "${HORIZON_MOVIES_HOST}:/media/movies:ro"
+      - "${HORIZON_SHOWS_HOST}:/media/shows:ro"
+      # Persistent state (SQLite DB + HLS transcode cache)
+      - "${HORIZON_DATA_HOST}:/data"
+
+    # Uncomment if you have an Intel iGPU and want QSV hwaccel
+    # devices:
+    #   - "/dev/dri:/dev/dri"
+    #   - "/dev/dri/renderD128:/dev/dri/renderD128"
+    # group_add:
+    #   - "video"
+    #   - "render"
+
+    # NVIDIA hwaccel (requires nvidia-container-toolkit on host):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

@@ -2,18 +2,21 @@
   "name": "horizon",
   "private": true,
   "workspaces": [
-    "server",
-    "sdk",
-    "app"
+    "apps/server",
+    "apps/web",
+    "libs/sdk"
   ],
   "scripts": {
-    "dev:server": "npm -w server run dev",
-    "dev:app": "npm -w app run dev",
-    "test": "npm -w server run test && npm -w sdk run test",
+    "dev": "concurrently -n server,web -c cyan,magenta --kill-others-on-fail 'npm -w @horizon/server run dev' 'npm -w @horizon/web run dev'",
+    "dev:e2e": "concurrently -n server,web -c cyan,magenta --kill-others-on-fail 'HORIZON_DEV_SEED=1 npm -w @horizon/server run dev' 'npm -w @horizon/web run dev'",
+    "dev:server": "npm -w @horizon/server run dev",
+    "dev:web": "npm -w @horizon/web run dev",
+    "test": "npm -w @horizon/server run test && npm -w @horizon/sdk run test",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1"
+    "@playwright/test": "^1.59.1",
+    "concurrently": "^9.2.1"
   }
 }

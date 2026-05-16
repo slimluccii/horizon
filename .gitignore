@@ -9,18 +9,16 @@ media/
 .env
 .env.local
 
-# Swift build artifacts
-mac/.build/
-mac/.swiftpm/
-mac/*.xcodeproj/
-mac/DerivedData/
+# Swift build artifacts (location-independent — apps/macos/ today)
+**/.build/
+**/.swiftpm/
+**/*.xcodeproj/
+**/DerivedData/
 
-# Android TV client build artifacts
-tv/.gradle/
-tv/.idea/
-tv/build/
-tv/app/build/
-tv/local.properties
-tv/captures/
-tv/*.iml
-tv/app/*.iml
+# Android / Gradle artifacts (location-independent — apps/android-tv/ today)
+**/.gradle/
+**/.idea/
+**/build/
+**/local.properties
+**/captures/
+**/*.iml

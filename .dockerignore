@@ -1,0 +1,33 @@
+**/node_modules
+**/dist
+**/.gradle
+**/build
+.git
+.github
+.vscode
+.idea
+.DS_Store
+*.log
+
+# Clients & native projects (server image only)
+apps/web
+apps/macos
+apps/android-tv
+
+# Dev artifacts
+apps/e2e
+playwright-report
+test-results
+coverage
+**/.cache
+
+# Sample media — never bake into image
+media
+
+# Local secrets
+.env
+.env.local
+**/local.properties
+
+# Docs (kept out of image; available on host)
+docs
