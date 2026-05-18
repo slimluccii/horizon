@@ -5,6 +5,7 @@ import Player from './pages/Player.tsx'
 import Show from './pages/Show.tsx'
 import Setup from './pages/Setup.tsx'
 import ProfilePicker from './pages/ProfilePicker.tsx'
+import Settings from './pages/Settings.tsx'
 import { useActiveUser } from './hooks/useActiveUser.ts'
 import { horizon } from './horizon.ts'
 
@@ -33,6 +34,7 @@ export default function App() {
       <Route path="/" element={<Guard><Library /></Guard>} />
       <Route path="/show/:showId" element={<Guard><Show /></Guard>} />
       <Route path="/play/:mediaId" element={<Guard><Player /></Guard>} />
+      <Route path="/settings" element={<Guard><Settings /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

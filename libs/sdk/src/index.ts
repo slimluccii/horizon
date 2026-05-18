@@ -14,3 +14,5 @@ export type {
   User, WatchProgress, ContinueWatchingItem,
 } from './types.ts'
 export { tmdbImageUrl } from './metadata.ts'
+export { PreferencesSchema, SUPPORTED_LANGUAGES } from './preferences.ts'
+export type { Preferences } from './preferences.ts'

@@ -41,10 +41,23 @@ export function useActiveUser(): {
 
   useEffect(() => {
     let cancelled = false
-    if (!userId) { setUser(null); setLoading(false); return }
+    if (!userId) {
+      setUser(null)
+      setLoading(false)
+      document.documentElement.removeAttribute('data-theme')
+      return
+    }
     setLoading(true)
     horizon.users.get(userId)
-      .then(u => { if (!cancelled) setUser(u) })
+      .then(u => {
+        if (!cancelled) {
+          setUser(u)
+          document.documentElement.setAttribute(
+            'data-theme',
+            u.preferences.theme === 'light' ? 'light' : 'dark',
+          )
+        }
+      })
       .catch(() => { if (!cancelled) { setGlobal(null); setUser(null) } })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
