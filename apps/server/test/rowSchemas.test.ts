@@ -5,7 +5,7 @@ describe('UserRowSchema', () => {
   it('parses a valid row', () => {
     const row = UserRowSchema.parse({
       id: 'u1', name: 'Luuk', avatar: '🐼', preferences: '{}',
-      created_at: 1, updated_at: 2,
+      role: 'member', created_at: 1, updated_at: 2,
     })
     expect(row.name).toBe('Luuk')
     expect(row.avatar).toBe('🐼')
@@ -14,7 +14,7 @@ describe('UserRowSchema', () => {
   it('accepts null avatar', () => {
     const row = UserRowSchema.parse({
       id: 'u1', name: 'x', avatar: null, preferences: '{}',
-      created_at: 1, updated_at: 1,
+      role: 'owner', created_at: 1, updated_at: 1,
     })
     expect(row.avatar).toBeNull()
   })

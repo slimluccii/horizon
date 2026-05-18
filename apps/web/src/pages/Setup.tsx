@@ -40,6 +40,7 @@ export default function Setup() {
           <div className="eyebrow">First run · new library</div>
           <h1 className="setup__title">Welcome to Horizon</h1>
           <p className="setup__subtitle">Create a profile to start watching.</p>
+          <p className="setup__subtitle">You'll be the household owner — the account that can never be removed.</p>
 
           <label className="setup__field">
             <span className="setup__label">Name</span>

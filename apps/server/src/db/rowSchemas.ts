@@ -11,6 +11,7 @@ export const UserRowSchema = z.object({
   name: z.string(),
   avatar: z.string().nullable(),
   preferences: z.string(),      // JSON blob, left as string at row layer
+  role: z.enum(['owner', 'admin', 'member']),
   created_at: z.number().int(),
   updated_at: z.number().int(),
 })
