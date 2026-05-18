@@ -169,6 +169,7 @@ export interface User {
   name: string
   avatar: string | null
   preferences: Preferences
+  role: 'owner' | 'admin' | 'member'
   createdAt: number
   updatedAt: number
 }

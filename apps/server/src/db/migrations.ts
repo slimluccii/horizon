@@ -117,9 +117,17 @@ CREATE TABLE scan_history (
 CREATE INDEX idx_scan_history_started ON scan_history(started_at DESC);
 `
 
+const V3_SQL = `
+-- Add role column; tie-break by id when created_at matches.
+ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','admin','member'));
+UPDATE users SET role='owner' WHERE id = (SELECT id FROM users ORDER BY created_at ASC, id ASC LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE role='owner');
+CREATE UNIQUE INDEX idx_users_one_owner ON users(role) WHERE role='owner';
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
+  { version: 3, sql: V3_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

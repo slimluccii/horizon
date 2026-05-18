@@ -68,9 +68,11 @@ export default function ProfileBadgeButton() {
           <button className="pb-badge__item" onClick={() => { setOpen(false); navigate('/settings') }}>
             Settings
           </button>
-          <button className="pb-badge__item pb-badge__item--danger" onClick={deleteProfile}>
-            Delete profile
-          </button>
+          {user.role !== 'owner' && (
+            <button className="pb-badge__item pb-badge__item--danger" onClick={deleteProfile}>
+              Delete profile
+            </button>
+          )}
         </div>
       )}
     </div>
