@@ -63,7 +63,7 @@ export class HorizonClient {
     get: (id: string) => this.fetch<User>(`/users/${id}`),
     create: (body: { name: string; avatar?: string | null }) =>
       this.fetch<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: string, body: { name?: string; avatar?: string | null; preferences?: Partial<Preferences> }) =>
+    update: (id: string, body: { name?: string; avatar?: string | null; preferences?: Partial<Preferences>; role?: 'owner' | 'admin' | 'member' }) =>
       this.fetch<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) =>
       this.fetch<void>(`/users/${id}`, { method: 'DELETE' }),

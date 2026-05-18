@@ -1,8 +1,16 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import { sendNotFound, badRequest, errorReply } from './errors.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
+
+function resolveCallerRole(users: UserRepo, req: FastifyRequest): { id: string; role: 'owner' | 'admin' | 'member' } | null {
+  const hdr = req.headers['x-horizon-user']
+  const id = typeof hdr === 'string' ? hdr : null
+  if (!id) return null
+  const u = users.get(id)
+  return u ? { id: u.id, role: u.role } : null
+}
 
 const CreateBody = z.object({
   name: z.string().min(1).max(100),
@@ -45,6 +53,11 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
   app.patch<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
     const parse = PatchBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, 'invalid-input', parse.error.message)
+    if (parse.data.role !== undefined) {
+      const caller = resolveCallerRole(users, req)
+      if (!caller) return badRequest(reply, 'no-user', 'Missing or unknown X-Horizon-User header')
+      if (caller.role === 'member') return errorReply(reply, 403, 'caller-forbidden', 'Only owner or admin can change roles')
+    }
     try {
       const { preferences, ...rest } = parse.data
       let updateData: typeof parse.data = rest

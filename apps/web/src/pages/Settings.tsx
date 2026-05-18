@@ -2,11 +2,72 @@ import { useEffect, useState } from 'react'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import { SUPPORTED_LANGUAGES } from '@horizon/sdk'
-import type { Preferences } from '@horizon/sdk'
+import type { Preferences, User } from '@horizon/sdk'
 import LargeTopNav from '../components/chrome/LargeTopNav.tsx'
 import './Settings.css'
 
-type Tab = 'Personal'
+type Tab = 'Personal' | 'Profiles'
+
+const PALETTE = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
+function userColor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
+  return PALETTE[Math.abs(hash) % PALETTE.length]
+}
+
+function ProfilesPanel({ viewerRole }: { viewerRole: 'owner' | 'admin' | 'member' }) {
+  const [rows, setRows] = useState<User[]>([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    horizon.users.list().then(setRows)
+  }, [])
+
+  async function handleRoleChange(id: string, role: 'admin' | 'member') {
+    setBusy(true)
+    setErr(null)
+    try {
+      await horizon.users.update(id, { role })
+      const updated = await horizon.users.list()
+      setRows(updated)
+    } catch (e) {
+      setErr((e as { message?: string }).message ?? 'Failed to update role')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <p className="settings__section-title">Profiles</p>
+      {rows.map(row => {
+        const color = userColor(row.name)
+        const initial = row.avatar ?? row.name.charAt(0).toUpperCase()
+        return (
+          <div key={row.id} className={`settings__profile-row${row.role === 'owner' ? ' settings__profile-row--owner' : ''}`}>
+            <div className="settings__profile-avatar" style={{ background: color }}>{initial}</div>
+            <span className="settings__profile-name">{row.name}</span>
+            {row.role === 'owner' ? (
+              <span className="settings__profile-role-label">Owner</span>
+            ) : (
+              <select
+                className="settings__profile-role-select"
+                value={row.role}
+                disabled={busy}
+                onChange={e => handleRoleChange(row.id, e.target.value as 'admin' | 'member')}
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+            )}
+          </div>
+        )
+      })}
+      {err && <p className="settings__profile-error">{err}</p>}
+    </div>
+  )
+}
 
 const QUALITY_OPTIONS = ['auto', '1080p', '720p', '480p'] as const
 
@@ -29,7 +90,7 @@ function mergeWithDefaults(prefs: Preferences): Required<Preferences> {
 }
 
 export default function Settings() {
-  const { userId } = useActiveUser()
+  const { user, userId } = useActiveUser()
 
   const [activeTab, setActiveTab] = useState<Tab>('Personal')
   const [initial, setInitial] = useState<Required<Preferences>>(DEFAULT_FORM)
@@ -46,7 +107,8 @@ export default function Settings() {
     })
   }, [userId])
 
-  const tabs: Tab[] = ['Personal']
+  const viewerCanManage = user?.role === 'owner' || user?.role === 'admin'
+  const tabs: Tab[] = viewerCanManage ? ['Personal', 'Profiles'] : ['Personal']
 
   const diff = Object.fromEntries(
     Object.entries(form).filter(([k, v]) => v !== initial[k as keyof typeof initial])
@@ -92,6 +154,10 @@ export default function Settings() {
             </button>
           ))}
         </div>
+
+        {activeTab === 'Profiles' && user && (
+          <ProfilesPanel viewerRole={user.role} />
+        )}
 
         {activeTab === 'Personal' && (
           <>
