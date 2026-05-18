@@ -116,6 +116,6 @@ describe('migrate', () => {
     expect(() => {
       db.prepare('INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run('u2', 'Bob', null, '{}', 'owner', 2000, 2000)
-    }).toThrow(/idx_users_one_owner/)
+    }).toThrow(/UNIQUE constraint failed: users\.role/)
   })
 })

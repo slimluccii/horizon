@@ -7,6 +7,7 @@ export interface User {
   name: string
   avatar: string | null
   preferences: Record<string, unknown>
+  role: 'owner' | 'admin' | 'member'
   createdAt: number
   updatedAt: number
 }
@@ -21,6 +22,7 @@ export interface UserPatch {
   name?: string
   avatar?: string | null
   preferences?: Record<string, unknown>
+  role?: 'owner' | 'admin' | 'member'
 }
 
 export interface UserRepo {
@@ -38,6 +40,7 @@ function rowToUser(raw: unknown): User {
     name: row.name,
     avatar: row.avatar,
     preferences: JSON.parse(row.preferences) as Record<string, unknown>,
+    role: row.role,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -64,10 +67,19 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
       const now = Date.now()
       const id = crypto.randomUUID()
       const prefsJson = JSON.stringify(input.preferences ?? {})
-      db.prepare(
-        `INSERT INTO users (id, name, avatar, preferences, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(id, input.name, input.avatar ?? null, prefsJson, now, now)
+      const isFirst = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n === 0
+      const role = isFirst ? 'owner' : 'member'
+      try {
+        db.prepare(
+          `INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(id, input.name, input.avatar ?? null, prefsJson, role, now, now)
+      } catch (err) {
+        if (String((err as Error).message).includes('users.role')) {
+          throw Object.assign(new Error('owner-exists'), { code: 'owner-exists' })
+        }
+        throw err
+      }
       return rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id))
     },
 
@@ -87,20 +99,35 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
       if (patch.name && nameTaken(db, patch.name, id)) {
         throw Object.assign(new Error('name-taken'), { code: 'name-taken' })
       }
+      if (patch.role !== undefined && existing.role === 'owner' && patch.role !== 'owner') {
+        throw Object.assign(new Error('role-immutable'), { code: 'role-immutable' })
+      }
       const next = {
         name: patch.name ?? existing.name,
         avatar: patch.avatar !== undefined ? patch.avatar : existing.avatar,
         preferences: patch.preferences ?? existing.preferences,
       }
-      db.prepare(
-        `UPDATE users
-           SET name = ?, avatar = ?, preferences = ?, updated_at = ?
-         WHERE id = ?`,
-      ).run(next.name, next.avatar, JSON.stringify(next.preferences), Date.now(), id)
+      try {
+        db.prepare(
+          `UPDATE users
+             SET name = ?, avatar = ?, preferences = ?, role = COALESCE(?, role), updated_at = ?
+           WHERE id = ?`,
+        ).run(next.name, next.avatar, JSON.stringify(next.preferences), patch.role ?? null, Date.now(), id)
+      } catch (err) {
+        if (String((err as Error).message).includes('users.role')) {
+          throw Object.assign(new Error('owner-exists'), { code: 'owner-exists' })
+        }
+        throw err
+      }
       return this.get(id)
     },
 
     delete(id) {
+      const existing = this.get(id)
+      if (!existing) return false
+      if (existing.role === 'owner') {
+        throw Object.assign(new Error('owner-protected'), { code: 'owner-protected' })
+      }
       const res = db.prepare('DELETE FROM users WHERE id = ?').run(id)
       return res.changes > 0
     },

@@ -9,6 +9,20 @@ vocabulary. If a term here is wrong, fix it here first.
 
 ---
 
+## Identity
+
+### Role
+Every User row carries a `role` of `owner`, `admin`, or `member` (default
+`member`). Exactly one owner exists per database, enforced by a partial unique
+index (`idx_users_one_owner`) on `users.role WHERE role='owner'`. The owner is
+auto-elected at first profile creation (`POST /users` on an empty DB) or
+backfilled to the oldest existing user during the v3 migration. The owner's
+role is immutable — `PATCH /users/:id` with a different role rejects with
+`role-immutable` (403). The owner row cannot be deleted — `DELETE /users/:id`
+rejects with `owner-protected` (403). The web UI hides the "Delete profile"
+button in the badge menu when the active user is the owner. See
+[apps/server/src/repos/users.ts](apps/server/src/repos/users.ts).
+
 ## Library
 
 ### MediaItem

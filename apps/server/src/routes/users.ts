@@ -12,6 +12,7 @@ const PatchBody = z.object({
   name: z.string().min(1).max(100).optional(),
   avatar: z.string().nullable().optional(),
   preferences: z.record(z.string(), z.unknown()).optional(),
+  role: z.enum(['owner', 'admin', 'member']).optional(),
 })
 
 export function registerUsers(app: FastifyInstance, users: UserRepo): void {
@@ -21,8 +22,12 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
     try {
       return users.create(parse.data)
     } catch (err) {
-      if ((err as { code?: string }).code === 'name-taken') {
+      const code = (err as { code?: string }).code
+      if (code === 'name-taken') {
         return errorReply(reply, 409, 'name-taken', 'Profile name already in use')
+      }
+      if (code === 'owner-exists') {
+        return errorReply(reply, 409, 'owner-exists', 'A household owner already exists')
       }
       throw err
     }
@@ -44,15 +49,29 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
       if (!u) return sendNotFound(reply, 'user-not-found', 'User not found')
       return u
     } catch (err) {
-      if ((err as { code?: string }).code === 'name-taken') {
+      const code = (err as { code?: string }).code
+      if (code === 'name-taken') {
         return errorReply(reply, 409, 'name-taken', 'Profile name already in use')
+      }
+      if (code === 'role-immutable') {
+        return errorReply(reply, 403, 'role-immutable', 'Cannot change the role of the household owner')
+      }
+      if (code === 'owner-exists') {
+        return errorReply(reply, 409, 'owner-exists', 'A household owner already exists')
       }
       throw err
     }
   })
 
   app.delete<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
-    users.delete(req.params.id)
+    try {
+      users.delete(req.params.id)
+    } catch (err) {
+      if ((err as { code?: string }).code === 'owner-protected') {
+        return errorReply(reply, 403, 'owner-protected', 'Cannot delete the household owner')
+      }
+      throw err
+    }
     return reply.status(204).send()
   })
 }
