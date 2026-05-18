@@ -48,14 +48,69 @@ describe('userRepo', () => {
   })
 
   it('deletes user and returns true', () => {
-    const u = repo.create({ name: 'A' })
-    expect(repo.delete(u.id)).toBe(true)
-    expect(repo.get(u.id)).toBeNull()
-    expect(repo.delete(u.id)).toBe(false)
+    const a = repo.create({ name: 'A' })
+    const b = repo.create({ name: 'B' })
+    expect(repo.delete(b.id)).toBe(true)
+    expect(repo.get(b.id)).toBeNull()
+    expect(repo.delete(b.id)).toBe(false)
+    expect(repo.get(a.id)).not.toBeNull()
   })
 
   it('preserves preferences JSON blob across round-trip', () => {
     const u = repo.create({ name: 'A', preferences: { defaultQuality: 'auto' } })
     expect(repo.get(u.id)!.preferences).toEqual({ defaultQuality: 'auto' })
+  })
+
+  it('first create is owner', () => {
+    const u = repo.create({ name: 'A' })
+    expect(u.role).toBe('owner')
+  })
+
+  it('second create is member', () => {
+    repo.create({ name: 'A' })
+    const u = repo.create({ name: 'B' })
+    expect(u.role).toBe('member')
+  })
+
+  it('delete owner throws owner-protected', () => {
+    const owner = repo.create({ name: 'A' })
+    let caught: unknown
+    try { repo.delete(owner.id) } catch (e) { caught = e }
+    expect(caught).toBeDefined()
+    expect((caught as { code?: string }).code).toBe('owner-protected')
+  })
+
+  it('delete non-owner returns true', () => {
+    repo.create({ name: 'A' }) // owner
+    const member = repo.create({ name: 'B' })
+    expect(repo.delete(member.id)).toBe(true)
+  })
+
+  it('update owner role to member throws role-immutable', () => {
+    const owner = repo.create({ name: 'A' })
+    let caught: unknown
+    try { repo.update(owner.id, { role: 'member' }) } catch (e) { caught = e }
+    expect((caught as { code?: string }).code).toBe('role-immutable')
+  })
+
+  it('update owner role to owner is a no-op', () => {
+    const owner = repo.create({ name: 'A' })
+    const result = repo.update(owner.id, { role: 'owner' })
+    expect(result?.role).toBe('owner')
+  })
+
+  it('update owner name succeeds', () => {
+    const owner = repo.create({ name: 'A' })
+    const result = repo.update(owner.id, { name: 'X' })
+    expect(result?.name).toBe('X')
+    expect(result?.role).toBe('owner')
+  })
+
+  it('update member role to owner throws owner-exists', () => {
+    repo.create({ name: 'A' }) // owner
+    const member = repo.create({ name: 'B' })
+    let caught: unknown
+    try { repo.update(member.id, { role: 'owner' }) } catch (e) { caught = e }
+    expect((caught as { code?: string }).code).toBe('owner-exists')
   })
 })
