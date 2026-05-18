@@ -1,5 +1,6 @@
 // sdk/src/client.ts
 import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem } from './types.ts'
+import type { Preferences } from './preferences.ts'
 import { detectCapabilities } from './capabilities.ts'
 import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
 
@@ -62,7 +63,7 @@ export class HorizonClient {
     get: (id: string) => this.fetch<User>(`/users/${id}`),
     create: (body: { name: string; avatar?: string | null }) =>
       this.fetch<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: string, body: { name?: string; avatar?: string | null; preferences?: Record<string, unknown> }) =>
+    update: (id: string, body: { name?: string; avatar?: string | null; preferences?: Partial<Preferences> }) =>
       this.fetch<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) =>
       this.fetch<void>(`/users/${id}`, { method: 'DELETE' }),
