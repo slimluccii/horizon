@@ -10,7 +10,7 @@ function setup() {
   migrate(db)
   const users = createUserRepo(db)
   const media = createMediaRepo(db)
-  const progress = createProgressRepo(db, media, { watchedThresholdPct: 90 })
+  const progress = createProgressRepo(db, media, { getWatchedThresholdPct: () => 90 })
   return { db, users, media, progress }
 }
 

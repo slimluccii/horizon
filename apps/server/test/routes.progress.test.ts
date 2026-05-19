@@ -21,7 +21,7 @@ function setup() {
   const db = openDatabase(':memory:'); migrate(db)
   const users = createUserRepo(db)
   const media = createMediaRepo(db)
-  const progress = createProgressRepo(db, media, { watchedThresholdPct: 90 })
+  const progress = createProgressRepo(db, media, { getWatchedThresholdPct: () => 90 })
   const u = users.create({ name: 'Luuk' })
   media.upsertMovie(movie('m1'))
   return { users, media, progress, user: u }

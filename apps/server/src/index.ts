@@ -2,6 +2,7 @@ import { loadConfig } from './config.ts'
 import { detectHwAccel } from './transcode/hwaccel.ts'
 import { openDatabase } from './db/index.ts'
 import { migrate } from './db/migrations.ts'
+import { bootstrapFromEnv, createServerSettings } from './serverSettings.ts'
 import { createMediaRepo } from './repos/media.ts'
 import { createCollectionsRepo } from './repos/collections.ts'
 import { createUserRepo } from './repos/users.ts'
@@ -22,11 +23,13 @@ async function main() {
 
   const db = openDatabase(cfg.dbPath)
   migrate(db)
+  bootstrapFromEnv(db)
+  const serverSettings = createServerSettings(db)
   const mediaRepo = createMediaRepo(db)
   const collectionsRepo = createCollectionsRepo(db)
   const userRepo = createUserRepo(db)
   const progressRepo = createProgressRepo(db, mediaRepo, {
-    watchedThresholdPct: cfg.watchedThresholdPct,
+    getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct,
   })
   const scanRootsRepo = createScanRootsRepo(db)
   const changesCursorRepo = createChangesCursorRepo(db)

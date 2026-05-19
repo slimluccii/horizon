@@ -28,7 +28,7 @@ describe('progress flusher', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const media = createMediaRepo(db)
-    const progress = createProgressRepo(db, media, { watchedThresholdPct: 90 })
+    const progress = createProgressRepo(db, media, { getWatchedThresholdPct: () => 90 })
     const u = users.create({ name: 'a' })
     media.upsertMovie({
       id: 'm1', filePath: '/x.mkv', title: 'x', sortYear: 2020,
@@ -57,7 +57,7 @@ describe('progress flusher', () => {
     const db = openDatabase(':memory:'); migrate(db)
     createUserRepo(db)
     const media = createMediaRepo(db)
-    const progress = createProgressRepo(db, media, { watchedThresholdPct: 90 })
+    const progress = createProgressRepo(db, media, { getWatchedThresholdPct: () => 90 })
     const session = fakeSession({}) // no userId
     const f = createProgressFlusher(session, progress)
     f.record(1000, 60_000)
