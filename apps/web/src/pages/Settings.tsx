@@ -2,11 +2,11 @@ import { useEffect, useState, useRef } from 'react'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
-import type { Preferences, User } from '@horizon/sdk'
+import type { Preferences, User, ServerSettings } from '@horizon/sdk'
 import LargeTopNav from '../components/chrome/LargeTopNav.tsx'
 import './Settings.css'
 
-type Tab = 'Personal' | 'Profiles'
+type Tab = 'Personal' | 'Server' | 'Profiles'
 
 const PALETTE = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
 function userColor(name: string): string {
@@ -79,6 +79,175 @@ function ProfilesPanel({
   )
 }
 
+// ---- Server tab -------------------------------------------------------
+
+const ACTIVE_KNOBS: Array<keyof ServerSettings> = ['scanCronHour', 'scanConcurrency', 'watchFs', 'watchDebounceMs']
+
+function activeKnobLabel(patch: Partial<ServerSettings>): string | null {
+  if (patch.watchFs !== undefined || patch.watchDebounceMs !== undefined) {
+    return 'Library settings updated. Watcher restarted.'
+  }
+  if (patch.scanCronHour !== undefined || patch.scanConcurrency !== undefined) {
+    return 'Library settings updated. Scheduler updated.'
+  }
+  return null
+}
+
+type LibraryForm = {
+  watchedThresholdPct: number
+  scanCronHour: number
+  scanConcurrency: number
+  watchFs: boolean
+  watchDebounceMs: number
+}
+
+function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
+  const [initial, setInitial] = useState<LibraryForm | null>(null)
+  const [form, setForm] = useState<LibraryForm | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    horizon.settings.getServer().then(s => {
+      const f: LibraryForm = {
+        watchedThresholdPct: s.watchedThresholdPct,
+        scanCronHour: s.scanCronHour,
+        scanConcurrency: s.scanConcurrency,
+        watchFs: s.watchFs,
+        watchDebounceMs: s.watchDebounceMs,
+      }
+      setInitial(f)
+      setForm(f)
+    }).catch(() => setError('Failed to load server settings.'))
+  }, [])
+
+  if (!form || !initial) {
+    return error
+      ? <p style={{ color: 'var(--danger)', fontSize: '13px' }}>{error}</p>
+      : <p className="settings__section-title">Loading…</p>
+  }
+
+  function set<K extends keyof LibraryForm>(key: K, value: LibraryForm[K]) {
+    setForm(f => f ? { ...f, [key]: value } : f)
+  }
+
+  const diff = Object.fromEntries(
+    Object.entries(form).filter(([k, v]) => v !== initial![k as keyof LibraryForm])
+  ) as Partial<LibraryForm>
+
+  const canSave = Object.keys(diff).length > 0 && !busy
+
+  async function handleSave() {
+    if (!canSave) return
+    setBusy(true)
+    setError(null)
+    try {
+      await horizon.settings.patchServer(diff)
+      setInitial({ ...form! })
+      const hasActive = (Object.keys(diff) as Array<keyof LibraryForm>).some(k =>
+        (ACTIVE_KNOBS as string[]).includes(k)
+      )
+      const msg = activeKnobLabel(diff) ?? 'Library settings updated.'
+      onSave(hasActive ? msg : 'Library settings updated.')
+    } catch {
+      setError('Failed to save settings. Please try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <p className="settings__section-title">Library</p>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-watched-pct">
+          Watched threshold (%)
+        </label>
+        <input
+          id="settings-watched-pct"
+          type="number"
+          className="settings__input"
+          min={1} max={100}
+          value={form.watchedThresholdPct}
+          onChange={e => set('watchedThresholdPct', Number(e.target.value))}
+        />
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-cron-hour">
+          Nightly scan hour (0–23 local time)
+        </label>
+        <input
+          id="settings-cron-hour"
+          type="number"
+          className="settings__input"
+          min={0} max={23}
+          value={form.scanCronHour}
+          onChange={e => set('scanCronHour', Number(e.target.value))}
+        />
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-concurrency">
+          Scan concurrency
+        </label>
+        <input
+          id="settings-concurrency"
+          type="number"
+          className="settings__input"
+          min={1} max={32}
+          value={form.scanConcurrency}
+          onChange={e => set('scanConcurrency', Number(e.target.value))}
+        />
+      </div>
+
+      <div className="settings__field">
+        <div className="settings__toggle-row">
+          <label className="settings__toggle-label" htmlFor="settings-watch-fs">
+            Enable filesystem watcher
+          </label>
+          <input
+            id="settings-watch-fs"
+            type="checkbox"
+            className="settings__toggle-input"
+            checked={form.watchFs}
+            onChange={e => set('watchFs', e.target.checked)}
+          />
+        </div>
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-debounce">
+          Watcher debounce (ms)
+        </label>
+        <input
+          id="settings-debounce"
+          type="number"
+          className="settings__input"
+          min={100} max={60000}
+          value={form.watchDebounceMs}
+          onChange={e => set('watchDebounceMs', Number(e.target.value))}
+        />
+      </div>
+
+      {error && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{error}</p>}
+
+      <div className="settings__actions">
+        <button
+          className="settings__save"
+          disabled={!canSave}
+          onClick={handleSave}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </>
+  )
+}
+
+// ---- Personal tab helpers --------------------------------------------
+
 const QUALITY_OPTIONS = ['auto', '1080p', '720p', '480p'] as const
 
 const DEFAULT_FORM: Required<Preferences> = {
@@ -120,7 +289,7 @@ export default function Settings() {
   }, [userId])
 
   const viewerCanManage = user?.role === 'owner' || user?.role === 'admin'
-  const tabs: Tab[] = viewerCanManage ? ['Personal', 'Profiles'] : ['Personal']
+  const tabs: Tab[] = viewerCanManage ? ['Personal', 'Server', 'Profiles'] : ['Personal']
 
   const diff = Object.fromEntries(
     Object.entries(form).filter(([k, v]) => v !== initial[k as keyof typeof initial])
@@ -182,6 +351,10 @@ export default function Settings() {
             </button>
           ))}
         </div>
+
+        {activeTab === 'Server' && (
+          <ServerPanel onSave={showToast} />
+        )}
 
         {activeTab === 'Profiles' && user && (
           <ProfilesPanel viewerRole={user.role} onRoleChanged={handleRoleChanged} />

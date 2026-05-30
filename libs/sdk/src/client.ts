@@ -1,5 +1,5 @@
 // sdk/src/client.ts
-import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem } from './types.ts'
+import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch } from './types.ts'
 import type { Preferences } from './preferences.ts'
 import { detectCapabilities } from './capabilities.ts'
 import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
@@ -80,6 +80,12 @@ export class HorizonClient {
       this.fetch<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) =>
       this.fetch<void>(`/users/${id}`, { method: 'DELETE' }),
+  }
+
+  readonly settings = {
+    getServer: () => this.fetch<ServerSettings>('/settings/server'),
+    patchServer: (patch: ServerSettingsPatch) =>
+      this.fetch<ServerSettings>('/settings/server', { method: 'PATCH', body: JSON.stringify(patch) }),
   }
 
   readonly progress = {
