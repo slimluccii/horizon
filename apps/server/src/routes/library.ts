@@ -95,7 +95,7 @@ export function registerLibrary(
    * Useful for the UI button "refresh poster art" without re-walking the disk.
    */
   app.post('/library/metadata-refresh', async (_req, reply) => {
-    if (!workers.refreshWorker) {
+    if (!workers.refreshWorker.status().configured) {
       return reply.status(503).send({
         error: 'TMDB not configured', code: 'tmdb-disabled',
       })
@@ -110,7 +110,7 @@ export function registerLibrary(
    */
   app.get('/library/scan-status', async () => {
     const scan = workers.scanManager.status()
-    const refresh = workers.refreshWorker?.status() ?? null
+    const refresh = workers.refreshWorker.status()
     return {
       scan,
       metadata: refresh,

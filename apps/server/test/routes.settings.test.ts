@@ -4,8 +4,12 @@ import { openDatabase } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo } from '../src/repos/users.ts'
 import { createServerSettings } from '../src/repos/serverSettings.ts'
+import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../src/metadata/refresh.ts'
+import { createChangesCursorRepo } from '../src/repos/scanState.ts'
+import { createMediaRepo } from '../src/repos/media.ts'
 import { registerSettings } from '../src/routes/settings.ts'
 import type { ServerSettings } from '../src/repos/serverSettings.ts'
+import type { TmdbProvider } from '../src/metadata/tmdb.ts'
 
 function setup() {
   const db = openDatabase(':memory:')
@@ -288,5 +292,159 @@ describe('serverSettings — bootstrapFromEnv', () => {
 
     const row = serverSettings.get()
     expect(row.watchedThresholdPct).toBe(95)   // unchanged
+  })
+})
+
+describe('PATCH /settings/server — tmdbToken', () => {
+  it('empty string normalises to unset (clears the token)', async () => {
+    const { users, serverSettings, owner } = setup()
+    // Pre-seed a token.
+    serverSettings.update({ tmdbToken: 'abc-secret' })
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { tmdbToken: '' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().tmdbToken).toBe('unset')
+
+    // DB row should have null.
+    expect(serverSettings.get().tmdbToken).toBeNull()
+  })
+
+  it('non-empty token saves and returns "set"', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { tmdbToken: 'new-token-xyz' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().tmdbToken).toBe('set')
+  })
+
+  it('GET never leaks the actual token value', async () => {
+    const { users, serverSettings, owner } = setup()
+    serverSettings.update({ tmdbToken: 'super-secret-token' })
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'GET', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json()
+    expect(body.tmdbToken).toBe('set')
+    expect(JSON.stringify(body)).not.toContain('super-secret-token')
+  })
+})
+
+describe('PATCH /settings/server — metadata fields', () => {
+  it('metadataBatchSize persists and is readable', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { metadataBatchSize: 75 },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().metadataBatchSize).toBe(75)
+    expect(serverSettings.get().metadataBatchSize).toBe(75)
+  })
+
+  it('metadataMaxAgeMovieDays persists', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { metadataMaxAgeMovieDays: 14 },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().metadataMaxAgeMovieDays).toBe(14)
+  })
+
+  it('metadataMaxAgeShowDays and metadataMaxAgeEpDays persist', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { metadataMaxAgeShowDays: 3, metadataMaxAgeEpDays: 45 },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().metadataMaxAgeShowDays).toBe(3)
+    expect(res.json().metadataMaxAgeEpDays).toBe(45)
+  })
+})
+
+describe('MetadataRefreshWorker — setTmdb (hot-swap)', () => {
+  function fakeTmdb(label: string): TmdbProvider & { _calls: string[] } {
+    const calls: string[] = []
+    return {
+      _calls: calls,
+      async movieByTmdbId(id: number) { calls.push(`${label}:movie:${id}`); return { kind: 'movie', tmdbId: id, title: `Movie ${id}` } as any },
+      async movieByImdbId() { return null },
+      async searchMovie() { return null },
+      async showByTmdbId() { return null },
+      async showByTvdbId() { return null },
+      async searchShow() { return null },
+      async episode() { return null },
+      async changedMovieIds() { return [] },
+      async changedShowIds() { return [] },
+    } as any
+  }
+
+  it('uses the new client after setTmdb is called', async () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const media = createMediaRepo(db)
+    db.prepare(
+      `INSERT INTO media_items (id, kind, title, file_path, mtime_ms, size_bytes,
+                                first_seen_at, last_seen_at, tmdb_id)
+       VALUES ('m1', 'movie', 'Test', '/m/test.mkv', 0, 0, 0, 0, 99)`,
+    ).run()
+
+    const tmdb1 = fakeTmdb('first')
+    const worker = createMetadataRefreshWorker(
+      { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+      { media, tmdb: tmdb1, changesCursor: createChangesCursorRepo(db) },
+    )
+
+    await worker.run({ useChangesFeed: false })
+    expect(tmdb1._calls.some(c => c.startsWith('first:'))).toBe(true)
+
+    // Swap client and reset the metadata_fetched_at so the item is stale again.
+    const tmdb2 = fakeTmdb('second')
+    worker.setTmdb(tmdb2)
+    db.prepare('UPDATE media_items SET metadata_fetched_at = NULL WHERE id = ?').run('m1')
+
+    await worker.run({ useChangesFeed: false })
+    expect(tmdb2._calls.some(c => c.startsWith('second:'))).toBe(true)
+    // First client received no additional calls after swap.
+    const firstCallCount = tmdb1._calls.length
+    await worker.run({ useChangesFeed: false })
+    expect(tmdb1._calls.length).toBe(firstCallCount)
+  })
+
+  it('run returns zero counts when tmdb is null', async () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const media = createMediaRepo(db)
+    const worker = createMetadataRefreshWorker(
+      { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+      { media, tmdb: null, changesCursor: createChangesCursorRepo(db) },
+    )
+    const result = await worker.run({ useChangesFeed: false })
+    expect(result.refreshed).toBe(0)
+    expect(result.failed).toBe(0)
   })
 })
