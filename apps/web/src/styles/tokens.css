@@ -39,3 +39,18 @@
   --dur-base:    200ms;
   --dur-slow:    400ms;
 }
+
+:root[data-theme="light"] {
+  --bg:        rgb(245, 247, 250);
+  --bg-deep:   rgb(232, 236, 242);
+  --surface:   rgb(255, 255, 255);
+  --surface-2: rgb(240, 243, 248);
+  --border:    rgb(210, 218, 228);
+  --border-hi: rgb(185, 196, 210);
+  --text:      rgb(12, 18, 28);
+  --text-soft: rgb(40, 52, 70);
+  --muted:     rgb(110, 122, 138);
+  --muted-hi:  rgb(80, 96, 116);
+  --chrome-bg:  rgba(245, 247, 250, 0.88);
+  --chrome-bdr: rgba(0, 0, 0, 0.10);
+}
