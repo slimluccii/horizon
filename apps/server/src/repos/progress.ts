@@ -26,7 +26,7 @@ export interface ProgressInput {
 }
 
 export interface ProgressRepoOpts {
-  watchedThresholdPct: number    // e.g. 90
+  getWatchedThresholdPct: () => number
 }
 
 /** Last 30 s of a title always counts as watched (credits buffer). */
@@ -83,7 +83,8 @@ export function createProgressRepo(
 
   return {
     setProgress(userId, mediaId, input) {
-      const watched = computeWatched(input.positionMs, input.durationMs, opts.watchedThresholdPct) ? 1 : 0
+      const threshold = opts.getWatchedThresholdPct()
+      const watched = computeWatched(input.positionMs, input.durationMs, threshold) ? 1 : 0
       const now = Date.now()
       upsertStmt.run(userId, mediaId, input.positionMs, input.durationMs, watched, now)
       return rowToProgress(

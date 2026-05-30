@@ -23,6 +23,21 @@ rejects with `owner-protected` (403). The web UI hides the "Delete profile"
 button in the badge menu when the active user is the owner. See
 [apps/server/src/repos/users.ts](apps/server/src/repos/users.ts).
 
+## Configuration
+
+### ServerSettings
+Runtime operator settings are stored in a singleton `server_settings` DB row (id=1, enforced by `CHECK (id = 1)`). Choosing a singleton row over a key/value table gives each knob a native SQL type, a hardcoded default, and makes the whole row atomically readable and writable.
+
+The `seeded_from_env` column is a one-time bootstrap flag. On first boot after upgrade (when `seeded_from_env = 0`), `bootstrapFromEnv` reads the current `HORIZON_*` environment variables and applies them to the row, then flips `seeded_from_env = 1`. Subsequent boots skip the overlay entirely — the row is the source of truth once seeded. This preserves operator intent across upgrades without re-reading env on every restart.
+
+Consumers must call `serverSettings.get()` rather than `loadConfig()` for live settings. The `get()` call is cheap (returns cached values; cache is invalidated on `update()`). Wire a thunk — `getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct` — so consumers pick up changes without restart.
+
+The `metadata_max_age_*_days` columns are stored in **days** (matching the `HORIZON_METADATA_MAX_AGE_*_DAYS` env-var unit). Consumers convert to milliseconds at the edge when wiring into workers (`days * 86_400_000`).
+
+Future schema additions (v5+) get only their hardcoded column defaults on existing rows — `seeded_from_env` will already be 1, so the bootstrap pass does not apply. A v5+ migration that adds a column should run its own targeted overlay for that column's env var.
+
+See [apps/server/src/serverSettings.ts](apps/server/src/serverSettings.ts).
+
 ## Library
 
 ### MediaItem

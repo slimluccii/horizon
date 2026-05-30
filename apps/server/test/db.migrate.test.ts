@@ -120,4 +120,44 @@ describe('migrate', () => {
         .run('u2', 'Bob', null, '{}', 'owner', 2000, 2000)
     }).toThrow(/UNIQUE constraint failed: users\.role/)
   })
+
+  it('v4: user_version is 4 after fresh migrate', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+    expect(ver).toBe(4)
+  })
+
+  it('v4: server_settings table exists after migrate', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const names = (db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).all() as { name: string }[]).map(r => r.name)
+    expect(names).toContain('server_settings')
+  })
+
+  it('v4: server_settings CHECK(id=1) rejects id=2', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    expect(() => {
+      db.prepare(
+        `INSERT INTO server_settings (id, scan_concurrency, scan_cron_hour, watch_fs,
+          watch_debounce_ms, metadata_batch_size, metadata_max_age_movie_days,
+          metadata_max_age_show_days, metadata_max_age_episode_days, watched_threshold_pct,
+          max_sessions, ws_grace_ms, ws_attach_ms, max_renditions, seeded_from_env, updated_at)
+         VALUES (2, 4, 3, 0, 5000, 50, 30, 7, 60, 90, 4, 10000, 10000, 3, 0, 0)`,
+      ).run()
+    }).toThrow()
+  })
+
+  it('v4: singleton row has id=1, seeded_from_env=0, watched_threshold_pct=90 after fresh migrate', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const row = db.prepare('SELECT * FROM server_settings WHERE id = 1').get() as Record<string, number>
+    expect(row).toBeDefined()
+    expect(row.id).toBe(1)
+    expect(row.seeded_from_env).toBe(0)
+    expect(row.watched_threshold_pct).toBe(90)
+  })
 })

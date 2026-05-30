@@ -26,12 +26,13 @@ async function main() {
   const mediaRepo = createMediaRepo(db)
   const collectionsRepo = createCollectionsRepo(db)
   const userRepo = createUserRepo(db)
-  const progressRepo = createProgressRepo(db, mediaRepo, {
-    watchedThresholdPct: cfg.watchedThresholdPct,
-  })
   const serverSettings = createServerSettings(db)
   // Overlay env values exactly once (fresh install / first boot after upgrade).
   serverSettings.bootstrapFromEnv(cfg)
+
+  const progressRepo = createProgressRepo(db, mediaRepo, {
+    getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct,
+  })
 
   const scanRootsRepo = createScanRootsRepo(db)
   const changesCursorRepo = createChangesCursorRepo(db)

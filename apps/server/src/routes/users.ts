@@ -29,7 +29,11 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
     const parse = CreateBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, 'invalid-input', parse.error.message)
     try {
-      return users.create(parse.data)
+      const { preferences, ...rest } = parse.data
+      return users.create({
+        ...rest,
+        ...(preferences !== undefined ? { preferences: preferences as Record<string, unknown> } : {}),
+      })
     } catch (err) {
       const code = (err as { code?: string }).code
       if (code === 'name-taken') {
