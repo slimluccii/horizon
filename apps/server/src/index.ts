@@ -37,32 +37,29 @@ async function main() {
   const changesCursorRepo = createChangesCursorRepo(db)
   const scanHistoryRepo = createScanHistoryRepo(db)
 
-  const tmdb = createTmdbProvider(cfg.tmdbToken, cfg.cacheDir)
+  const initialTmdb = createTmdbProvider(cfg.tmdbToken, cfg.cacheDir)
 
-  // Metadata refresh worker — wired only if TMDB is configured.
-  const refreshWorker = tmdb
-    ? createMetadataRefreshWorker(
-        {
-          ...DEFAULT_REFRESH_CONFIG,
-          batchSize: cfg.metadataBatchSize,
-          maxAgeMs: {
-            movie: cfg.metadataMaxAgeMovieMs,
-            show: cfg.metadataMaxAgeShowMs,
-            episode: cfg.metadataMaxAgeEpisodeMs,
-          },
-        },
-        { media: mediaRepo, tmdb, changesCursor: changesCursorRepo },
-      )
-    : null
+  // Metadata refresh worker — always created so the tmdbToken change handler
+  // can swap the client without restarting the server.
+  const refreshWorker = createMetadataRefreshWorker(
+    {
+      ...DEFAULT_REFRESH_CONFIG,
+      batchSize: cfg.metadataBatchSize,
+      maxAgeMs: {
+        movie: cfg.metadataMaxAgeMovieMs,
+        show: cfg.metadataMaxAgeShowMs,
+        episode: cfg.metadataMaxAgeEpisodeMs,
+      },
+    },
+    { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo },
+  )
 
   const scanManager = createScanManager(cfg, {
     media: mediaRepo,
     collections: collectionsRepo,
     scanRoots: scanRootsRepo,
     scanHistory: scanHistoryRepo,
-    onScanFinished: refreshWorker
-      ? () => { void refreshWorker.run({ useChangesFeed: false }) }   // newly indexed items get metadata fast
-      : undefined,
+    onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false }) },  // newly indexed items get metadata fast
   })
 
   const sessions = createSessionManager(serverSettings)
@@ -113,12 +110,21 @@ async function main() {
     lastFiredAt: lastScan,
     task: async () => {
       await scanManager.request({ trigger: 'cron', paths: [] })
-      if (refreshWorker) await refreshWorker.run({ useChangesFeed: true })
+      await refreshWorker.run({ useChangesFeed: true })
     },
   })
 
   // Subscribe to settings changes to react to active knobs.
   serverSettings.on('change', ({ patch }) => {
+    // tmdbToken change → swap the TMDB client on the refresh worker.
+    // In-flight requests on the old client complete; subsequent calls use
+    // the new auth header. No process restart needed.
+    if (patch.tmdbToken !== undefined) {
+      const newTmdb = createTmdbProvider(patch.tmdbToken ?? undefined, cfg.cacheDir)
+      refreshWorker.setTmdb(newTmdb)
+      console.log(`MetadataRefresh: TMDB client ${newTmdb ? 'updated' : 'cleared'} after token change`)
+    }
+
     // scanCronHour change → reschedule nightly scan.
     if (patch.scanCronHour !== undefined) {
       scheduleHandle.stop()
@@ -128,7 +134,7 @@ async function main() {
         lastFiredAt: lastScan,
         task: async () => {
           await scanManager.request({ trigger: 'cron', paths: [] })
-          if (refreshWorker) await refreshWorker.run({ useChangesFeed: true })
+          await refreshWorker.run({ useChangesFeed: true })
         },
       })
       console.log(`Scheduler: rescheduled nightly scan to ${patch.scanCronHour}:00 local time`)

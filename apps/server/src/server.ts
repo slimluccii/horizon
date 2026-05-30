@@ -35,7 +35,7 @@ export interface Repos {
 
 export interface ScanWorkers {
   scanManager: ScanManager
-  refreshWorker: MetadataRefreshWorker | null
+  refreshWorker: MetadataRefreshWorker
   scanHistory: ScanHistoryRepo
 }
 

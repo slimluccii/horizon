@@ -101,6 +101,13 @@ type LibraryForm = {
   watchDebounceMs: number
 }
 
+type MetadataForm = {
+  metadataBatchSize: number
+  metadataMaxAgeMovieDays: number
+  metadataMaxAgeShowDays: number
+  metadataMaxAgeEpDays: number
+}
+
 type PlaybackForm = {
   maxSessions: number
   maxRenditions: number
@@ -117,8 +124,14 @@ const TONEMAP_OPERATORS = [
 ] as const
 
 function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
-  const [initial, setInitial] = useState<LibraryForm | null>(null)
+  const [initialLib, setInitialLib] = useState<LibraryForm | null>(null)
   const [form, setForm] = useState<LibraryForm | null>(null)
+  const [initialMeta, setInitialMeta] = useState<MetadataForm | null>(null)
+  const [metaForm, setMetaForm] = useState<MetadataForm | null>(null)
+  // tmdbToken state: what the server last reported, pending new value
+  const [tmdbStatus, setTmdbStatus] = useState<'set' | 'unset'>('unset')
+  const [showTokenInput, setShowTokenInput] = useState(false)
+  const [pendingToken, setPendingToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -137,8 +150,18 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
         watchFs: s.watchFs,
         watchDebounceMs: s.watchDebounceMs,
       }
-      setInitial(f)
+      setInitialLib(f)
       setForm(f)
+
+      const m: MetadataForm = {
+        metadataBatchSize: s.metadataBatchSize,
+        metadataMaxAgeMovieDays: s.metadataMaxAgeMovieDays,
+        metadataMaxAgeShowDays: s.metadataMaxAgeShowDays,
+        metadataMaxAgeEpDays: s.metadataMaxAgeEpDays,
+      }
+      setInitialMeta(m)
+      setMetaForm(m)
+      setTmdbStatus(s.tmdbToken)
 
       const pf: PlaybackForm = {
         maxSessions: s.maxSessions,
@@ -159,7 +182,7 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
     }).catch(() => {/* non-critical */})
   }, [])
 
-  if (!form || !initial) {
+  if (!form || !initialLib || !metaForm || !initialMeta) {
     return error
       ? <p style={{ color: 'var(--danger)', fontSize: '13px' }}>{error}</p>
       : <p className="settings__section-title">Loading…</p>
@@ -169,28 +192,50 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
     setForm(f => f ? { ...f, [key]: value } : f)
   }
 
+  function setMeta<K extends keyof MetadataForm>(key: K, value: MetadataForm[K]) {
+    setMetaForm(f => f ? { ...f, [key]: value } : f)
+  }
+
   function setPlayback<K extends keyof PlaybackForm>(key: K, value: PlaybackForm[K]) {
     setPlaybackForm(f => f ? { ...f, [key]: value } : f)
   }
 
-  const diff = Object.fromEntries(
-    Object.entries(form).filter(([k, v]) => v !== initial![k as keyof LibraryForm])
+  const libDiff = Object.fromEntries(
+    Object.entries(form).filter(([k, v]) => v !== initialLib![k as keyof LibraryForm])
   ) as Partial<LibraryForm>
 
-  const canSave = Object.keys(diff).length > 0 && !busy
+  const metaDiff = Object.fromEntries(
+    Object.entries(metaForm).filter(([k, v]) => v !== initialMeta![k as keyof MetadataForm])
+  ) as Partial<MetadataForm>
+
+  const hasTokenChange = showTokenInput && (pendingToken !== '' || tmdbStatus === 'set')
+  const canSave = (Object.keys(libDiff).length > 0 || Object.keys(metaDiff).length > 0 || hasTokenChange) && !busy
 
   async function handleSave() {
     if (!canSave) return
     setBusy(true)
     setError(null)
     try {
-      await horizon.settings.patchServer(diff)
-      setInitial({ ...form! })
-      const hasActive = (Object.keys(diff) as Array<keyof LibraryForm>).some(k =>
+      const patch: Record<string, unknown> = { ...libDiff, ...metaDiff }
+      if (showTokenInput) {
+        // Empty string normalises to null server-side (clears the token).
+        patch.tmdbToken = pendingToken
+      }
+      const updated = await horizon.settings.patchServer(patch)
+      setInitialLib({ ...form! })
+      setInitialMeta({ ...metaForm! })
+      setTmdbStatus(updated.tmdbToken)
+      setShowTokenInput(false)
+      setPendingToken('')
+      const hasActive = (Object.keys(libDiff) as Array<keyof LibraryForm>).some(k =>
         (ACTIVE_KNOBS as string[]).includes(k)
       )
-      const msg = activeKnobLabel(diff) ?? 'Library settings updated.'
-      onSave(hasActive ? msg : 'Library settings updated.')
+      if (showTokenInput) {
+        onSave(updated.tmdbToken === 'set' ? 'TMDB token saved.' : 'TMDB token cleared.')
+      } else {
+        const msg = activeKnobLabel(libDiff) ?? 'Settings updated.'
+        onSave(hasActive ? msg : 'Settings updated.')
+      }
     } catch {
       setError('Failed to save settings. Please try again.')
     } finally {
@@ -304,6 +349,102 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
           min={100} max={60000}
           value={form.watchDebounceMs}
           onChange={e => set('watchDebounceMs', Number(e.target.value))}
+        />
+      </div>
+
+      <p className="settings__section-title">Metadata</p>
+
+      <div className="settings__field">
+        <label className="settings__label">TMDB Token</label>
+        <div className="settings__token-row">
+          <span className={`settings__token-status settings__token-status--${tmdbStatus}`}>
+            {tmdbStatus === 'set' ? 'Set' : 'Not set'}
+          </span>
+          {!showTokenInput && (
+            <button
+              className="settings__token-replace"
+              type="button"
+              onClick={() => { setShowTokenInput(true); setPendingToken('') }}
+            >
+              {tmdbStatus === 'set' ? 'Replace' : 'Add token'}
+            </button>
+          )}
+        </div>
+        {showTokenInput && (
+          <div className="settings__token-input-row">
+            <input
+              id="settings-tmdb-token"
+              type="password"
+              className="settings__input"
+              placeholder="Paste new token or leave blank to clear"
+              value={pendingToken}
+              onChange={e => setPendingToken(e.target.value)}
+              autoComplete="off"
+            />
+            <button
+              className="settings__token-cancel"
+              type="button"
+              onClick={() => { setShowTokenInput(false); setPendingToken('') }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-batch-size">
+          Metadata batch size
+        </label>
+        <input
+          id="settings-batch-size"
+          type="number"
+          className="settings__input"
+          min={1} max={500}
+          value={metaForm.metadataBatchSize}
+          onChange={e => setMeta('metadataBatchSize', Number(e.target.value))}
+        />
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-max-age-movie">
+          Movie metadata max age (days)
+        </label>
+        <input
+          id="settings-max-age-movie"
+          type="number"
+          className="settings__input"
+          min={1}
+          value={metaForm.metadataMaxAgeMovieDays}
+          onChange={e => setMeta('metadataMaxAgeMovieDays', Number(e.target.value))}
+        />
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-max-age-show">
+          Show metadata max age (days)
+        </label>
+        <input
+          id="settings-max-age-show"
+          type="number"
+          className="settings__input"
+          min={1}
+          value={metaForm.metadataMaxAgeShowDays}
+          onChange={e => setMeta('metadataMaxAgeShowDays', Number(e.target.value))}
+        />
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label" htmlFor="settings-max-age-episode">
+          Episode metadata max age (days)
+        </label>
+        <input
+          id="settings-max-age-episode"
+          type="number"
+          className="settings__input"
+          min={1}
+          value={metaForm.metadataMaxAgeEpDays}
+          onChange={e => setMeta('metadataMaxAgeEpDays', Number(e.target.value))}
         />
       </div>
 
