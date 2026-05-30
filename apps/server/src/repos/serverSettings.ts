@@ -168,6 +168,9 @@ export function createServerSettings(db: DatabaseSync): ServerSettings {
           ws_grace_ms                 = ?,
           ws_attach_ms                = ?,
           force_encoder               = ?,
+          tonemap_operator            = ?,
+          tonemap_param               = ?,
+          tonemap_desat               = ?,
           seeded_from_env             = 1,
           updated_at                  = ?
         WHERE id = 1
@@ -187,6 +190,9 @@ export function createServerSettings(db: DatabaseSync): ServerSettings {
         cfg.wsGraceMs,
         cfg.wsAttachMs,
         cfg.forceEncoder ?? null,
+        cfg.toneMap.operator,
+        cfg.toneMap.param ?? null,
+        cfg.toneMap.desat ?? null,
         Date.now(),
       )
     },
