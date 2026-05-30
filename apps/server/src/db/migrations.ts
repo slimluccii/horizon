@@ -124,10 +124,47 @@ UPDATE users SET role='owner' WHERE id = (SELECT id FROM users ORDER BY created_
 CREATE UNIQUE INDEX idx_users_one_owner ON users(role) WHERE role='owner';
 `
 
+// Singleton row for operator-tunable runtime settings. Chosen over a k/v table
+// so each knob gets a native SQL type and a hardcoded default, and the row can
+// be updated atomically. The seeded_from_env flag ensures HORIZON_* env vars
+// are overlaid exactly once at first boot after upgrade (see bootstrapFromEnv in
+// serverSettings.ts). Planned ADR: docs/adr/0002-server-settings-singleton-with-env-overlay.md
+const V4_SQL = `
+CREATE TABLE server_settings (
+  id                           INTEGER PRIMARY KEY CHECK (id = 1),
+  scan_concurrency             INTEGER NOT NULL DEFAULT 4,
+  scan_cron_hour               INTEGER NOT NULL DEFAULT 3,
+  watch_fs                     INTEGER NOT NULL DEFAULT 0,
+  watch_debounce_ms            INTEGER NOT NULL DEFAULT 5000,
+  metadata_batch_size          INTEGER NOT NULL DEFAULT 50,
+  metadata_max_age_movie_days  INTEGER NOT NULL DEFAULT 30,
+  metadata_max_age_show_days   INTEGER NOT NULL DEFAULT 7,
+  metadata_max_age_episode_days INTEGER NOT NULL DEFAULT 60,
+  watched_threshold_pct        INTEGER NOT NULL DEFAULT 90,
+  max_sessions                 INTEGER NOT NULL DEFAULT 4,
+  ws_grace_ms                  INTEGER NOT NULL DEFAULT 10000,
+  ws_attach_ms                 INTEGER NOT NULL DEFAULT 10000,
+  max_renditions               INTEGER NOT NULL DEFAULT 3,
+  seeded_from_env              INTEGER NOT NULL DEFAULT 0,
+  updated_at                   INTEGER NOT NULL
+);
+
+INSERT INTO server_settings (
+  id, scan_concurrency, scan_cron_hour, watch_fs, watch_debounce_ms,
+  metadata_batch_size, metadata_max_age_movie_days, metadata_max_age_show_days,
+  metadata_max_age_episode_days, watched_threshold_pct, max_sessions,
+  ws_grace_ms, ws_attach_ms, max_renditions, seeded_from_env, updated_at
+) VALUES (
+  1, 4, 3, 0, 5000, 50, 30, 7, 60, 90, 4, 10000, 10000, 3, 0,
+  CAST(strftime('%s', 'now') * 1000 AS INTEGER)
+);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
   { version: 3, sql: V3_SQL },
+  { version: 4, sql: V4_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.
