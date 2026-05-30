@@ -77,7 +77,11 @@ export function registerSettings(
     const parse = PatchBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, 'invalid-input', parse.error.message)
 
-    const updated = serverSettings.update(parse.data)
+    const patch = { ...parse.data }
+    // Normalise empty string → null (clears the token).
+    if (patch.tmdbToken === '') patch.tmdbToken = null
+
+    const updated = serverSettings.update(patch)
     return {
       ...updated,
       tmdbToken: updated.tmdbToken ? 'set' : 'unset',
