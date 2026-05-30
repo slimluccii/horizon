@@ -1,105 +1,97 @@
-# Plan for issue #12: Role on User + auto-elect owner at first profile creation
+# Plan for issue #18: Settings page: Profiles tab + role management
 
 ## Goal
-Add a `role` column (`owner | admin | member`, default `member`) to the `users` table, auto-elect the first profile as `owner` (via migration backfill on populated DBs, via `POST /users` on empty DBs), and guard the owner row from deletion or role mutation. Setup.tsx and the in-app profile badge surface the owner status so the silent promotion isn't a surprise and the owner can't accidentally delete themselves.
+Add a **Profiles** tab to `/settings` (owner/admin only) that lists every user with an admin↔member role dropdown, and harden `PATCH /users/:id` so role changes require the caller — resolved fresh from DB via `x-horizon-user` — to be `owner` or `admin`. Owner row stays frozen client- and server-side; DELETE-owner protection is already in place from #12.
 
 ## Scope
-- Expected files changed: **11**
-- Expected lines changed: **~370**
-- Within soft caps: **no** (11 of 8 files; lines comfortably under 400)
-- Justification: the slice naturally fans out across one DB migration + one row schema + one repo + one route + one SDK type + two UI touches (Setup copy + ProfileBadgeButton owner-guard) + three test files (matching the existing one-test-per-concern convention: `db.migrate`, `repos.users`, `routes.users`) + CONTEXT.md. Each touch is tiny (1–50 lines). Folding tests together would obscure failure modes; skipping the SDK type would let `User.role` rot; leaving `ProfileBadgeButton` untouched would surface the new 403 as an unhandled rejection in the existing UI (reviewer-flagged). Hard caps (20 / 1500) easily respected.
+- Expected files changed: **6**
+- Expected lines changed: **~310**
+- Within soft caps: **yes** (6 of 8 files; ~310 of 400 lines)
 
 ## Files to change
-- `apps/server/src/db/migrations.ts` — add `V3_SQL` that `ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','admin','member'))`, backfills oldest user as owner if none exists (`UPDATE users SET role='owner' WHERE id = (SELECT id FROM users ORDER BY created_at ASC, id ASC LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE role='owner')`), and creates partial unique index `CREATE UNIQUE INDEX idx_users_one_owner ON users(role) WHERE role='owner'`. Append `{ version: 3, sql: V3_SQL }` to `MIGRATIONS`.
-- `apps/server/src/db/rowSchemas.ts` — add `role: z.enum(['owner','admin','member'])` to `UserRowSchema`.
-- `apps/server/src/repos/users.ts` — add `role: 'owner'|'admin'|'member'` to `User` interface; add optional `role` to `UserPatch`; in `create()`, query `SELECT COUNT(*) AS n FROM users` first and pass `'owner'` when 0 else `'member'` into the INSERT; wrap the INSERT in `try/catch` and, if the caught error's message contains the substring `idx_users_one_owner`, throw `Error` with `code: 'owner-exists'` (otherwise rethrow so the existing `name-taken` UNIQUE on `users.name` flow is unaffected); in `delete()`, fetch row first and throw `code: 'owner-protected'` when `existing.role === 'owner'`; in `update()`, throw `code: 'role-immutable'` if `existing.role === 'owner' && patch.role !== undefined && patch.role !== 'owner'`; persist `role` in the UPDATE SQL only when `patch.role !== undefined`; map `row.role` in `rowToUser`.
-- `apps/server/src/routes/users.ts` — extend `PatchBody` with `role: z.enum(['owner','admin','member']).optional()`; in POST catch, additionally map `owner-exists` → 409 with `code: 'owner-exists'`; wrap `users.delete(...)` in try/catch and return `errorReply(reply, 403, 'owner-protected', 'Cannot delete the household owner')` on that code; in PATCH catch, map `role-immutable` → 403 with `code: 'role-immutable'` and `owner-exists` → 409.
-- `libs/sdk/src/types.ts` — add `role: 'owner' | 'admin' | 'member'` to `User` interface (line ~165).
-- `apps/web/src/pages/Setup.tsx` — replace the subtitle (`setup__subtitle`, line 42) with a two-line explainer: keep "Create a profile to start watching." then add an explicit owner notice (e.g. a `<p className="setup__subtitle">` second line: `"You'll be the household owner — the account that can never be removed."`). No logic change; Setup is only rendered on the empty-DB path per `App.tsx` route guard.
-- `apps/web/src/components/chrome/ProfileBadgeButton.tsx` — hide/disable the "Delete profile" button when `user.role === 'owner'`. Concrete: render the `<button className="pb-badge__item pb-badge__item--danger">` only when `user.role !== 'owner'`; when owner, render a disabled non-button row (or simply omit it) so the active owner cannot trigger the now-403 path. Uses the new `User.role` field from the SDK type.
-- `apps/server/test/db.migrate.test.ts` — add cases (see Tests).
-- `apps/server/test/repos.users.test.ts` — **amend the existing `'deletes user and returns true'` test (line 50–55)** to create *two* users and delete the *second* (non-owner) one. Then add new cases for owner-protected delete, owner-mint behaviour, and patch-owner-role rejection. See Tests.
-- `apps/server/test/routes.users.test.ts` — **amend the existing `'deletes + subsequent 404'` test (line 85–94)** to create two users and delete the second. Add new cases for the four owner paths. See Tests.
-- `CONTEXT.md` — under `## Library` (or a new `## Identity` section above it), add `### Role` entry: explains `owner | admin | member`, that exactly one owner exists per DB (enforced by partial unique index), auto-election on empty DB / migration backfill, immutability invariant, and the web UI consequence (owner can't self-delete from the badge menu). Cross-link to `apps/server/src/repos/users.ts`.
+- `apps/server/src/routes/users.ts` — add a `resolveCallerRole(users, req)` helper that reads `req.headers['x-horizon-user']`, calls `users.get(id)` fresh on every request (no cache, per AC "next request"), and returns `{ id, role } | null`. In the PATCH handler, **only when `parse.data.role !== undefined`**, run the gate **before** `users.update`: missing/unknown caller → `badRequest(reply, 'no-user', ...)`; caller `role === 'member'` → `errorReply(reply, 403, 'caller-forbidden', 'Only owner or admin can change roles')`. Owner/admin callers fall through to the repo, which still enforces `role-immutable` and `owner-exists`. No changes to POST, GET, or DELETE.
+- `apps/server/test/routes.users.test.ts` — **amend** the two existing role-PATCH cases ("PATCH owner role to member returns 403 role-immutable", "PATCH member role to owner returns 409 owner-exists") to inject `headers: { 'x-horizon-user': owner.id }`, otherwise the new gate flips them to 400. Add the six new cases listed under **Tests**. Do **not** touch the non-role PATCH cases (name + preferences merge) — they must keep passing without a header, proving the gate is role-scoped.
+- `libs/sdk/src/client.ts` — extend the `users.update` body type to include `role?: 'owner' | 'admin' | 'member'`. One-line addition; runtime is unchanged (body is `JSON.stringify`d).
+- `apps/web/src/pages/Settings.tsx` — (1) widen `type Tab = 'Personal'` to `'Personal' | 'Profiles'`; (2) read `const { user } = useActiveUser()` and compute `viewerCanManage = user?.role === 'owner' || user?.role === 'admin'`; (3) compute `tabs = viewerCanManage ? ['Personal', 'Profiles'] : ['Personal']`; (4) add `{activeTab === 'Profiles' && user && <ProfilesPanel viewerRole={user.role} />}` below the Personal branch; (5) co-locate `ProfilesPanel` in the same file (matches the inline pattern this file already uses). The panel loads `horizon.users.list()` into local state, renders each row as `avatar circle + name + role widget`, and wires the role widget's `onChange` to `horizon.users.update(id, { role }).then(refetch).catch(setErr)`. **Owner rows render a static "Owner" label instead of a dropdown** (matches AC "Owner row's role dropdown is disabled in the UI" and avoids any UI-visible 409 from `owner-exists`). Non-owner rows render `<select>` with options `['member', 'admin']`. A panel-wide `busy` flag disables all dropdowns while a request is in flight.
+- `apps/web/src/pages/Settings.css` — add `.settings__profile-row` (flex row), `.settings__profile-avatar` (36×36 circle), `.settings__profile-name` (flex:1), `.settings__profile-role-select` (height matches `.settings__select`), `.settings__profile-role-label` (frozen owner label), `.settings__profile-row--owner`, `.settings__profile-error` (small red text). Reuse `var(--surface)`, `var(--border-hi)`, `var(--accent)`, `var(--danger)` to match the Personal tab visuals.
+- `apps/e2e/profiles.spec.ts` — append two tests to the existing spec: `test('Profiles tab visible only to owner/admin')` (seed owner Alice + member Bob; assert tab is visible for Alice, hidden for Bob), and `test('admin can demote another admin')` (seed owner + two admins via API + PATCH with owner header; switch to admin1; demote admin2 via the dropdown; assert the row reflects the new role). Keep total added lines tight (~55).
 
 ## Out of scope
-- **Creating `docs/adr/0001-role-on-user-row.md`.** The ADR is referenced in the issue body but adding it is not in the AC. Skip; if the issue author wants it bundled, that's a follow-up.
-- Authorization checks elsewhere (no route gates on role; admin vs member only differ in this column for now).
-- Changing `apps/android-tv/.../api/Models.kt` — Kotlin `Json { ignoreUnknownKeys = true }` (HorizonApi.kt:24) means a new field on the wire is silently ignored; the TV client doesn't surface role anywhere yet.
-- Migrating role logic into a separate `roles` table (the issue's ADR explicitly prefers role-on-row).
-- ProfilePicker.tsx — adding a second user from the picker creates a `member` automatically; no copy change needed.
-- Any owner-transfer flow (PATCH to promote a member to owner). The partial unique index will 409 such attempts; that's correct behaviour for this slice and a future feature, not a regression to design around now.
+- Generalized auth middleware / Fastify hook. The gate lives inline in `users.ts` because it's the only route that consumes caller role today; lifting it into a hook would be premature.
+- DELETE handler changes. AC says "existing behavior preserved"; DELETE-owner protection is already at the repo layer from #12. Member-can-delete-another-member is pre-existing behaviour and outside this issue.
+- Repo changes (`apps/server/src/repos/users.ts`). All gating is route-level; `role-immutable` and `owner-exists` already come from the repo.
+- Caller-role check on non-role PATCH (name/avatar/preferences). The AC scopes the gate to role changes; any user can still edit their own non-role fields without a header.
+- Self-vs-other distinction for non-role PATCH. Not in AC; not enforced today.
+- Rendering `'owner'` as a selectable option for non-owner rows. There is no transfer-ownership feature; surfacing a 409 through the UI is bad UX. Options stay `['member', 'admin']`.
+- Auto-refresh of the current viewer's tab list if their own role changes mid-session. `useActiveUser` re-fetches only on `userId` change; staleness is accepted (the viewer is the editor, not typically the edited).
+- Android TV — no role-aware UI on TV; `ignoreUnknownKeys = true` (HorizonApi.kt) means the new behaviour is transparent there.
+- New SDK list helper. `horizon.users.list()` already returns `User[]` including `role` (from #12).
 
 ## Steps
-1. Write the failing migration tests in `apps/server/test/db.migrate.test.ts` (cases listed below). Run `npm -w @horizon/server run test -- db.migrate` to confirm red.
-2. Implement `V3_SQL` and append to `MIGRATIONS` in `apps/server/src/db/migrations.ts`. Migrate tests green.
-3. Update `UserRowSchema` in `apps/server/src/db/rowSchemas.ts` to include `role`.
-4. **Amend** `apps/server/test/repos.users.test.ts`:
-   - Change `'deletes user and returns true'` (line 50–55): create user `A` then user `B`, delete `B` (the non-owner), assert true; assert `repo.get(B.id)` is null; assert second `repo.delete(B.id)` returns false.
-   - Add new cases: first-create-is-owner, second-create-is-member, delete-owner-throws-owner-protected, patch-owner-role-throws-role-immutable, patch-owner-name-still-works, patch-owner-with-role='owner'-is-noop, patch-non-owner-with-role='owner' throws `owner-exists` (the partial unique index path surfacing through the repo).
-   Run repo tests; confirm red.
-5. Update `apps/server/src/repos/users.ts`:
-   - Add `role: 'owner' | 'admin' | 'member'` to `User`.
-   - Add `role?: 'owner' | 'admin' | 'member'` to `UserPatch`.
-   - In `create()`: after the existing `nameTaken` check, run `const isFirst = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n === 0`; set `const role = isFirst ? 'owner' : 'member'`; add `role` to the INSERT column list and bind. Wrap the INSERT prepare/run in `try { ... } catch (err) { if (String((err as Error).message).includes('idx_users_one_owner')) throw Object.assign(new Error('owner-exists'), { code: 'owner-exists' }); throw err }`. This narrow check avoids mis-mapping the existing `users.name` UNIQUE failure to `owner-exists`.
-   - In `delete()`: `const existing = this.get(id); if (!existing) return false; if (existing.role === 'owner') throw Object.assign(new Error('owner-protected'), { code: 'owner-protected' });` then keep the existing DELETE.
-   - In `update()`: after fetching `existing`, if `patch.role !== undefined && existing.role === 'owner' && patch.role !== 'owner'`, throw `code: 'role-immutable'`. Add `role` to the UPDATE column list **only when `patch.role !== undefined`** (build the SQL conditionally, or use `COALESCE(?, role)` with `patch.role ?? null` bound — picker's choice but spell out in the implementation that an undefined patch must not overwrite the persisted role). Trust the partial unique index to surface a second-owner attempt as `owner-exists` via the same try/catch substring check.
-   - Update `rowToUser` to populate `role`.
-6. Repo tests green.
-7. **Amend** `apps/server/test/routes.users.test.ts`:
-   - Change `'deletes + subsequent 404'` (line 85–94): create user `A` then user `B`, DELETE `B`, assert 204 then 404 on subsequent GET of `B`.
-   - Add: `POST /users` to empty DB → 200 body has `role: 'owner'`. `POST /users` to non-empty DB → 200 body has `role: 'member'`. `DELETE /users/:id` on owner → 403 with `code: 'owner-protected'`. `PATCH /users/:id` with `{ role: 'member' }` on owner → 403 with `code: 'role-immutable'`. `PATCH /users/:id` with `{ role: 'owner' }` on a non-owner second user → 409 with `code: 'owner-exists'`.
-   Run route tests; confirm red.
-8. Update `apps/server/src/routes/users.ts`:
-   - Extend `PatchBody` with optional `role` enum.
-   - In POST catch, add `owner-exists` → 409 mapping (defensive; race-loser path).
-   - Replace the DELETE handler body with try/catch — return `errorReply(reply, 403, 'owner-protected', 'Cannot delete the household owner')` on that code, else rethrow.
-   - In PATCH catch, map `role-immutable` → 403 and `owner-exists` → 409.
-9. Route tests green.
-10. Update `libs/sdk/src/types.ts` `User` interface with the `role` field.
-11. Update `apps/web/src/pages/Setup.tsx` subtitle copy (add the "You'll be the household owner" line). No logic change.
-12. Update `apps/web/src/components/chrome/ProfileBadgeButton.tsx`: gate the "Delete profile" menu item on `user.role !== 'owner'` (the active user is now typed as having `role`, since the SDK type was updated in step 10).
-13. Update `CONTEXT.md` with the `### Role` entry and the one-owner invariant.
-14. Run the full verification suite (see below).
+1. **Write failing server tests first** in `apps/server/test/routes.users.test.ts` (the six new cases under **Tests** + amend the two existing role-PATCH cases to include the owner's `x-horizon-user` header). Run `npm -w @horizon/server run test -- routes.users` and confirm: amended cases green, new cases red.
+2. **Implement the route gate** in `apps/server/src/routes/users.ts`:
+   ```ts
+   function resolveCallerRole(users: UserRepo, req: FastifyRequest):
+     { id: string; role: 'owner' | 'admin' | 'member' } | null {
+     const hdr = req.headers['x-horizon-user']
+     const id = typeof hdr === 'string' ? hdr : null
+     if (!id) return null
+     const u = users.get(id)   // fresh DB read on every request
+     return u ? { id: u.id, role: u.role } : null
+   }
+   ```
+   In the PATCH handler, after `parse.success` and before the `users.update` call:
+   ```ts
+   if (parse.data.role !== undefined) {
+     const caller = resolveCallerRole(users, req)
+     if (!caller) return badRequest(reply, 'no-user', 'Missing or unknown X-Horizon-User header')
+     if (caller.role === 'member') return errorReply(reply, 403, 'caller-forbidden', 'Only owner or admin can change roles')
+   }
+   ```
+   Re-run server tests; all green.
+3. **Widen the SDK type** in `libs/sdk/src/client.ts`: add `role?: 'owner' | 'admin' | 'member'` to the `users.update` body type. Run `npm -w @horizon/sdk run build`.
+4. **Build the Profiles tab UI** in `apps/web/src/pages/Settings.tsx`:
+   - Widen `type Tab`.
+   - Read `useActiveUser()`; derive `viewerCanManage` and `tabs`.
+   - Add the `activeTab === 'Profiles'` branch and co-locate `ProfilesPanel({ viewerRole })` in the same file.
+   - `ProfilesPanel` owns `rows: User[]`, `busy: boolean`, `err: string | null`. Initial load via `horizon.users.list().then(setRows)`. Owner row → static "Owner" label. Non-owner row → `<select>` with options `['member','admin']`. `onChange` → `horizon.users.update(id, { role }).then(() => horizon.users.list().then(setRows)).catch(e => setErr(e.message ?? 'Failed to update role'))`. Disable all dropdowns while `busy`.
+   - Reuse the existing `userColor(name)` helper if it lives in Settings.tsx; otherwise inline a small palette helper (mirrors `ProfileBadgeButton.tsx`'s palette to keep the visual identity consistent).
+5. **Add CSS** in `apps/web/src/pages/Settings.css` for the row, avatar, name, dropdown, owner label, and error states (see Files section).
+6. **Add Playwright tests** in `apps/e2e/profiles.spec.ts` (the two cases listed under Files).
+7. **Verify** with the commands below.
 
 ## Tests
-- **Test-first: yes.** Failing tests to write before any production change (in order):
-  1. `apps/server/test/db.migrate.test.ts`:
-     - After `migrate(db)` on a fresh DB, `PRAGMA user_version === 3`; `PRAGMA table_info(users)` includes a `role` column with default `'member'`.
-     - On a DB pre-populated at v2 with two users (insert raw rows with distinct `created_at`s), after `migrate(db)` to v3 the older user has `role='owner'` and the newer has `role='member'`.
-     - Re-running `migrate(db)` is a no-op: `PRAGMA user_version` still 3; the same owner; no second owner introduced.
-     - Inserting a second row with `role='owner'` raises a SQLite UNIQUE-constraint error mentioning `idx_users_one_owner`.
-  2. `apps/server/test/repos.users.test.ts` (after the amendment from Step 4):
-     - first-create returns `role: 'owner'`.
-     - second-create returns `role: 'member'`.
-     - `delete()` on the owner throws with `code === 'owner-protected'`; `delete()` on a non-owner returns true.
-     - `update(ownerId, { role: 'member' })` throws with `code === 'role-immutable'`.
-     - `update(ownerId, { role: 'owner' })` is a no-op (returns the row, no throw).
-     - `update(ownerId, { name: 'X' })` succeeds.
-     - `update(memberId, { role: 'owner' })` throws with `code === 'owner-exists'` (partial-unique-index path).
-  3. `apps/server/test/routes.users.test.ts` (after the amendment from Step 7):
-     - `POST /users` against empty DB → 200, body `role` === `'owner'`.
-     - `POST /users` against DB with one user → 200, body `role` === `'member'`.
-     - `DELETE /users/:id` on owner → 403, `code === 'owner-protected'`.
-     - `PATCH /users/:id` on owner with `{ role: 'member' }` → 403, `code === 'role-immutable'`.
-     - `PATCH /users/:id` on non-owner with `{ role: 'owner' }` → 409, `code === 'owner-exists'`.
-- **Existing tests checked:**
-  - `repos.users.test.ts:50–55` (`'deletes user and returns true'`) — **must be amended** as described above; this is the one explicit breakage from the new auto-elect rule.
-  - `routes.users.test.ts:85–94` (`'deletes + subsequent 404'`) — **must be amended** the same way.
-  - All other server tests (`repos.progress`, `routes.progress`, `ws.progress`, etc.) create users without asserting role and don't delete them, so they continue to pass under auto-elect.
-  - SDK tests don't construct `User` literals; the new required `role` field on the type doesn't cascade into test fixtures.
+- **Test-first: yes.**
+- **New cases** in `apps/server/test/routes.users.test.ts`:
+  1. `PATCH role without x-horizon-user header → 400 no-user`
+  2. `PATCH role with caller role=member → 403 caller-forbidden`
+  3. `PATCH role with caller=member trying to promote self → 403 caller-forbidden` (header user === path user — confirms gate is on caller role, not self-vs-other)
+  4. `PATCH role with caller=owner, target=admin, body={role:'member'} → 200, body.role === 'member'`
+  5. `PATCH role with caller=admin (admin1), target=other admin (admin2), body={role:'member'} → 200`
+  6. `PATCH role with caller=admin, target=owner, body={role:'member'} → 403 role-immutable` (verifies the caller-gate doesn't shadow the repo's owner protection)
+- **Amend** the existing role-PATCH cases (lines ~127 and ~137) to include `headers: { 'x-horizon-user': owner.id }`. Keep their original assertions.
+- **Do not amend** the non-role PATCH cases (`patches name`, all 7 preferences-merge cases) — they should keep passing without a header.
+- **New Playwright cases** in `apps/e2e/profiles.spec.ts`:
+  - `Profiles tab visible only to owner/admin` — owner sees the tab; member does not.
+  - `admin can demote another admin` — admin1 demotes admin2 via the UI dropdown; row updates.
+- **AC coverage map:**
+  - owner cannot be demoted by an admin → server case 6
+  - owner cannot be deleted → existing `DELETE owner returns 403 owner-protected` (unchanged)
+  - admin can promote/demote another admin → server case 5 + e2e `admin can demote another admin`
+  - member-viewers receive 403 on PATCH role → server cases 2 + 3
+  - tab visibility matches server authority → e2e `Profiles tab visible only to owner/admin` (member view: no tab; member's API call would 403 from the gate)
 
 ## Verification commands
-- `npm test` *(root — runs server + sdk vitest)*
 - `npm -w @horizon/server run typecheck`
 - `npm -w @horizon/server run test`
-- `npm -w @horizon/sdk run build` *(libs/sdk has no `typecheck` script; `build` runs `tsc` and serves the same purpose)*
-- `npm -w @horizon/web run build` *(apps/web has no `typecheck` script; `build` runs `tsc && vite build` and catches type errors)*
+- `npm -w @horizon/sdk run build`
+- `npm -w @horizon/web run build`
+- `npm test` *(root — runs server + sdk vitest)*
 
 ## Risks / open questions
-- **Concurrent `POST /users` on a truly empty DB.** Two requests could each observe count=0. Mitigation: the partial unique index on `role='owner'` lets SQLite reject the second insert atomically; the loser surfaces as `owner-exists` (translated to 409 by the route). The implementer should confirm SQLite is in WAL mode (it is per `db/index.ts`), but no `BEGIN EXCLUSIVE` wrapper is needed — the index is the source of truth.
-- **PATCH on a non-owner with `{ role: 'owner' }`.** This would attempt to mint a second owner. The partial unique index rejects it; the existing try/catch translates that to `owner-exists` (409 via the route). This is the correct behaviour for this slice (no transfer flow yet) — flagged so the implementer does **not** add a redundant guard in `update()`. The catch in `update()` only needs the same substring check as `create()`.
-- **PATCH on the owner with `{ role: 'owner' }`.** The repo treats this as a no-op (allowed). Reject only when the new role *differs*. This avoids surprise 403s when a caller round-trips a User object back.
-- **Backfill tie-break.** When two existing users share the same `created_at`, the migration's `ORDER BY created_at ASC, id ASC` makes the choice deterministic. One-liner comment in the migration is fine; no code change needed.
-- **Setup.tsx in non-empty DB edge case.** `App.tsx` route guard only routes to `/setup` when no users exist, but the route remains reachable directly. The new copy assumes empty-DB context — acceptable because that's the only way to reach Setup via normal flow; manual navigation is a non-goal.
-- **ProfileBadgeButton when `user.role` is `undefined`.** Until the server is upgraded to v3 in dev, an active user fetched via `/users/:id` could (briefly, during the dev cycle) lack `role`. The guard should be `user.role === 'owner'` (strict equality), so an undefined role still shows the delete button — matches prior behaviour and avoids accidentally hiding delete for everyone during the migration. Spell this out in the implementation.
+- **Error code naming.** `caller-forbidden` matches the noun-verb shape of existing codes (`name-taken`, `owner-protected`, `role-immutable`). If a reviewer prefers `forbidden` or `role-forbidden`, it's a one-line rename in `users.ts` + one test file.
+- **DELETE caller gate.** AC explicitly preserves DELETE behaviour, so no caller-role check is added there. A member can still DELETE another non-owner via the API today; that's pre-existing (#12 only added owner-protection) and outside this issue's scope. Flagging so the reviewer doesn't expect a fix bundled in.
+- **Owner-self no-op (`PATCH /users/<ownerId> { role: 'owner' }`).** Repo treats this as a no-op (covered by existing tests from #12); our gate passes (caller=owner). No regression.
+- **Multi-admin race.** Two admins simultaneously demote each other. SQLite serializes writes, so the second write sees the updated role of the first. End state: one admin and one member. Acceptable; AC says nothing about coordination, and the partial unique index on `role='owner'` is the only structural invariant.
+- **Viewer-role UI staleness.** `useActiveUser` re-fetches only on `userId` change. If a viewer's role is changed by someone else mid-session, their Profiles tab visibility won't update until reload. AC's "next request" is server-side; this UI staleness is acceptable and matches the existing theme/preferences pattern.
+- **Owner-row UX.** Rendering a frozen "Owner" label (not a disabled dropdown with an "owner" option) keeps the dropdown options to legal transitions only and avoids exposing the 409 `owner-exists` path through the UI.

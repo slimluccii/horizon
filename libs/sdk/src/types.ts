@@ -13,6 +13,7 @@ export type HorizonErrorCode =
   | 'capabilities-unsupported' | 'transcode-failed' | 'file-read-error'
   | 'audio-track-invalid' | 'max-sessions' | 'probe-failed'
   | 'session-destroyed' | 'network-error'
+  | 'caller-forbidden'
 
 export interface HorizonError {
   code: HorizonErrorCode
@@ -162,11 +163,13 @@ export interface ShowSummary {
   metadata?: ShowMetadataInfo
 }
 
+import type { Preferences } from './preferences.ts'
+
 export interface User {
   id: string
   name: string
   avatar: string | null
-  preferences: Record<string, unknown>
+  preferences: Preferences
   role: 'owner' | 'admin' | 'member'
   createdAt: number
   updatedAt: number

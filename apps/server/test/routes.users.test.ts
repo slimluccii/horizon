@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
 import { openDatabase } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo, type UserRepo } from '../src/repos/users.ts'
 import { registerUsers } from '../src/routes/users.ts'
+import { SUPPORTED_LANGUAGES } from '@horizon/sdk/preferences'
 
 async function buildApp(users: UserRepo) {
   const app = Fastify({ logger: false })
@@ -128,7 +129,7 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
     const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { role: 'member' } })
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': owner.id } })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('role-immutable')
   })
@@ -136,11 +137,191 @@ describe('PATCH + DELETE /users/:id', () => {
   it('PATCH member role to owner returns 409 owner-exists', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'owner' }, headers: { 'x-horizon-user': owner.id } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().code).toBe('owner-exists')
+  })
+
+  it('PATCH role without x-horizon-user header returns 400 no-user', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('no-user')
+  })
+
+  it('PATCH role with caller role=member returns 403 caller-forbidden', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
     users.create({ name: 'Alice' }) // owner
     const member = users.create({ name: 'Bob' })
     const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'owner' } })
-    expect(res.statusCode).toBe(409)
-    expect(res.json().code).toBe('owner-exists')
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' }, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+  })
+
+  it('PATCH role with caller=owner demoting admin returns 200', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const adminUser = users.create({ name: 'Bob' })
+    users.update(adminUser.id, { role: 'admin' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${adminUser.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': owner.id } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().role).toBe('member')
+  })
+
+  it('PATCH role with caller=admin demoting another admin returns 200', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const admin1 = users.create({ name: 'Bob' })
+    users.update(admin1.id, { role: 'admin' })
+    const admin2 = users.create({ name: 'Charlie' })
+    users.update(admin2.id, { role: 'admin' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${admin2.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': admin1.id } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().role).toBe('member')
+  })
+
+  it('PATCH role with caller=admin demoting owner returns 403 role-immutable', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const adminUser = users.create({ name: 'Bob' })
+    users.update(adminUser.id, { role: 'admin' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': adminUser.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('role-immutable')
+  })
+
+  it('PATCH role with caller=member trying to promote self returns 403 caller-forbidden', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'Alice' }) // owner
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' }, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+  })
+})
+
+describe('PATCH /users/:id preferences', () => {
+  it('merges preferences and returns combined blob', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A', preferences: { theme: 'dark', audioLanguage: 'en' } })
+    const app = await buildApp(users)
+    const res = await app.inject({
+      method: 'PATCH', url: `/users/${u.id}`,
+      payload: { preferences: { theme: 'light' } },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().preferences).toEqual({ theme: 'light', audioLanguage: 'en' })
+  })
+
+  it('rejects unknown key in preferences (strict schema)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A' })
+    const app = await buildApp(users)
+    const res = await app.inject({
+      method: 'PATCH', url: `/users/${u.id}`,
+      payload: { preferences: { theme: 'dark', foo: 'bar' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('rejects invalid theme enum value', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A' })
+    const app = await buildApp(users)
+    const res = await app.inject({
+      method: 'PATCH', url: `/users/${u.id}`,
+      payload: { preferences: { theme: 'midnight' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('rejects invalid language code', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A' })
+    const app = await buildApp(users)
+    const res = await app.inject({
+      method: 'PATCH', url: `/users/${u.id}`,
+      payload: { preferences: { audioLanguage: 'klingon' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('accepts every curated language code', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const app = await buildApp(users)
+    for (const { code } of SUPPORTED_LANGUAGES) {
+      const u = users.create({ name: `user-${code}` })
+      const res = await app.inject({
+        method: 'PATCH', url: `/users/${u.id}`,
+        payload: { preferences: { audioLanguage: code, subtitleLanguage: code } },
+      })
+      expect(res.statusCode, `expected 200 for language code ${code}`).toBe(200)
+      expect(res.json().preferences.audioLanguage).toBe(code)
+      expect(res.json().preferences.subtitleLanguage).toBe(code)
+    }
+  })
+
+  it('rejects wrong type for boolean field', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A' })
+    const app = await buildApp(users)
+    const res = await app.inject({
+      method: 'PATCH', url: `/users/${u.id}`,
+      payload: { preferences: { subtitlesEnabled: 'yes' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('leaves existing prefs untouched when preferences key is absent', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A', preferences: { theme: 'light' } })
+    const app = await buildApp(users)
+    const res = await app.inject({
+      method: 'PATCH', url: `/users/${u.id}`,
+      payload: { name: 'B' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().preferences).toEqual({ theme: 'light' })
+  })
+
+  it('partial patch only overwrites supplied keys', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A', preferences: { theme: 'light', subtitlesEnabled: true, audioLanguage: 'fr' } })
+    const app = await buildApp(users)
+    const res = await app.inject({
+      method: 'PATCH', url: `/users/${u.id}`,
+      payload: { preferences: { theme: 'dark' } },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().preferences).toEqual({ theme: 'dark', subtitlesEnabled: true, audioLanguage: 'fr' })
   })
 })
