@@ -13,6 +13,7 @@ export type HorizonErrorCode =
   | 'capabilities-unsupported' | 'transcode-failed' | 'file-read-error'
   | 'audio-track-invalid' | 'max-sessions' | 'probe-failed'
   | 'session-destroyed' | 'network-error'
+  | 'caller-forbidden'
 
 export interface HorizonError {
   code: HorizonErrorCode

@@ -3,6 +3,30 @@
   background: var(--bg-deep);
 }
 
+/* Toast notification */
+.settings__toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  white-space: nowrap;
+  animation: settings-toast-in var(--dur-fast) var(--ease-out);
+}
+
+@keyframes settings-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 .settings__body {
   max-width: 720px;
   margin: 0 auto;

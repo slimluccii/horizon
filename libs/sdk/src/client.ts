@@ -16,6 +16,19 @@ export interface PlayOptions extends Omit<PlaybackSessionOptions, 'sessionInfo' 
   autoCleanup?: boolean
 }
 
+/**
+ * Returns true when an error thrown by HorizonClient indicates the caller's
+ * role was insufficient — typically because an admin demoted themselves and
+ * then attempted a privileged mutation. The web client should use this to
+ * redirect to the Personal tab and show "Your role changed."
+ */
+export function isRoleChangedError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err as Error & { code?: string }).code === 'caller-forbidden'
+  )
+}
+
 export class HorizonClient {
   private baseUrl: string
   private activeUserId: string | null = null

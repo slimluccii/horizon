@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
-import { SUPPORTED_LANGUAGES } from '@horizon/sdk'
+import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
 import type { Preferences, User } from '@horizon/sdk'
 import LargeTopNav from '../components/chrome/LargeTopNav.tsx'
 import './Settings.css'
@@ -15,7 +15,13 @@ function userColor(name: string): string {
   return PALETTE[Math.abs(hash) % PALETTE.length]
 }
 
-function ProfilesPanel({ viewerRole }: { viewerRole: 'owner' | 'admin' | 'member' }) {
+function ProfilesPanel({
+  viewerRole,
+  onRoleChanged,
+}: {
+  viewerRole: 'owner' | 'admin' | 'member'
+  onRoleChanged: () => void
+}) {
   const [rows, setRows] = useState<User[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -32,6 +38,10 @@ function ProfilesPanel({ viewerRole }: { viewerRole: 'owner' | 'admin' | 'member
       const updated = await horizon.users.list()
       setRows(updated)
     } catch (e) {
+      if (isRoleChangedError(e)) {
+        onRoleChanged()
+        return
+      }
       setErr((e as { message?: string }).message ?? 'Failed to update role')
     } finally {
       setBusy(false)
@@ -97,6 +107,8 @@ export default function Settings() {
   const [form, setForm] = useState<Required<Preferences>>(DEFAULT_FORM)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!userId) return
@@ -139,9 +151,25 @@ export default function Settings() {
     setForm(f => ({ ...f, [key]: value }))
   }
 
+  function showToast(message: string) {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast(message)
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
+  }
+
+  function handleRoleChanged() {
+    setActiveTab('Personal')
+    showToast('Your role changed.')
+  }
+
   return (
     <div className="settings">
       <LargeTopNav />
+      {toast && (
+        <div className="settings__toast" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
       <div className="settings__body">
         <div className="settings__tabs">
           {tabs.map(tab => (
@@ -156,7 +184,7 @@ export default function Settings() {
         </div>
 
         {activeTab === 'Profiles' && user && (
-          <ProfilesPanel viewerRole={user.role} />
+          <ProfilesPanel viewerRole={user.role} onRoleChanged={handleRoleChanged} />
         )}
 
         {activeTab === 'Personal' && (
