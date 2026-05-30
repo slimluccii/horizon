@@ -124,10 +124,49 @@ UPDATE users SET role='owner' WHERE id = (SELECT id FROM users ORDER BY created_
 CREATE UNIQUE INDEX idx_users_one_owner ON users(role) WHERE role='owner';
 `
 
+const V4_SQL = `
+-- ServerSettings singleton row. Exactly one row with id=1 (enforced by CHECK).
+CREATE TABLE server_settings (
+  id                          INTEGER PRIMARY KEY CHECK(id = 1),
+
+  -- Library knobs
+  watched_threshold_pct       INTEGER NOT NULL DEFAULT 90,
+  scan_cron_hour              INTEGER NOT NULL DEFAULT 3,
+  scan_concurrency            INTEGER NOT NULL DEFAULT 4,
+  watch_fs                    INTEGER NOT NULL DEFAULT 0,   -- boolean: 0/1
+  watch_debounce_ms           INTEGER NOT NULL DEFAULT 5000,
+
+  -- Metadata knobs
+  tmdb_token                  TEXT,
+  metadata_batch_size         INTEGER NOT NULL DEFAULT 50,
+  metadata_max_age_movie_days INTEGER NOT NULL DEFAULT 30,
+  metadata_max_age_show_days  INTEGER NOT NULL DEFAULT 7,
+  metadata_max_age_ep_days    INTEGER NOT NULL DEFAULT 60,
+
+  -- Playback knobs
+  max_sessions                INTEGER NOT NULL DEFAULT 4,
+  max_renditions              INTEGER NOT NULL DEFAULT 3,
+  ws_grace_ms                 INTEGER NOT NULL DEFAULT 10000,
+  ws_attach_ms                INTEGER NOT NULL DEFAULT 10000,
+  force_encoder               TEXT,
+  tonemap_operator            TEXT    NOT NULL DEFAULT 'hable',
+  tonemap_param               REAL,
+  tonemap_desat               REAL,
+
+  -- Bootstrap tracking: 0 = never seeded from env, 1 = already applied
+  seeded_from_env             INTEGER NOT NULL DEFAULT 0,
+  updated_at                  INTEGER NOT NULL DEFAULT 0
+);
+
+-- Insert the singleton row with hardcoded defaults.
+INSERT INTO server_settings (id) VALUES (1);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
   { version: 3, sql: V3_SQL },
+  { version: 4, sql: V4_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

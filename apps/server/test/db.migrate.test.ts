@@ -7,7 +7,7 @@ describe('migrate', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(3)
+    expect(ver).toBe(4)
   })
 
   it('is idempotent — applying twice leaves version at the latest', () => {
@@ -15,9 +15,9 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(3)
+    expect(ver).toBe(4)
     const rows = db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]
-    expect(rows.map(r => r.version)).toEqual([1, 2, 3])
+    expect(rows.map(r => r.version)).toEqual([1, 2, 3, 4])
   })
 
   it('creates all tables', () => {
@@ -36,6 +36,8 @@ describe('migrate', () => {
     expect(names).toContain('scan_roots')
     expect(names).toContain('tmdb_changes_cursor')
     expect(names).toContain('scan_history')
+    // v4 additions
+    expect(names).toContain('server_settings')
   })
 
   it('enforces kind CHECK on media_items', () => {
@@ -102,7 +104,7 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(3)
+    expect(ver).toBe(4)
     const owners = db.prepare("SELECT id FROM users WHERE role = 'owner'").all() as { id: string }[]
     expect(owners).toHaveLength(1)
     expect(owners[0].id).toBe('u1')

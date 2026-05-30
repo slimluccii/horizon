@@ -113,6 +113,31 @@
   box-shadow: 0 0 0 4px var(--accent-dim);
 }
 
+.settings__input {
+  height: 48px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  padding: 0 16px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color var(--dur-fast);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-dim);
+}
+
+/* Remove number input spinners for a cleaner look */
+.settings__input::-webkit-inner-spin-button,
+.settings__input::-webkit-outer-spin-button { opacity: 0.5; }
+
 /* Toggle row */
 .settings__toggle-row {
   display: flex;
