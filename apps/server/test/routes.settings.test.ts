@@ -4,6 +4,7 @@ import { openDatabase } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo } from '../src/repos/users.ts'
 import { createServerSettings } from '../src/repos/serverSettings.ts'
+import { createSessionManager } from '../src/session/manager.ts'
 import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../src/metadata/refresh.ts'
 import { createChangesCursorRepo } from '../src/repos/scanState.ts'
 import { createMediaRepo } from '../src/repos/media.ts'
@@ -182,6 +183,42 @@ describe('PATCH /settings/server — validation', () => {
     })
     expect(res.statusCode).toBe(200)
   })
+
+  it('rejects maxSessions <= 0', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { maxSessions: 0 },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('rejects maxRenditions <= 0', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { maxRenditions: 0 },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('rejects maxSessions above hard cap', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { maxSessions: 100 },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
 })
 
 describe('serverSettings — change events', () => {
@@ -292,6 +329,98 @@ describe('serverSettings — bootstrapFromEnv', () => {
 
     const row = serverSettings.get()
     expect(row.watchedThresholdPct).toBe(95)   // unchanged
+  })
+})
+
+describe('PATCH /settings/server — playback knobs', () => {
+  it('persists maxSessions and get() reflects new value', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { maxSessions: 8 },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(serverSettings.get().maxSessions).toBe(8)
+  })
+
+  it('persists tonemapOperator and get() reflects new value', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { tonemapOperator: 'mobius' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(serverSettings.get().tonemapOperator).toBe('mobius')
+  })
+
+  it('persists tonemapParam and tonemapDesat', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { tonemapParam: 0.5, tonemapDesat: 0.3 },
+    })
+    expect(res.statusCode).toBe(200)
+    const row = serverSettings.get()
+    expect(row.tonemapParam).toBeCloseTo(0.5)
+    expect(row.tonemapDesat).toBeCloseTo(0.3)
+  })
+
+  it('SessionManager reads maxSessions live — new limit takes effect immediately', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const serverSettings = createServerSettings(db)
+
+    // Start with maxSessions=1
+    serverSettings.update({ maxSessions: 1 })
+    const sessions = createSessionManager(serverSettings)
+
+    // Exhaust the first slot
+    sessions.create({
+      mediaId: 'm1', filePath: '/f.mkv',
+      plan: {
+        method: 'direct-play', needsToneMap: false,
+        toneMap: { operator: 'hable', postCorrection: true },
+        renditions: [], audioTrackIndex: 0,
+        audioStrategy: 'copy', videoStrategy: 'copy',
+      },
+      renditionCodecs: [], sessionDir: '', sessionReady: false,
+      durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
+    })
+
+    // Second create should fail at limit=1
+    expect(() => sessions.create({
+      mediaId: 'm2', filePath: '/g.mkv',
+      plan: {
+        method: 'direct-play', needsToneMap: false,
+        toneMap: { operator: 'hable', postCorrection: true },
+        renditions: [], audioTrackIndex: 0,
+        audioStrategy: 'copy', videoStrategy: 'copy',
+      },
+      renditionCodecs: [], sessionDir: '', sessionReady: false,
+      durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
+    })).toThrow(expect.objectContaining({ code: 'max-sessions' }))
+
+    // Raise the limit live — no restart
+    serverSettings.update({ maxSessions: 4 })
+
+    // Now the create succeeds
+    expect(() => sessions.create({
+      mediaId: 'm2', filePath: '/g.mkv',
+      plan: {
+        method: 'direct-play', needsToneMap: false,
+        toneMap: { operator: 'hable', postCorrection: true },
+        renditions: [], audioTrackIndex: 0,
+        audioStrategy: 'copy', videoStrategy: 'copy',
+      },
+      renditionCodecs: [], sessionDir: '', sessionReady: false,
+      durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
+    })).not.toThrow()
   })
 })
 

@@ -4,6 +4,7 @@ import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { MediaRepo } from '../repos/media.ts'
 import type { UserRepo } from '../repos/users.ts'
 import type { ProgressRepo } from '../repos/progress.ts'
+import type { ServerSettings } from '../repos/serverSettings.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { PlaybackOrchestrator, StartPlaybackInput } from '../session/playback.ts'
 import { handleWsMessage } from '../ws/handler.ts'
@@ -19,6 +20,7 @@ export function registerSessions(
   sessions: SessionManager,
   progressRepo: ProgressRepo,
   orchestrator: PlaybackOrchestrator,
+  serverSettings: ServerSettings,
 ) {
   app.post<{ Body: StartPlaybackInput }>('/sessions', async (req, reply) => {
     let started
@@ -115,7 +117,7 @@ export function registerSessions(
       if (session.state === 'destroyed') return
       session.state = 'detached'
       session.wsSocket = undefined
-      session.graceTimer = setTimeout(() => sessions.destroy(session.id), cfg.wsGraceMs)
+      session.graceTimer = setTimeout(() => sessions.destroy(session.id), serverSettings.get().wsGraceMs)
     })
   })
 }

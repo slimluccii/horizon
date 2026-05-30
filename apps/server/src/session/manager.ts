@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
-import type { Config } from '../config.ts'
 import type { Session } from './types.ts'
 import type { SessionRuntime } from './runtime.ts'
+import type { ServerSettings } from '../repos/serverSettings.ts'
 import { cleanupSessionDir, killFfmpeg } from '../transcode/ffmpeg.ts'
 
 export interface SessionManager {
@@ -19,13 +19,14 @@ export interface SessionManager {
   getRuntime(id: string): SessionRuntime | undefined
 }
 
-export function createSessionManager(cfg: Config): SessionManager {
+export function createSessionManager(serverSettings: ServerSettings): SessionManager {
   const sessions = new Map<string, Session>()
   const runtimes = new Map<string, SessionRuntime>()
   const byToken = new Map<string, string>()
 
   function create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs' | 'currentStartSegment'>): Session {
-    if (sessions.size >= cfg.maxSessions) {
+    const { maxSessions, wsAttachMs } = serverSettings.get()
+    if (sessions.size >= maxSessions) {
       throw Object.assign(new Error('Server at session capacity'), { code: 'max-sessions' })
     }
 
@@ -48,7 +49,7 @@ export function createSessionManager(cfg: Config): SessionManager {
         console.log(`Session ${id}: WS attach timeout`)
         await destroy(id)
       }
-    }, cfg.wsAttachMs)
+    }, wsAttachMs)
 
     return session
   }

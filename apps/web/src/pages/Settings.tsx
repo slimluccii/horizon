@@ -108,6 +108,21 @@ type MetadataForm = {
   metadataMaxAgeEpDays: number
 }
 
+type PlaybackForm = {
+  maxSessions: number
+  maxRenditions: number
+  wsGraceMs: number
+  wsAttachMs: number
+  forceEncoder: string
+  tonemapOperator: string
+  tonemapParam: string      // stored as string so the input can be empty for null
+  tonemapDesat: string
+}
+
+const TONEMAP_OPERATORS = [
+  'hable', 'mobius', 'reinhard', 'gamma', 'clip', 'linear', 'none',
+] as const
+
 function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
   const [initialLib, setInitialLib] = useState<LibraryForm | null>(null)
   const [form, setForm] = useState<LibraryForm | null>(null)
@@ -120,6 +135,12 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [playbackInitial, setPlaybackInitial] = useState<PlaybackForm | null>(null)
+  const [playbackForm, setPlaybackForm] = useState<PlaybackForm | null>(null)
+  const [playbackBusy, setPlaybackBusy] = useState(false)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
+  const [detectedEncoder, setDetectedEncoder] = useState<string | null>(null)
+
   useEffect(() => {
     horizon.settings.getServer().then(s => {
       const f: LibraryForm = {
@@ -131,6 +152,7 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
       }
       setInitialLib(f)
       setForm(f)
+
       const m: MetadataForm = {
         metadataBatchSize: s.metadataBatchSize,
         metadataMaxAgeMovieDays: s.metadataMaxAgeMovieDays,
@@ -140,7 +162,24 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
       setInitialMeta(m)
       setMetaForm(m)
       setTmdbStatus(s.tmdbToken)
+
+      const pf: PlaybackForm = {
+        maxSessions: s.maxSessions,
+        maxRenditions: s.maxRenditions,
+        wsGraceMs: s.wsGraceMs,
+        wsAttachMs: s.wsAttachMs,
+        forceEncoder: s.forceEncoder ?? '',
+        tonemapOperator: s.tonemapOperator,
+        tonemapParam: s.tonemapParam != null ? String(s.tonemapParam) : '',
+        tonemapDesat: s.tonemapDesat != null ? String(s.tonemapDesat) : '',
+      }
+      setPlaybackInitial(pf)
+      setPlaybackForm(pf)
     }).catch(() => setError('Failed to load server settings.'))
+
+    fetch('/health').then(r => r.json()).then((h: { hwAccel?: string }) => {
+      if (h.hwAccel) setDetectedEncoder(h.hwAccel)
+    }).catch(() => {/* non-critical */})
   }, [])
 
   if (!form || !initialLib || !metaForm || !initialMeta) {
@@ -155,6 +194,10 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
 
   function setMeta<K extends keyof MetadataForm>(key: K, value: MetadataForm[K]) {
     setMetaForm(f => f ? { ...f, [key]: value } : f)
+  }
+
+  function setPlayback<K extends keyof PlaybackForm>(key: K, value: PlaybackForm[K]) {
+    setPlaybackForm(f => f ? { ...f, [key]: value } : f)
   }
 
   const libDiff = Object.fromEntries(
@@ -197,6 +240,40 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
       setError('Failed to save settings. Please try again.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const playbackDiff: Record<string, unknown> = {}
+  if (playbackForm && playbackInitial) {
+    if (playbackForm.maxSessions !== playbackInitial.maxSessions) playbackDiff.maxSessions = playbackForm.maxSessions
+    if (playbackForm.maxRenditions !== playbackInitial.maxRenditions) playbackDiff.maxRenditions = playbackForm.maxRenditions
+    if (playbackForm.wsGraceMs !== playbackInitial.wsGraceMs) playbackDiff.wsGraceMs = playbackForm.wsGraceMs
+    if (playbackForm.wsAttachMs !== playbackInitial.wsAttachMs) playbackDiff.wsAttachMs = playbackForm.wsAttachMs
+    if (playbackForm.forceEncoder !== playbackInitial.forceEncoder) {
+      playbackDiff.forceEncoder = playbackForm.forceEncoder === '' ? null : playbackForm.forceEncoder
+    }
+    if (playbackForm.tonemapOperator !== playbackInitial.tonemapOperator) playbackDiff.tonemapOperator = playbackForm.tonemapOperator
+    if (playbackForm.tonemapParam !== playbackInitial.tonemapParam) {
+      playbackDiff.tonemapParam = playbackForm.tonemapParam === '' ? null : Number(playbackForm.tonemapParam)
+    }
+    if (playbackForm.tonemapDesat !== playbackInitial.tonemapDesat) {
+      playbackDiff.tonemapDesat = playbackForm.tonemapDesat === '' ? null : Number(playbackForm.tonemapDesat)
+    }
+  }
+  const canSavePlayback = Object.keys(playbackDiff).length > 0 && !playbackBusy
+
+  async function handleSavePlayback() {
+    if (!canSavePlayback) return
+    setPlaybackBusy(true)
+    setPlaybackError(null)
+    try {
+      await horizon.settings.patchServer(playbackDiff)
+      setPlaybackInitial({ ...playbackForm! })
+      onSave('Playback settings updated.')
+    } catch {
+      setPlaybackError('Failed to save settings. Please try again.')
+    } finally {
+      setPlaybackBusy(false)
     }
   }
 
@@ -382,6 +459,139 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
+
+      {/* ---- Playback subsection ---------------------------------------- */}
+      {playbackForm && (
+        <>
+          <p className="settings__section-title">Playback</p>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-max-sessions">
+              Max concurrent sessions
+            </label>
+            <input
+              id="settings-max-sessions"
+              type="number"
+              className="settings__input"
+              min={1} max={64}
+              value={playbackForm.maxSessions}
+              onChange={e => setPlayback('maxSessions', Number(e.target.value))}
+            />
+          </div>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-max-renditions">
+              Max renditions (ABR ladder size)
+            </label>
+            <input
+              id="settings-max-renditions"
+              type="number"
+              className="settings__input"
+              min={1} max={8}
+              value={playbackForm.maxRenditions}
+              onChange={e => setPlayback('maxRenditions', Number(e.target.value))}
+            />
+          </div>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-ws-grace">
+              WS grace period (ms)
+            </label>
+            <input
+              id="settings-ws-grace"
+              type="number"
+              className="settings__input"
+              min={0}
+              value={playbackForm.wsGraceMs}
+              onChange={e => setPlayback('wsGraceMs', Number(e.target.value))}
+            />
+          </div>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-ws-attach">
+              WS attach timeout (ms)
+            </label>
+            <input
+              id="settings-ws-attach"
+              type="number"
+              className="settings__input"
+              min={0}
+              value={playbackForm.wsAttachMs}
+              onChange={e => setPlayback('wsAttachMs', Number(e.target.value))}
+            />
+          </div>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-force-encoder">
+              Force encoder{detectedEncoder ? ` (current: ${detectedEncoder})` : ''}
+            </label>
+            <input
+              id="settings-force-encoder"
+              type="text"
+              className="settings__input"
+              placeholder="e.g. h264_videotoolbox (leave empty for auto-detect)"
+              value={playbackForm.forceEncoder}
+              onChange={e => setPlayback('forceEncoder', e.target.value)}
+            />
+          </div>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-tonemap-op">
+              Tone-map operator
+            </label>
+            <select
+              id="settings-tonemap-op"
+              className="settings__select"
+              value={playbackForm.tonemapOperator}
+              onChange={e => setPlayback('tonemapOperator', e.target.value)}
+            >
+              {TONEMAP_OPERATORS.map(op => (
+                <option key={op} value={op}>{op}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-tonemap-param">
+              Tone-map param (leave empty for operator default)
+            </label>
+            <input
+              id="settings-tonemap-param"
+              type="number"
+              className="settings__input"
+              placeholder="operator default"
+              value={playbackForm.tonemapParam}
+              onChange={e => setPlayback('tonemapParam', e.target.value)}
+            />
+          </div>
+
+          <div className="settings__field">
+            <label className="settings__label" htmlFor="settings-tonemap-desat">
+              Tone-map desat (leave empty for operator default)
+            </label>
+            <input
+              id="settings-tonemap-desat"
+              type="number"
+              className="settings__input"
+              placeholder="operator default"
+              value={playbackForm.tonemapDesat}
+              onChange={e => setPlayback('tonemapDesat', e.target.value)}
+            />
+          </div>
+
+          {playbackError && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{playbackError}</p>}
+
+          <div className="settings__actions">
+            <button
+              className="settings__save"
+              disabled={!canSavePlayback}
+              onClick={handleSavePlayback}
+            >
+              {playbackBusy ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </>
+      )}
     </>
   )
 }

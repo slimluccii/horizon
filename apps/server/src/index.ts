@@ -62,9 +62,9 @@ async function main() {
     onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false }) },  // newly indexed items get metadata fast
   })
 
-  const sessions = createSessionManager(cfg)
+  const sessions = createSessionManager(serverSettings)
   const orchestrator = createPlaybackOrchestrator({
-    cfg, hwAccel, media: mediaRepo, users: userRepo, sessions,
+    cfg, hwAccel, media: mediaRepo, users: userRepo, sessions, serverSettings,
   })
 
   const app = await buildServer(
