@@ -88,6 +88,18 @@ method, the ffmpeg child process (if any), the on-disk session dir holding
 HLS segments, the WS socket, and lifecycle state. See
 [server/src/session/types.ts](server/src/session/types.ts).
 
+**Track-index bounds invariant.** A client-supplied `audioTrackIndex` /
+`subtitleTrackIndex` is validated at *both* entry points before it can reach
+ffmpeg — an out-of-range index is otherwise a trivial mid-session DoS (the
+ffmpeg run crashes). At session create, `PlaybackOrchestrator.startPlayback`
+checks the index against the probed `MediaItem` (rejecting with
+`audio-track-invalid` / `invalid-input`). Mid-session switches over the WS are
+checked in the `audio-track` handler against `Session.audioTrackCount` /
+`subtitleTrackCount`, which are stamped at create from the same probe (the
+`PlaybackPlan` does not carry the track list, so the counts live on the
+Session). The counts are stable because a MediaItem is immutable for the life
+of a Session.
+
 ### SessionState
 `pre-buffer | active | detached | parked | destroyed`. Transitions are driven
 by WS attach, WS close (grace timer), explicit DELETE, and session destroy.

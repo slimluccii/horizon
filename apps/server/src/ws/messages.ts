@@ -83,6 +83,12 @@ export function parseWsMessage(raw: unknown): WsMessage | null {
         segmentDownloadMs: typeof m.segmentDownloadMs === 'number' ? m.segmentDownloadMs : undefined,
       }
     case 'seek':
+      // Lower bound only: a negative position is meaningless and dropped. The
+      // upper bound is intentionally NOT capped here — an over-duration WS seek
+      // restarts ffmpeg cleanly at the clamped segment (msToSegment guards with
+      // Math.max(0, …)), so it is a harmless no-op rather than a crash. The
+      // HTTP create path (#48) does enforce startPositionMs <= duration because
+      // that value seeds the initial spawn.
       if (typeof m.positionMs !== 'number' || m.positionMs < 0) return null
       return { type: 'seek', positionMs: m.positionMs }
     case 'quality-override': {

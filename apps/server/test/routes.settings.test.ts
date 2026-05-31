@@ -391,6 +391,7 @@ describe('PATCH /settings/server — playback knobs', () => {
       },
       renditionCodecs: [], sessionDir: '', sessionReady: false,
       durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
+      audioTrackCount: 0, subtitleTrackCount: 0,
     })
 
     // Second create should fail at limit=1
@@ -404,6 +405,7 @@ describe('PATCH /settings/server — playback knobs', () => {
       },
       renditionCodecs: [], sessionDir: '', sessionReady: false,
       durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
+      audioTrackCount: 0, subtitleTrackCount: 0,
     })).toThrow(expect.objectContaining({ code: 'max-sessions' }))
 
     // Raise the limit live — no restart
@@ -420,6 +422,7 @@ describe('PATCH /settings/server — playback knobs', () => {
       },
       renditionCodecs: [], sessionDir: '', sessionReady: false,
       durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
+      audioTrackCount: 0, subtitleTrackCount: 0,
     })).not.toThrow()
   })
 })

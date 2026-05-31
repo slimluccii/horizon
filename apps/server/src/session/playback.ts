@@ -38,7 +38,9 @@ import {
   spawnFfmpeg as defaultSpawnFfmpeg,
 } from '../transcode/ffmpeg.ts'
 import { extractSubtitles as defaultExtractSubtitles } from '../transcode/subtitles.ts'
+import { getFfmpegStderrTail } from '../transcode/ffmpeg.ts'
 import { createSessionRuntime } from './runtime.ts'
+import { TranscodeError } from './errors.ts'
 
 export interface StartPlaybackInput {
   mediaId: string
@@ -100,6 +102,8 @@ type PlaybackErrorCode =
   | typeof ErrorCodes.MEDIA_NOT_FOUND
   | typeof ErrorCodes.USER_NOT_FOUND
   | typeof ErrorCodes.MAX_SESSIONS
+  | typeof ErrorCodes.AUDIO_TRACK_INVALID
+  | typeof ErrorCodes.INVALID_INPUT
 
 class PlaybackError extends Error {
   constructor(public code: PlaybackErrorCode, message: string) {
@@ -124,6 +128,34 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         throw new PlaybackError(ErrorCodes.USER_NOT_FOUND, 'User not found')
       }
 
+      // Validate the requested audio track up-front so we fail fast at session
+      // creation rather than during ffmpeg spawn. A client that omits
+      // audioTrackIndex defaults to 0, so a file with zero audio tracks also
+      // rejects here (you cannot select an audio track that doesn't exist).
+      const requestedAudioTrack = input.audioTrackIndex ?? 0
+      const audioTrackCount = mediaItem.audioTracks?.length ?? 0
+      if (requestedAudioTrack < 0 || requestedAudioTrack >= audioTrackCount) {
+        throw new PlaybackError(ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track index out of bounds')
+      }
+
+      // Subtitle track: -1 (or null) means "no subtitles". Any other value must
+      // index an existing track.
+      const requestedSubtitle = input.subtitleTrackIndex
+      if (
+        requestedSubtitle !== undefined && requestedSubtitle !== null && requestedSubtitle !== -1 &&
+        requestedSubtitle >= (mediaItem.subtitleTracks?.length ?? 0)
+      ) {
+        throw new PlaybackError(ErrorCodes.INVALID_INPUT, 'Subtitle track index out of bounds')
+      }
+
+      // Seek position cannot exceed the media duration.
+      if (
+        input.startPositionMs !== undefined &&
+        input.startPositionMs > (mediaItem.durationSec ?? 0) * 1000
+      ) {
+        throw new PlaybackError(ErrorCodes.INVALID_INPUT, 'Start position exceeds media duration')
+      }
+
       // Read playback knobs live from serverSettings so changes take effect
       // on the next session create without a server restart.
       const liveSettings = serverSettings.get()
@@ -132,7 +164,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         throw new PlaybackError(ErrorCodes.MAX_SESSIONS, 'Server at session capacity')
       }
 
-      const audioTrackIndex = input.audioTrackIndex ?? 0
+      const audioTrackIndex = requestedAudioTrack
       const subtitleTrackIndex = input.subtitleTrackIndex ?? null
 
       const plan = buildPlan({
@@ -149,6 +181,8 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         filePath: mediaItem.filePath!,
         plan,
         selectedSubtitleTrack: subtitleTrackIndex,
+        audioTrackCount,
+        subtitleTrackCount: mediaItem.subtitleTracks?.length ?? 0,
         renditionCodecs: [],
         sessionDir: '',
         sessionReady: false,
@@ -204,9 +238,26 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         try {
           await spawner(session, hwAccel, plan, ctx)
         } catch (err) {
-          // Reap the half-created session so callers don't have to.
+          // Capture the stderr tail (if ffmpeg got far enough to spawn) so the
+          // failure can be diagnosed from a single log line.
+          const stderrTail = session.ffmpegProcess
+            ? getFfmpegStderrTail(session.ffmpegProcess)
+            : ''
+          const message = err instanceof Error ? err.message : String(err)
+          const transcodeError = new TranscodeError(
+            ErrorCodes.FFMPEG_SPAWN_FAILED,
+            message,
+            stderrTail,
+          )
+          console.error(
+            `Session ${session.id}: spawn failed (media ${input.mediaId}, code ${transcodeError.code}): ${message}` +
+            (stderrTail ? `\n=== ffmpeg stderr tail ===\n${stderrTail}\n=== end ===` : ''),
+          )
+          // Reap the half-created session so callers don't have to. destroy()
+          // is bulletproof (each cleanup step is isolated), so this never
+          // throws over the original spawn failure.
           await sessions.destroy(session.id).catch(() => {/* already gone */})
-          throw err
+          throw transcodeError
         }
 
         session.sessionReady = true

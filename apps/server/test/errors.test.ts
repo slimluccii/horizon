@@ -15,6 +15,7 @@ const SRC_DIR = path.resolve(__dirname, '../src')
  * deliberate decision rather than silent drift.
  */
 const EXPECTED_CODES = [
+  'audio-track-invalid',
   'caller-forbidden',
   'fetch-failed',
   'ffmpeg-spawn-failed',

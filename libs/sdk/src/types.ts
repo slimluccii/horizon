@@ -17,6 +17,7 @@ export type PlaybackMethod = 'direct-play' | 'direct-stream' | 'partial-transcod
  * Values are stable kebab-case strings — they are part of the API contract.
  */
 export const ErrorCodes = {
+  AUDIO_TRACK_INVALID: 'audio-track-invalid',
   CALLER_FORBIDDEN: 'caller-forbidden',
   FETCH_FAILED: 'fetch-failed',
   FFMPEG_SPAWN_FAILED: 'ffmpeg-spawn-failed',
@@ -52,7 +53,7 @@ export type ServerErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes]
  */
 export type ClientErrorCode =
   | 'session-attach-timeout' | 'capabilities-unsupported' | 'file-read-error'
-  | 'audio-track-invalid' | 'probe-failed' | 'session-destroyed' | 'network-error'
+  | 'probe-failed' | 'session-destroyed' | 'network-error'
 
 export type HorizonErrorCode = ServerErrorCode | ClientErrorCode
 

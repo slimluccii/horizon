@@ -66,19 +66,32 @@ export function createSessionManager(serverSettings: ServerSettings): SessionMan
     const session = sessions.get(id)
     if (!session) return
 
+    // Each cleanup step is isolated: a failure in one must never abort the
+    // others or prevent the session from being marked destroyed. This
+    // guarantees the ffmpeg process is killed and bookkeeping is cleared even
+    // if (say) cleanupSessionDir throws on a stuck filesystem.
+
     // Mark runtime destroyed first so any in-flight transition observes the
     // terminal state when it returns to update bookkeeping.
-    runtimes.get(id)?.markDestroyed()
+    try { runtimes.get(id)?.markDestroyed() } catch (err) {
+      console.error(`Session ${id}: markDestroyed failed`, err)
+    }
 
-    clearTimeout(session.attachTimer)
-    clearTimeout(session.graceTimer)
-    killFfmpeg(session)
+    try { clearTimeout(session.attachTimer) } catch {/* not set */}
+    try { clearTimeout(session.graceTimer) } catch {/* not set */}
+
+    try { killFfmpeg(session) } catch (err) {
+      console.error(`Session ${id}: killFfmpeg failed`, err)
+    }
+
     if (session.subtitleProcess && !session.subtitleProcess.killed) {
       try { session.subtitleProcess.kill('SIGTERM') } catch {/* gone */}
     }
+
     await cleanupSessionDir(session.sessionDir).catch((err) => {
       console.error(`Session ${id}: cleanup failed`, err)
     })
+
     byToken.delete(session.reconnectToken)
     sessions.delete(id)
     runtimes.delete(id)

@@ -13,6 +13,13 @@ export interface Session {
    *  no field on Session duplicates plan contents. */
   plan: PlaybackPlan
   selectedSubtitleTrack: number | null
+  /** Number of audio tracks the source media exposes. Stamped at create from
+   *  the probed MediaItem. Used to bounds-check mid-session audio-track
+   *  switches over the WS so an out-of-range index can never reach ffmpeg. */
+  audioTrackCount: number
+  /** Number of subtitle tracks the source media exposes. Stamped at create.
+   *  Bounds-checks mid-session subtitle switches over the WS. */
+  subtitleTrackCount: number
   /** Codec strings for each rendition, written by spawnFfmpeg from the
    *  rendered args. Used by the master playlist + WS notify. */
   renditionCodecs: string[]
