@@ -1,26 +1,11 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import type { ProgressRepo } from '../repos/progress.ts'
 import { sendNotFound, badRequest } from './errors.ts'
+import { requireUser } from './authz.ts'
 
 const PatchBody = z.object({ watched: z.boolean() })
-
-/** Ensure the active-user header is present + matches the path user + resolves
- *  to an existing row. Returns null and writes a reply on failure. */
-function requireUser(
-  users: UserRepo,
-  req: FastifyRequest,
-  reply: FastifyReply,
-  pathUserId: string,
-): string | null {
-  const hdr = req.headers['x-horizon-user']
-  const id = typeof hdr === 'string' ? hdr : null
-  if (!id) { badRequest(reply, 'no-user', 'Missing X-Horizon-User header'); return null }
-  if (id !== pathUserId) { badRequest(reply, 'user-mismatch', 'Header user does not match path'); return null }
-  if (!users.get(id)) { badRequest(reply, 'no-user', 'User not found'); return null }
-  return id
-}
 
 export function registerProgress(
   app: FastifyInstance,
