@@ -249,4 +249,104 @@ describe('MetadataRefreshWorker', () => {
       expect(cursor.get('tv')).not.toBeNull()
     })
   })
+
+  describe('TMDB connectivity errorState surfacing (#64)', () => {
+    function failingTmdb(): TmdbProvider {
+      return {
+        ...fakeTmdb(),
+        async changedMovieIds() { throw new Error('movie down') },
+        async changedShowIds() { throw new Error('tv down') },
+      } as any
+    }
+
+    it('captures the TMDB error in the run result and status()', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb: failingTmdb(), changesCursor: createChangesCursorRepo(db) },
+      )
+      const r = await worker.run({ useChangesFeed: true })
+      expect(r.errorState).not.toBeNull()
+      expect(r.errorState!.code).toBe('tmdb-changes-unreachable')
+      expect(r.errorState!.message).toMatch(/movie down/)
+      expect(r.errorState!.message).toMatch(/tv down/)
+      expect(r.errorState!.firstOccurredAt).toBeGreaterThan(0)
+      // Exposed via status() for the /library/scan-status route.
+      const st = worker.status()
+      expect(st.errorState).not.toBeNull()
+      expect(st.errorState!.code).toBe('tmdb-changes-unreachable')
+    })
+
+    it('reports a partial failure (one kind fails, the other succeeds)', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const tmdb = {
+        ...fakeTmdb(),
+        async changedMovieIds() { throw new Error('movie 401') },
+        async changedShowIds() { return [] },
+      } as any
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb, changesCursor: createChangesCursorRepo(db) },
+      )
+      const r = await worker.run({ useChangesFeed: true })
+      expect(r.errorState).not.toBeNull()
+      expect(r.errorState!.message).toMatch(/movie/)
+      expect(r.errorState!.message).not.toMatch(/tv/)
+    })
+
+    it('preserves firstOccurredAt across a consecutive-failure streak', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb: failingTmdb(), changesCursor: createChangesCursorRepo(db) },
+      )
+      const first = await worker.run({ useChangesFeed: true })
+      const second = await worker.run({ useChangesFeed: true })
+      expect(second.errorState!.firstOccurredAt).toBe(first.errorState!.firstOccurredAt)
+    })
+
+    it('clears errorState on the next successful changes-feed run', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const calls = { n: 0 }
+      const tmdb = {
+        ...fakeTmdb(),
+        async changedMovieIds(start: string, end: string) {
+          calls.n++
+          if (calls.n === 1) throw new Error('transient outage')
+          return start && end ? [42] : []
+        },
+        async changedShowIds() { return [] },
+      } as any
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb, changesCursor: createChangesCursorRepo(db) },
+      )
+      const failed = await worker.run({ useChangesFeed: true })
+      expect(failed.errorState).not.toBeNull()
+      const ok = await worker.run({ useChangesFeed: true })
+      expect(ok.errorState).toBeNull()
+      expect(worker.status().errorState).toBeNull()
+    })
+
+    it('does not set errorState for per-item enrichment failures (TMDB reachable)', async () => {
+      // Changes feed succeeds (returns [42]) but refreshOne fails to resolve the
+      // movie → failed++ but errorState stays null (item-level, not TMDB-level).
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const tmdb = {
+        ...fakeTmdb(),
+        async changedMovieIds() { return [42] },
+        async changedShowIds() { return [] },
+        async movieByTmdbId() { return null },
+        async movieByImdbId() { return null },
+        async searchMovie() { return null },
+      } as any
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb, changesCursor: createChangesCursorRepo(db) },
+      )
+      const r = await worker.run({ useChangesFeed: true })
+      expect(r.failed).toBeGreaterThan(0)
+      expect(r.errorState).toBeNull()
+    })
+  })
 })
