@@ -5,6 +5,7 @@ import { createMediaRepo } from '../src/repos/media.ts'
 import { createCollectionsRepo } from '../src/repos/collections.ts'
 import { createScanRootsRepo, createScanHistoryRepo } from '../src/repos/scanState.ts'
 import { createScanManager } from '../src/scanner/manager.ts'
+import type { ScanScope } from '../src/scanner/scanner.ts'
 
 function setup() {
   const db = openDatabase(':memory:')
@@ -59,16 +60,17 @@ describe('ScanManager', () => {
 
   it('full request supersedes pending sub-paths', async () => {
     const deps = setup()
-    let lastScope: { fullScope?: boolean } | null = null
+    const seenScopes: ScanScope[] = []
     const mgr = createScanManager(baseCfg, {
       ...deps,
-      onScanFinished: (r) => { lastScope = r.scope as any },
+      onScanFinished: (r) => { seenScopes.push(r.scope) },
     })
     const p1 = mgr.request({ trigger: 'watcher', paths: ['/nonexistent/movies/A'] })
     // Queue a full scan while the first runs.
     const p2 = mgr.request({ trigger: 'manual', paths: [] })
     await Promise.all([p1, p2])
     // The follow-up after first finishes should be a full scope.
+    const lastScope = seenScopes.at(-1)
     expect(lastScope?.fullScope).toBe(true)
   })
 
