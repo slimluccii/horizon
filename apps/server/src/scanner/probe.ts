@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, stat, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
@@ -144,7 +144,10 @@ function cacheKey(filePath: string, mtimeMs: number, size: number) {
 }
 
 async function readCache(cacheDir: string, key: string): Promise<CacheEntry | null> {
-  const entryPath = path.join(cacheDir, `${key.slice(0, 8)}.json`)
+  // Use the FULL 40-char SHA1 key as the filename. Truncating to 8 chars
+  // risked collisions (two distinct files hashing to the same prefix would
+  // overwrite each other's cache).
+  const entryPath = path.join(cacheDir, `${key}.json`)
   try {
     const raw = await readFile(entryPath, 'utf8')
     return JSON.parse(raw) as CacheEntry
@@ -155,8 +158,18 @@ async function readCache(cacheDir: string, key: string): Promise<CacheEntry | nu
 
 async function writeCache(cacheDir: string, key: string, result: ProbeResult) {
   await mkdir(cacheDir, { recursive: true })
-  const entryPath = path.join(cacheDir, `${key.slice(0, 8)}.json`)
-  await writeFile(entryPath, JSON.stringify({ key, result }))
+  const entryPath = path.join(cacheDir, `${key}.json`)
+  // Write to a unique temp file, then atomically rename into place. Concurrent
+  // writers can no longer interleave bytes in the final file — the reader
+  // always sees either the old complete file or the new complete file.
+  const tempPath = path.join(cacheDir, `${key}-${Math.random().toString(36).slice(2)}.tmp`)
+  try {
+    await writeFile(tempPath, JSON.stringify({ key, result }))
+    await rename(tempPath, entryPath)
+  } finally {
+    // Best-effort cleanup if the rename never happened (e.g. write threw).
+    await unlink(tempPath).catch(() => {})
+  }
 }
 
 export async function probe(filePath: string, cacheDir: string): Promise<ProbeResult> {
