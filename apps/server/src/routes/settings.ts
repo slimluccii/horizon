@@ -1,16 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import type { ServerSettings } from '../repos/serverSettings.ts'
 import { badRequest, errorReply } from './errors.ts'
-
-function resolveCallerRole(users: UserRepo, req: FastifyRequest): { id: string; role: 'owner' | 'admin' | 'member' } | null {
-  const hdr = req.headers['x-horizon-user']
-  const id = typeof hdr === 'string' ? hdr : null
-  if (!id) return null
-  const u = users.get(id)
-  return u ? { id: u.id, role: u.role } : null
-}
+import { resolveCallerRole } from './authz.ts'
 
 /**
  * Zod schema for the writable subset of ServerSettingsRow.
