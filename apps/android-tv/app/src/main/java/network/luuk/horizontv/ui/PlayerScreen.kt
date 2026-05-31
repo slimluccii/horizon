@@ -130,13 +130,25 @@ fun PlayerScreen(
     }
 
     // Periodic progress reports, every 5 s.
-    LaunchedEffect(sess) {
-        if (sess == null) return@LaunchedEffect
-        while (true) {
-            delay(5_000)
-            val pos = player.currentPosition.toInt()
-            val dur = player.duration.takeIf { it > 0 }?.toInt() ?: 0
-            if (dur > 0) socket.reportProgress(pos, dur)
+    // Use a DisposableEffect so the polling coroutine is explicitly cancelled
+    // when the session changes or PlayerScreen exits, preventing coroutine
+    // leaks and stalled delay() calls on a stale session/socket.
+    DisposableEffect(sess) {
+        val progressJob = if (sess != null) {
+            scope.launch {
+                while (true) {
+                    delay(5_000)
+                    val pos = player.currentPosition.toInt()
+                    val dur = player.duration.takeIf { it > 0 }?.toInt() ?: 0
+                    if (dur > 0) socket.reportProgress(pos, dur)
+                }
+            }
+        } else null
+        onDispose {
+            /* Explicitly cancel the progress-reporting job when the session
+             * changes or PlayerScreen exits, to prevent coroutine leaks and
+             * stalled delay() calls. */
+            progressJob?.cancel()
         }
     }
 
