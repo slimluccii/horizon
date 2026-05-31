@@ -30,6 +30,10 @@ export function registerPlaylists(app: FastifyInstance, sessions: SessionManager
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
+      const r = parseInt(req.params.r, 10)
+      if (r < 0 || r >= session.plan.renditions.length) {
+        return badRequest(reply, ErrorCodes.INVALID_INPUT, `Rendition ${r} does not exist`)
+      }
       // Static VOD playlist for the entire media duration. Listed segments may
       // not yet exist on disk — the segment route produces them on demand.
       const playlist = buildRenditionPlaylist(session.durationSec, `${req.params.r}/`)
