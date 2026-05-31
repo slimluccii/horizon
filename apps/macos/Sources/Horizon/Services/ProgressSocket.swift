@@ -9,7 +9,22 @@ import Foundation
 /// surface an alert.
 @Observable
 final class ProgressSocket {
+    /// Internal connection lifecycle. The public `isConnected` flag is derived
+    /// from this so the UI never sees `true` until the socket has actually
+    /// proven itself by receiving at least one message from the server.
+    enum ConnectionState {
+        case idle, connecting, connected, disconnected
+    }
+
+    /// Public flag the UI observes. Only `true` once `state == .connected`.
     private(set) var isConnected: Bool = false
+
+    /// Actual connection state. Setting it keeps `isConnected` in sync so the
+    /// boolean and the state machine can never diverge.
+    private var state: ConnectionState = .idle {
+        didSet { isConnected = (state == .connected) }
+    }
+
     private var task: URLSessionWebSocketTask?
     private var reconnectAttempts = 0
 
@@ -27,14 +42,17 @@ final class ProgressSocket {
         let t = URLSession.shared.webSocketTask(with: url)
         self.task = t
         t.resume()
-        isConnected = true
+        // We're only connecting at this point — the WS handshake may still be in
+        // flight. `isConnected` stays false until the first successful receive
+        // confirms a live, usable connection (see listen()).
+        state = .connecting
         listen()
     }
 
     func disconnect() {
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
-        isConnected = false
+        state = .disconnected
     }
 
     /// Send a progress update over the open socket. Silent no-op when
@@ -60,7 +78,7 @@ final class ProgressSocket {
             guard let self else { return }
             switch result {
             case .failure:
-                self.isConnected = false
+                self.state = .disconnected
                 // Single retry with 1s backoff. More than that = user rage.
                 if self.reconnectAttempts < 1, let url = self.task?.originalRequest?.url {
                     self.reconnectAttempts += 1
@@ -69,6 +87,13 @@ final class ProgressSocket {
                     }
                 }
             case .success:
+                // First successful receive proves the connection is live and
+                // usable — only now do we flip to .connected (and isConnected).
+                // The server sends `session-ready` immediately on connect, so
+                // this resolves promptly. Subsequent receives leave state as-is.
+                if self.state != .connected {
+                    self.state = .connected
+                }
                 // We only send — server messages (session-ready, track-changed,
                 // etc.) are not consumed by the Mac app yet. Keep looping.
                 self.listen()

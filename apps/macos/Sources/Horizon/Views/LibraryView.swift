@@ -12,6 +12,7 @@ struct LibraryView: View {
     @State private var collections: [Collection] = []
     @State private var cwItems: [ContinueWatchingItem] = []
     @State private var loading = true
+    @State private var error: String?
 
     var body: some View {
         ScrollView {
@@ -257,6 +258,8 @@ struct LibraryView: View {
                 .font(.horizon(size: 14, weight: .regular))
                 .foregroundStyle(.horizonMutedHi)
                 .padding(.top, 16)
+        } else if let error {
+            errorBanner(error)
         } else {
             switch tab {
             case .home, .movies:
@@ -321,24 +324,61 @@ struct LibraryView: View {
             .foregroundStyle(.horizonMutedHi)
     }
 
+    /// Error banner shown when load() fails, with a Retry action. Mirrors the
+    /// SetupView error pattern (horizonDanger text). Retry re-runs load().
+    private func errorBanner(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Couldn't load your library")
+                .font(.horizon(size: 16, weight: .bold))
+                .foregroundStyle(.horizonDanger)
+            Text(message)
+                .font(.horizon(size: 13, weight: .regular))
+                .foregroundStyle(.horizonMutedHi)
+            Button {
+                Task { await load() }
+            } label: {
+                Text("Retry")
+                    .font(.horizon(size: 13, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 18)
+                    .frame(height: 36)
+                    .background(Color.horizonAccent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 16)
+    }
+
     // MARK: - Load
 
     private func load() async {
-        loading = true
-        async let m  = try? client.api.listMovies()
-        async let sh = try? client.api.listShows()
-        async let co = try? client.api.listCollections()
+        await MainActor.run {
+            self.loading = true
+            self.error = nil
+        }
+        async let m  = client.api.listMovies()
+        async let sh = client.api.listShows()
+        async let co = client.api.listCollections()
+        // Continue Watching is best-effort (needs an active user) and must not
+        // fail the whole load; keep swallowing its error.
         async let cw: [ContinueWatchingItem]? = {
             guard let id = await client.activeUser?.id else { return nil }
             return try? await client.api.continueWatching(userId: id)
         }()
-        let (mv, sv, cv, cwv) = await (m, sh, co, cw)
-        await MainActor.run {
-            self.movies = mv ?? []
-            self.shows = sv ?? []
-            self.collections = cv ?? []
-            self.cwItems = cwv ?? []
-            self.loading = false
+        do {
+            let (mv, sv, cv, cwv) = try await (m, sh, co, cw)
+            await MainActor.run {
+                self.movies = mv
+                self.shows = sv
+                self.collections = cv
+                self.cwItems = cwv ?? []
+                self.loading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.loading = false
+            }
         }
     }
 }

@@ -135,6 +135,11 @@ struct PlayerView: View {
     // MARK: - AVPlayer
 
     private func configurePlayer(with session: SessionInfo) {
+        // Ensure any prior observers are removed before reassigning; the view
+        // may be reused for multiple sessions (e.g. future "Play Next" queuing),
+        // and reconfiguring without cleanup would leak the old observers.
+        cleanupPlayer()
+
         // streamUrl is an absolute server path (e.g. "/sessions/xxx/stream.m3u8").
         // Resolve against baseURL so it becomes http://host:port/sessions/...
         // `appendingPathComponent` percent-encodes leading `/` on some OS versions.
@@ -178,7 +183,12 @@ struct PlayerView: View {
         }
     }
 
-    private func teardown() {
+    /// Removes all player observers (timeObserver, statusObserver, errorObserver)
+    /// from the current player without touching socket/session/decision state or
+    /// dismissing the view. Safe to call repeatedly: each removal is guarded.
+    /// If a new observer type is added in configurePlayer(), remember to release
+    /// it here too.
+    private func cleanupPlayer() {
         if let p = player, let t = timeObserver {
             p.removeTimeObserver(t)
         }
@@ -187,6 +197,13 @@ struct PlayerView: View {
         statusObserver = nil
         errorObserver?.invalidate()
         errorObserver = nil
+    }
+
+    /// Cleans up observers via cleanupPlayer() and then tears down the session
+    /// (pauses playback, disconnects the socket, destroys the server session)
+    /// and dismisses the view.
+    private func teardown() {
+        cleanupPlayer()
         player?.pause()
         socket.disconnect()
         if let id = session?.sessionId {
