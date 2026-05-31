@@ -79,4 +79,64 @@ describe('HorizonClient.fetch error code handling', () => {
       expect((err as Error & { code?: string }).code).toBeUndefined()
     }
   })
+
+  it('preserves code and message from a valid JSON error body', async () => {
+    mockFetch(() => ({ ok: false, status: 403, json: async () => ({ error: 'nope', code: 'caller-forbidden' }) }))
+    try {
+      await client.users.list()
+      expect.fail('should have thrown')
+    } catch (err) {
+      expect((err as Error).message).toBe('nope')
+      expect((err as Error & { code?: string }).code).toBe('caller-forbidden')
+    }
+  })
+
+  it('includes HTTP status and response text when body is not valid JSON (HTML 502)', async () => {
+    mockFetch(() => ({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      json: async () => { throw new SyntaxError('Unexpected token <') },
+      text: async () => '<html><body>502 Bad Gateway</body></html>',
+    }))
+    try {
+      await client.users.list()
+      expect.fail('should have thrown')
+    } catch (err) {
+      const msg = (err as Error).message
+      expect(msg).toContain('HTTP 502')
+      expect(msg).toContain('Bad Gateway')
+      expect(msg).toContain('502 Bad Gateway')
+      expect((err as Error & { code?: string }).code).toBeUndefined()
+    }
+  })
+
+  it('falls back to bare HTTP status when body is empty and unparseable', async () => {
+    mockFetch(() => ({
+      ok: false,
+      status: 500,
+      statusText: '',
+      json: async () => { throw new SyntaxError('no body') },
+      text: async () => '',
+    }))
+    await expect(client.users.list()).rejects.toThrow('HTTP 500')
+  })
+
+  it('truncates very long response text in the error message', async () => {
+    const long = 'x'.repeat(5000)
+    mockFetch(() => ({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      json: async () => { throw new SyntaxError('html') },
+      text: async () => long,
+    }))
+    try {
+      await client.users.list()
+      expect.fail('should have thrown')
+    } catch (err) {
+      // status prefix + ': ' + at most 200 chars of snippet
+      expect((err as Error).message.length).toBeLessThan(260)
+    }
+  })
 })

@@ -42,6 +42,40 @@ export function isProgressNotFoundError(err: unknown): boolean {
   )
 }
 
+/** Cap on raw-response text included in an error message, to keep messages sane. */
+const ERROR_TEXT_LIMIT = 200
+
+/**
+ * Build an Error for a non-ok HTTP response. Normal path is a JSON error body
+ * (`{ error, code }`). When the body is not valid JSON (e.g. an nginx/proxy HTML
+ * 502 page, or an unhandled server exception), fall back to `res.text()` and
+ * include a truncated snippet so the failure is debuggable instead of a bare
+ * `HTTP 502`. A `code` is attached only when the JSON body actually carried one.
+ */
+async function buildHttpError(res: Response): Promise<Error> {
+  let body: { error?: string; code?: string } | null = null
+  try {
+    body = await res.json()
+  } catch {
+    body = null
+  }
+  if (body && typeof body === 'object') {
+    const error = new Error(body.error ?? `HTTP ${res.status}`)
+    if (typeof body.code === 'string') (error as Error & { code?: string }).code = body.code
+    return error
+  }
+  // JSON parse failed — try to surface the raw response text for debugging.
+  let text = ''
+  try {
+    text = await res.text()
+  } catch {
+    text = ''
+  }
+  const snippet = text.trim().slice(0, ERROR_TEXT_LIMIT)
+  const suffix = snippet ? `: ${snippet}` : ''
+  return new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}${suffix}`)
+}
+
 export class HorizonClient {
   private baseUrl: string
   private activeUserId: string | null = null
@@ -68,12 +102,7 @@ export class HorizonClient {
       ...init,
     })
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      const error = new Error(body.error ?? `HTTP ${res.status}`)
-      // Only attach a code when the server actually sent one — otherwise the
-      // error carries `code: undefined`, which silently breaks code checks.
-      if (typeof body.code === 'string') (error as Error & { code?: string }).code = body.code
-      throw error
+      throw await buildHttpError(res)
     }
     if (res.status === 204) return undefined as T
     return res.json()
