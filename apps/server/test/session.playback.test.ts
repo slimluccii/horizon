@@ -271,6 +271,33 @@ describe('PlaybackOrchestrator', () => {
     ).toThrow(expect.objectContaining({ code: 'invalid-input' }))
   })
 
+  it('accepts startPositionMs of 0 (boundary)', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, startPositionMs: 0 })
+    ).not.toThrow()
+  })
+
+  it('accepts startPositionMs exactly at media duration (boundary)', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      // durationSec 3600 → exactly 3_600_000 ms is allowed; only strictly > rejects.
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, startPositionMs: 3_600_000 })
+    ).not.toThrow()
+  })
+
   it('accepts a valid audioTrackIndex', () => {
     const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
