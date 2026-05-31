@@ -26,6 +26,12 @@ struct ShowDetailView: View {
             LargeTopNav(active: .series, transparent: true, onBack: { dismiss() })
         }
         .task { await load() }
+        // React to user-initiated season changes (pill taps). The initial
+        // season is loaded by load(); this handles every selection after that.
+        .onChange(of: season) { _, newSeason in
+            guard let newSeason else { return }
+            Task { await loadEpisodes(for: newSeason) }
+        }
         .navigationBarBackButtonHidden()
     }
 
@@ -215,11 +221,32 @@ struct ShowDetailView: View {
                 self.season = s.seasons.first?.number
             }
             if let season = s.seasons.first?.number {
-                let eps = try await client.api.listEpisodes(showId: showId, season: season)
-                await MainActor.run { self.episodes = eps }
+                await loadEpisodes(for: season)
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Fetch episodes for `season` and publish them only if the user hasn't
+    /// since selected a different season. The guard against `self.season`
+    /// discards stale responses, so rapidly tapping season pills always ends
+    /// on the most recently selected season's episodes rather than whichever
+    /// request happens to finish last.
+    private func loadEpisodes(for season: Int) async {
+        do {
+            let eps = try await client.api.listEpisodes(showId: showId, season: season)
+            await MainActor.run {
+                // Only apply if this is still the selected season.
+                guard self.season == season else { return }
+                self.episodes = eps
+                self.error = nil
+            }
+        } catch {
+            await MainActor.run {
+                guard self.season == season else { return }
+                self.error = error.localizedDescription
+            }
         }
     }
 }
