@@ -153,6 +153,13 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
 
   'audio-track'(msg, { session, runtime }) {
     if (msg.type !== 'audio-track') return
+    // Bounds-check against the source's audio-track count (stamped at create).
+    // An out-of-range index would otherwise reach ffmpeg and crash the run —
+    // a trivial mid-session DoS. Reject and leave the session untouched.
+    if (msg.index < 0 || msg.index >= session.audioTrackCount) {
+      sendError(session, 'audio-track-invalid', 'Audio track index out of range')
+      return
+    }
     if (session.plan.method === 'direct-play') {
       // Direct-play doesn't restart; just update the plan in-place so the WS
       // notify reflects the new track. (Direct-play actually streams the

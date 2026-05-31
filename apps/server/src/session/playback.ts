@@ -181,6 +181,8 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         filePath: mediaItem.filePath!,
         plan,
         selectedSubtitleTrack: subtitleTrackIndex,
+        audioTrackCount,
+        subtitleTrackCount: mediaItem.subtitleTracks?.length ?? 0,
         renditionCodecs: [],
         sessionDir: '',
         sessionReady: false,
