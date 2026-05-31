@@ -63,7 +63,10 @@ export default function LargeTopNav({ active, transparent = false, back }: Props
 
         <div className="top-nav__spacer" />
 
-        <button className="top-nav__icon-btn" aria-label="Search">
+        {/* TODO: implement search functionality. Disabled until then so the
+            button is removed from the tab order — critical in TV/remote
+            contexts where a focusable-but-dead control confuses users. */}
+        <button className="top-nav__icon-btn" disabled aria-label="Search">
           <Icon name="search" size={16} />
         </button>
         <ProfileBadgeButton />

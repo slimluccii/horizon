@@ -107,3 +107,12 @@
 .top-nav__icon-btn:hover {
   background: rgba(36, 50, 66, 0.95);
 }
+
+.top-nav__icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.top-nav__icon-btn:disabled:hover {
+  background: var(--chrome-bg);
+}
