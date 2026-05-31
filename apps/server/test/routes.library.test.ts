@@ -43,7 +43,7 @@ function makeWorkers(opts: { tmdbConfigured: boolean }): ScanWorkers {
     },
     refreshWorker: {
       run: async (o: unknown) => { refreshRuns.push(o); return { refreshed: 0, failed: 0, changesFeedHits: 0, durationMs: 0 } },
-      status: () => ({ running: false, lastResult: null, configured: opts.tmdbConfigured }),
+      status: () => ({ running: false, lastResult: null, configured: opts.tmdbConfigured, errorState: null }),
       setTmdb: () => undefined,
     },
     scanHistory: {
