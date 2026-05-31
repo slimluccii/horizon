@@ -3,6 +3,12 @@ import { useEffect, useRef, type RefObject } from 'react'
 import Hls from 'hls.js'
 import type { PlaybackSession, QualityProfile, SubtitleTrack } from '@horizon/sdk'
 
+/** Delay (ms) before tearing down an old hls.js instance on reload. Gives any
+ *  in-flight MSE buffer appends time to settle so destroy() doesn't abort them
+ *  mid-flight and stall the freshly-created instance. Environment-dependent;
+ *  100ms is enough on the dev environment and is validated by the e2e suite. */
+const DESTROY_DEFER_MS = 100
+
 interface Props {
   session: PlaybackSession
   /** Bumped by parent to force HLS source reload after server restarts ffmpeg
@@ -93,7 +99,12 @@ export default function VideoPlayer({
     video.play().catch(() => {})
 
     return () => {
-      hls.destroy()
+      // Defer hls.destroy() by a macrotask so any in-flight MSE buffer appends
+      // (microtask-scheduled by hls.js) settle before we tear MSE down. A
+      // synchronous destroy here races with the encoder restart and can abort
+      // SourceBuffer operations mid-flight, leaving the next instance stalled.
+      // `hls` is captured per-effect-run, so each instance destroys exactly once.
+      setTimeout(() => hls.destroy(), DESTROY_DEFER_MS)
       hlsRef.current = null
     }
     // reloadKey is intentional: bumping it tears down + recreates hls.js so the
