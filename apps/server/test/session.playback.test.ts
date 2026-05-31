@@ -5,6 +5,7 @@ import {
   type SubtitleExtractor,
 } from '../src/session/playback.ts'
 import { createSessionManager, type SessionManager } from '../src/session/manager.ts'
+import { TranscodeError } from '../src/session/errors.ts'
 import type { Config } from '../src/config.ts'
 import type { HwAccel } from '../src/transcode/hwaccel.ts'
 import type { MediaRepo, MediaItemRow } from '../src/repos/media.ts'
@@ -220,6 +221,63 @@ describe('PlaybackOrchestrator', () => {
 
     expect(sessions.get(info.sessionId)).toBeUndefined()
     expect(extractSubtitles).not.toHaveBeenCalled()
+  })
+
+  it('spawn error rejection is a TranscodeError with code and stderrTail', async () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+
+    const transcodeCaps: ClientCapabilities = { ...browserCaps, container: ['mkv'] }
+    const { info, ready } = orch.startPlayback({ mediaId: 'm1', capabilities: transcodeCaps })
+
+    const caught = ready.then(
+      () => { throw new Error('expected rejection') },
+      (err) => err,
+    )
+    spawner.reject(new Error('ffmpeg exploded'))
+    const err = await caught
+
+    expect(err).toBeInstanceOf(TranscodeError)
+    expect((err as TranscodeError).code).toBe('ffmpeg-spawn-failed')
+    expect((err as TranscodeError).message).toMatch(/ffmpeg exploded/)
+    // No ffmpeg process attached by the fake spawner → stderrTail empty string.
+    expect(typeof (err as TranscodeError).stderrTail).toBe('string')
+    expect(sessions.get(info.sessionId)).toBeUndefined()
+  })
+
+  it('session is destroyed even if a cleanup step throws', async () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+
+    const transcodeCaps: ClientCapabilities = { ...browserCaps, container: ['mkv'] }
+    const { info, ready } = orch.startPlayback({ mediaId: 'm1', capabilities: transcodeCaps })
+
+    // Make a cleanup step (the runtime's markDestroyed) throw. destroy() must
+    // isolate it and still remove the session from the map.
+    const runtime = sessions.getRuntime(info.sessionId)!
+    const originalMark = runtime.markDestroyed.bind(runtime)
+    runtime.markDestroyed = () => { originalMark(); throw new Error('cleanup boom') }
+
+    const caught = ready.then(() => { throw new Error('expected rejection') }, (e) => e)
+    spawner.reject(new Error('ffmpeg exploded'))
+    const err = await caught
+
+    // The original spawn failure is what surfaces — the cleanup throw is swallowed.
+    expect(err).toBeInstanceOf(TranscodeError)
+    expect((err as TranscodeError).message).toMatch(/ffmpeg exploded/)
+    // Session is gone despite the cleanup-step failure.
+    expect(sessions.get(info.sessionId)).toBeUndefined()
+    expect(sessions.size()).toBe(0)
   })
 
   it('skips ffmpeg spawn for direct-play and resolves ready immediately', async () => {

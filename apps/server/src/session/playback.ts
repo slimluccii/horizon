@@ -38,7 +38,9 @@ import {
   spawnFfmpeg as defaultSpawnFfmpeg,
 } from '../transcode/ffmpeg.ts'
 import { extractSubtitles as defaultExtractSubtitles } from '../transcode/subtitles.ts'
+import { getFfmpegStderrTail } from '../transcode/ffmpeg.ts'
 import { createSessionRuntime } from './runtime.ts'
+import { TranscodeError } from './errors.ts'
 
 export interface StartPlaybackInput {
   mediaId: string
@@ -204,9 +206,26 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         try {
           await spawner(session, hwAccel, plan, ctx)
         } catch (err) {
-          // Reap the half-created session so callers don't have to.
+          // Capture the stderr tail (if ffmpeg got far enough to spawn) so the
+          // failure can be diagnosed from a single log line.
+          const stderrTail = session.ffmpegProcess
+            ? getFfmpegStderrTail(session.ffmpegProcess)
+            : ''
+          const message = err instanceof Error ? err.message : String(err)
+          const transcodeError = new TranscodeError(
+            ErrorCodes.FFMPEG_SPAWN_FAILED,
+            message,
+            stderrTail,
+          )
+          console.error(
+            `Session ${session.id}: spawn failed (media ${input.mediaId}, code ${transcodeError.code}): ${message}` +
+            (stderrTail ? `\n=== ffmpeg stderr tail ===\n${stderrTail}\n=== end ===` : ''),
+          )
+          // Reap the half-created session so callers don't have to. destroy()
+          // is bulletproof (each cleanup step is isolated), so this never
+          // throws over the original spawn failure.
           await sessions.destroy(session.id).catch(() => {/* already gone */})
-          throw err
+          throw transcodeError
         }
 
         session.sessionReady = true
