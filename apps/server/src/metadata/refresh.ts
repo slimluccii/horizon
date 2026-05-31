@@ -36,6 +36,24 @@ export interface MetadataRefreshDeps {
   changesCursor: ChangesCursorRepo
 }
 
+/**
+ * Live config getter. Called at the START of every `run()` so operator changes
+ * to `metadataBatchSize` / `metadataMaxAge*` (via PATCH /settings/server) take
+ * effect on the next run with no server restart — matching the thunk pattern
+ * documented in CONTEXT.md → ServerSettings (cf. progressRepo's
+ * `getWatchedThresholdPct`). A plain `MetadataRefreshConfig` is accepted too
+ * (wrapped in a constant thunk) for tests and static callers.
+ */
+export type MetadataRefreshConfigGetter = () => MetadataRefreshConfig
+
+/** Wrap a static config (or getter) into a getter — keeps existing call sites
+ *  that pass a plain config object working unchanged. */
+function toConfigGetter(
+  cfgOrGetter: MetadataRefreshConfig | MetadataRefreshConfigGetter,
+): MetadataRefreshConfigGetter {
+  return typeof cfgOrGetter === 'function' ? cfgOrGetter : () => cfgOrGetter
+}
+
 export interface RefreshResult {
   refreshed: number
   failed: number
@@ -53,9 +71,14 @@ export interface RefreshResult {
  * (a row whose tmdb_id was deleted upstream, a wrong match, etc).
  */
 export function createMetadataRefreshWorker(
-  cfg: MetadataRefreshConfig,
+  cfgOrGetter: MetadataRefreshConfig | MetadataRefreshConfigGetter,
   deps: MetadataRefreshDeps,
 ) {
+  // Read live config on each run() — operator settings changes (batchSize,
+  // maxAgeMs) apply on the next run without restart. Accepts a plain config
+  // object for back-compat (wrapped in a constant thunk).
+  const getConfig = toConfigGetter(cfgOrGetter)
+
   // Mutable reference so `setTmdb` can hot-swap the client on token change.
   let tmdb: TmdbProvider | null = deps.tmdb
 
@@ -75,8 +98,9 @@ export function createMetadataRefreshWorker(
     const todayEnd = now
     const movieCursor = deps.changesCursor.get('movie')
     const tvCursor = deps.changesCursor.get('tv')
-    const movieStartTs = movieCursor?.lastWindowEnd ?? (now - cfg.initialLookbackDays * 86_400_000)
-    const tvStartTs = tvCursor?.lastWindowEnd ?? (now - cfg.initialLookbackDays * 86_400_000)
+    const initialLookbackDays = getConfig().initialLookbackDays
+    const movieStartTs = movieCursor?.lastWindowEnd ?? (now - initialLookbackDays * 86_400_000)
+    const tvStartTs = tvCursor?.lastWindowEnd ?? (now - initialLookbackDays * 86_400_000)
     if (!tmdb) return { ids: [], windowEnd: todayEnd, succeeded: { movie: false, tv: false } }
     // Run both fetches independently. We only advance a kind's cursor when its
     // fetch actually SUCCEEDED — a failure (or empty list from .catch) must not
@@ -257,6 +281,9 @@ export function createMetadataRefreshWorker(
       let failed = 0
       let changesFeedHits = 0
       try {
+        // Snapshot live config once per run — picks up operator changes to
+        // batchSize / maxAgeMs since the previous run, without restart.
+        const cfg = getConfig()
         const work: StaleMetadataPick[] = []
 
         if (opts.useChangesFeed) {

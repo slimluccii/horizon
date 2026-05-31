@@ -50,16 +50,22 @@ async function main() {
 
   // Metadata refresh worker — always created so the tmdbToken change handler
   // can swap the client without restarting the server.
+  //
+  // Config is supplied as a LIVE getter: batchSize + maxAgeMs are read from
+  // serverSettings on every run(), so PATCH /settings/server changes take
+  // effect on the next run with no restart (CONTEXT.md → ServerSettings thunk
+  // pattern). metadataMaxAge* is stored in days; convert to ms at this edge.
+  const DAY_MS = 86_400_000
   const refreshWorker = createMetadataRefreshWorker(
-    {
+    () => ({
       ...DEFAULT_REFRESH_CONFIG,
-      batchSize: cfg.metadataBatchSize,
+      batchSize: serverSettings.get().metadataBatchSize,
       maxAgeMs: {
-        movie: cfg.metadataMaxAgeMovieMs,
-        show: cfg.metadataMaxAgeShowMs,
-        episode: cfg.metadataMaxAgeEpisodeMs,
+        movie: serverSettings.get().metadataMaxAgeMovieDays * DAY_MS,
+        show: serverSettings.get().metadataMaxAgeShowDays * DAY_MS,
+        episode: serverSettings.get().metadataMaxAgeEpDays * DAY_MS,
       },
-    },
+    }),
     { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo },
   )
 
