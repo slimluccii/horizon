@@ -62,23 +62,29 @@ function nameTaken(db: DatabaseSync, name: string, excludingId?: string): boolea
 export function createUserRepo(db: DatabaseSync): UserRepo {
   return {
     create(input) {
-      if (nameTaken(db, input.name)) {
-        throw Object.assign(new Error(ErrorCodes.NAME_TAKEN), { code: ErrorCodes.NAME_TAKEN })
-      }
       const now = Date.now()
       const id = crypto.randomUUID()
       const prefsJson = JSON.stringify(input.preferences ?? {})
-      const isFirst = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n === 0
-      const role = isFirst ? 'owner' : 'member'
+      // Wrap the name-uniqueness check, owner election (COUNT), and INSERT in a
+      // single transaction so they are atomic. Without it, two concurrent
+      // creates could both see COUNT=0 and race to insert an owner; the
+      // partial unique index would then reject the loser with a raw constraint
+      // error. Inside the transaction the COUNT and INSERT cannot interleave,
+      // so the owner-exists constraint can never fire during normal operation.
+      db.exec('BEGIN')
       try {
+        if (nameTaken(db, input.name)) {
+          throw Object.assign(new Error(ErrorCodes.NAME_TAKEN), { code: ErrorCodes.NAME_TAKEN })
+        }
+        const isFirst = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n === 0
+        const role = isFirst ? 'owner' : 'member'
         db.prepare(
           `INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
         ).run(id, input.name, input.avatar ?? null, prefsJson, role, now, now)
+        db.exec('COMMIT')
       } catch (err) {
-        if (String((err as Error).message).includes('users.role')) {
-          throw Object.assign(new Error(ErrorCodes.OWNER_EXISTS), { code: ErrorCodes.OWNER_EXISTS })
-        }
+        db.exec('ROLLBACK')
         throw err
       }
       return rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id))
