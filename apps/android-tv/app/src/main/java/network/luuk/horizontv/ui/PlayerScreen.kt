@@ -130,6 +130,15 @@ fun PlayerScreen(
         socket.connect(sess.wsUrl)
     }
 
+    // Socket lifecycle is decoupled from the player lifecycle. The socket is
+    // closed whenever the session id changes OR the phase transitions (e.g. to
+    // Error), not only when the composable unmounts. This prevents socket leaks
+    // during recomposition for non-player reasons and guarantees the WebSocket
+    // is torn down on playback errors. socket.disconnect() is idempotent.
+    DisposableEffect(sess?.sessionId, phase) {
+        onDispose { socket.disconnect() }
+    }
+
     // Periodic progress reports, every 5 s.
     // Use a DisposableEffect so the polling coroutine is explicitly cancelled
     // when the session changes or PlayerScreen exits, preventing coroutine
