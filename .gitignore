@@ -22,3 +22,8 @@ media/
 **/local.properties
 **/captures/
 **/*.iml
+
+# Claude Code orchestration scratch
+.claude/wf-*.js
+.claude/scheduled_tasks.lock
+.claude/settings.local.json

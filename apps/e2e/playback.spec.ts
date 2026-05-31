@@ -111,6 +111,60 @@ test('clicking a movie starts playback without 404 errors', async ({ page }) => 
   ).toHaveLength(0)
 })
 
+test('rapid quality changes preserve correct playback position', async ({ page }) => {
+  // Probes the resumeAtSec lifecycle (#83/#84): after a quality switch the
+  // player must resume at the captured position; a *later* switch made from a
+  // different position must resume at that newer position, not the stale one.
+  await page.goto('/')
+  const firstCard = page.locator('[data-testid="movie-card"]').first()
+  await expect(firstCard).toBeVisible({ timeout: 15_000 })
+  await firstCard.click()
+
+  await expect(page).toHaveURL(/\/play\//, { timeout: 10_000 })
+  await expect(page.getByText('Starting playback…')).not.toBeVisible({ timeout: 60_000 })
+
+  const video = page.locator('video')
+  await expect(video).toBeVisible({ timeout: 10_000 })
+
+  // Wait until playback has advanced past ~8s so we have a non-trivial position.
+  await expect(async () => {
+    const t = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+    expect(t).toBeGreaterThan(8)
+  }).toPass({ timeout: 40_000, intervals: [1_000] })
+
+  // Helper: pick a quality option from the TrackSelector that differs from the
+  // current selection. The selector markup may vary, so target the quality
+  // <select> / option list by accessible name and choose a different value.
+  const qualitySelect = page.getByLabel(/quality/i)
+  await expect(qualitySelect).toBeVisible({ timeout: 10_000 })
+
+  // First switch — capture position, change quality, expect resume near it.
+  const pos1 = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+  await qualitySelect.selectOption({ index: 1 })
+  await expect(async () => {
+    const t = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+    // Resume should land within ~5s of where we switched (segment alignment +
+    // network jitter), and must NOT have reset to 0.
+    expect(Math.abs(t - pos1)).toBeLessThan(5)
+  }).toPass({ timeout: 30_000, intervals: [1_000] })
+
+  // Seek forward, then switch again. The second switch must resume near the
+  // NEW position — proving resumeAtSec was cleared after the first switch.
+  await video.evaluate((el: HTMLVideoElement) => { el.currentTime = el.currentTime + 20 })
+  await expect(async () => {
+    const t = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+    expect(t).toBeGreaterThan(pos1 + 15)
+  }).toPass({ timeout: 15_000, intervals: [500] })
+  const pos2 = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+
+  await qualitySelect.selectOption({ index: 2 })
+  await expect(async () => {
+    const t = await video.evaluate((el: HTMLVideoElement) => el.currentTime)
+    expect(Math.abs(t - pos2)).toBeLessThan(8) // near pos2, not stale pos1
+    expect(t).toBeGreaterThan(pos1 + 10)        // definitively past the stale value
+  }).toPass({ timeout: 30_000, intervals: [1_000] })
+})
+
 test('back button disconnects session and returns to library', async ({ page }) => {
   await page.goto('/')
   const firstCard = page.locator('[data-testid="movie-card"]').first()

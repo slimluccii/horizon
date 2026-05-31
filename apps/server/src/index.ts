@@ -19,6 +19,14 @@ import { buildServer } from './server.ts'
 
 async function main() {
   const cfg = loadConfig()
+
+  // Hard fail-fast: the dev-seed routes are destructive and unauthenticated.
+  // Never let them be exposed in a production deployment, even by accident.
+  if (cfg.devSeedEnabled && cfg.nodeEnv === 'production') {
+    console.error('ERROR: HORIZON_DEV_SEED=1 with NODE_ENV=production is not allowed. Dev seed routes cannot be exposed in production.')
+    process.exit(1)
+  }
+
   const hwAccel = await detectHwAccel(cfg.forceEncoder)
 
   const db = openDatabase(cfg.dbPath)
@@ -42,16 +50,22 @@ async function main() {
 
   // Metadata refresh worker — always created so the tmdbToken change handler
   // can swap the client without restarting the server.
+  //
+  // Config is supplied as a LIVE getter: batchSize + maxAgeMs are read from
+  // serverSettings on every run(), so PATCH /settings/server changes take
+  // effect on the next run with no restart (CONTEXT.md → ServerSettings thunk
+  // pattern). metadataMaxAge* is stored in days; convert to ms at this edge.
+  const DAY_MS = 86_400_000
   const refreshWorker = createMetadataRefreshWorker(
-    {
+    () => ({
       ...DEFAULT_REFRESH_CONFIG,
-      batchSize: cfg.metadataBatchSize,
+      batchSize: serverSettings.get().metadataBatchSize,
       maxAgeMs: {
-        movie: cfg.metadataMaxAgeMovieMs,
-        show: cfg.metadataMaxAgeShowMs,
-        episode: cfg.metadataMaxAgeEpisodeMs,
+        movie: serverSettings.get().metadataMaxAgeMovieDays * DAY_MS,
+        show: serverSettings.get().metadataMaxAgeShowDays * DAY_MS,
+        episode: serverSettings.get().metadataMaxAgeEpDays * DAY_MS,
       },
-    },
+    }),
     { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo },
   )
 
@@ -121,6 +135,8 @@ async function main() {
     // In-flight requests on the old client complete; subsequent calls use
     // the new auth header. No process restart needed.
     if (patch.tmdbToken !== undefined) {
+      // Audit trail — NEVER log the token value, only that it changed.
+      console.log(`Server settings: TMDB token ${patch.tmdbToken ? 'updated' : 'cleared'}`)
       const newTmdb = createTmdbProvider(patch.tmdbToken ?? undefined, cfg.cacheDir)
       refreshWorker.setTmdb(newTmdb)
       console.log(`MetadataRefresh: TMDB client ${newTmdb ? 'updated' : 'cleared'} after token change`)

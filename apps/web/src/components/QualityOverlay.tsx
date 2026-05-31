@@ -65,8 +65,8 @@ export default function QualityOverlay({ method, profile, bufferSeconds, quality
       {qualityLog.length > 0 && (
         <div className="qo__log">
           <div className="qo__log-title">Recent switches</div>
-          {qualityLog.slice(-3).reverse().map((entry, i) => (
-            <div key={i} className="qo__log-item">
+          {qualityLog.slice(-3).reverse().map((entry) => (
+            <div key={`${entry.time.getTime()}-${entry.reason}`} className="qo__log-item">
               <span className="qo__log-time">{entry.time.toLocaleTimeString()}</span>
               <span className="qo__log-profile">{entry.profile.height}p</span>
               <span className="qo__log-reason">{entry.reason}</span>

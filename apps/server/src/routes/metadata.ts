@@ -6,7 +6,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import type { Config } from '../config.ts'
 import { imageCachePath, fileExists } from '../metadata/cache.ts'
-import { sendNotFound, badRequest, serverError } from './errors.ts'
+import { sendNotFound, badRequest, serverError, ErrorCodes } from './errors.ts'
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p'
 
@@ -49,15 +49,15 @@ export function registerMetadata(app: FastifyInstance, cfg: Config): void {
     async (req, reply) => {
       const { size } = req.params
       const tail = req.params['*']
-      if (!ALLOWED_SIZES.has(size)) return badRequest(reply, 'invalid-size', 'Invalid image size')
-      if (!tail || tail.includes('..')) return badRequest(reply, 'invalid-path', 'Invalid image path')
+      if (!ALLOWED_SIZES.has(size)) return badRequest(reply, ErrorCodes.INVALID_SIZE, 'Invalid image size')
+      if (!tail || tail.includes('..')) return badRequest(reply, ErrorCodes.INVALID_PATH, 'Invalid image path')
 
       // Mock posters bypass TMDB and proxy from picsum.photos so dev seeds work
       // without a TMDB token and without baking real CDN paths into fixtures.
       const sourceUrl = tail.startsWith('mock/')
         ? mockImageUrl(tail, size)
         : `${TMDB_IMAGE_BASE}/${size}/${tail}`
-      if (!sourceUrl) return badRequest(reply, 'invalid-path', 'Invalid image path')
+      if (!sourceUrl) return badRequest(reply, ErrorCodes.INVALID_PATH, 'Invalid image path')
       const cachePath = await imageCachePath(cfg.cacheDir, sourceUrl)
 
       reply.header('Cache-Control', 'public, max-age=2592000, immutable')
@@ -77,10 +77,10 @@ export function registerMetadata(app: FastifyInstance, cfg: Config): void {
         upstream = await fetch(sourceUrl)
       } catch (err) {
         console.warn(`Image proxy fetch failed: ${(err as Error).message}`)
-        return serverError(reply, 'fetch-failed', 'Image fetch failed')
+        return serverError(reply, ErrorCodes.FETCH_FAILED, 'Image fetch failed')
       }
       if (!upstream.ok || !upstream.body) {
-        return sendNotFound(reply, 'image-not-found', `Upstream ${upstream.status}`)
+        return sendNotFound(reply, ErrorCodes.IMAGE_NOT_FOUND, `Upstream ${upstream.status}`)
       }
 
       const upstreamLen = upstream.headers.get('content-length')

@@ -6,7 +6,7 @@ import { openDatabase } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createMediaRepo } from '../src/repos/media.ts'
 import { createCollectionsRepo } from '../src/repos/collections.ts'
-import { rescan } from '../src/scanner/scanner.ts'
+import { rescan, runScan, fullScope } from '../src/scanner/scanner.ts'
 
 // Stub probe — scanner is generally backed by ffprobe. We inject a fake via
 // vi.spyOn so these tests don't need ffprobe on PATH.
@@ -73,5 +73,34 @@ describe('rescan (integration)', () => {
       scanConcurrency: 2,
     }, { media, collections, tmdb: null })
     expect(media.getEpisodes(media.listShows()[0].id)).toHaveLength(0)
+  })
+
+  it('counts a probe timeout as a failed item, not a crash (#72)', async () => {
+    const moviesRoot = path.join(tmpRoot, 'movies')
+    mkdirSync(moviesRoot, { recursive: true })
+    writeFileSync(path.join(moviesRoot, 'Oppenheimer (2023) {tmdb-872585}.mkv'), '')
+
+    // Simulate the timeout: execFileAsync rejects with a timeout error which
+    // propagates out of probe(). The scanner's .catch(() => null) must turn
+    // this into a failed-count increment instead of crashing the scan.
+    vi.spyOn(probeMod, 'probe').mockImplementation(async () => {
+      throw Object.assign(new Error('ffprobe timed out'), { killed: true, signal: 'SIGTERM' })
+    })
+
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const media = createMediaRepo(db)
+    const collections = createCollectionsRepo(db)
+
+    const cfg = {
+      moviesRoots: [moviesRoot],
+      showsRoots: [],
+      cacheDir: tmpRoot,
+      scanConcurrency: 2,
+    }
+    const result = await runScan(fullScope(cfg), cfg, { media, collections })
+
+    expect(result.itemsFailed).toBe(1)
+    expect(media.listMovies()).toHaveLength(0)
   })
 })

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   createSessionRuntime,
   SEEK_LOOKAHEAD_SEGMENTS,
+  RESTART_TIMEOUT_MS,
   type RestartFn,
   type RestartWithResetFn,
 } from '../src/session/runtime.ts'
@@ -155,6 +156,70 @@ describe('SessionRuntime', () => {
         expect(String(res.error)).toMatch(/ffmpeg died/)
       }
       expect(runtime.state().kind).toBe('idle')
+    })
+
+    it('returns busy+error and unwedges when the restart action times out', async () => {
+      vi.useFakeTimers()
+      try {
+        const session = fakeSession()
+        const never = deferred() // doRestart that never settles
+        const runtime = createSessionRuntime({
+          session, hwAccel,
+          doRestart: (async () => { await never.promise }) as RestartFn,
+          doRestartWithReset: vi.fn() as unknown as RestartWithResetFn,
+        })
+
+        const pending = runtime.applyRestart(500)
+        expect(runtime.state().kind).toBe('restarting')
+
+        // Fire the timeout.
+        await vi.advanceTimersByTimeAsync(RESTART_TIMEOUT_MS)
+        const res = await pending
+
+        expect(res.ok).toBe(false)
+        if (!res.ok) {
+          expect(res.reason).toBe('busy')
+          expect(String((res.error as Error)?.message)).toMatch(/restart-timeout/)
+        }
+        // Crucially, the runtime is back to idle — not wedged in `restarting`.
+        expect(runtime.state().kind).toBe('idle')
+        never.resolve() // let the orphaned action settle
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('a restart timeout does not break subsequent transitions', async () => {
+      vi.useFakeTimers()
+      try {
+        const session = fakeSession()
+        const never = deferred()
+        let call = 0
+        const doRestart: RestartFn = (async (_s, _hw, _plan, segNum: number) => {
+          call += 1
+          if (call === 1) { await never.promise; return } // first hangs → times out
+          session.currentStartSegment = segNum                // second succeeds fast
+        }) as RestartFn
+        const runtime = createSessionRuntime({
+          session, hwAccel,
+          doRestart,
+          doRestartWithReset: vi.fn() as unknown as RestartWithResetFn,
+        })
+
+        const first = runtime.applyRestart(500)
+        await vi.advanceTimersByTimeAsync(RESTART_TIMEOUT_MS)
+        const firstRes = await first
+        expect(firstRes.ok).toBe(false)
+        expect(runtime.state().kind).toBe('idle')
+
+        // A fresh restart after the timeout works normally.
+        const secondRes = await runtime.applyRestart(800)
+        expect(secondRes).toEqual({ ok: true })
+        expect(runtime.state().kind).toBe('idle')
+        never.resolve()
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

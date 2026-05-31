@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { ErrorCodes } from '@horizon/sdk'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import path from 'node:path'
@@ -79,9 +80,10 @@ const WAIT_POLL_MS = 250
  *  "fully written". Segments are written in append mode: ffmpeg opens the
  *  file → writes N MB → closes. fs.watch fires on every write(), so seeing
  *  the file isn't enough; a static size for this window means no more
- *  appends are in-flight. 50ms is tight (hls.js tolerates fast arrivals)
- *  but long enough that ffmpeg's next buffered write lands first. */
-const STABLE_WINDOW_MS = 50
+ *  appends are in-flight. 100ms gives empirical headroom for buffered write
+ *  flush on slower / network filesystems while staying well below a segment
+ *  duration (hls.js tolerates fast arrivals). */
+const STABLE_WINDOW_MS = 100
 
 /**
  * Wait for a file under sessionDir to exist AND finish being written. Uses
@@ -104,6 +106,13 @@ async function waitForFile(session: Session, absPath: string, timeoutMs: number)
       if (s1.size === 0) return false
       await new Promise(res => setTimeout(res, STABLE_WINDOW_MS))
       const s2 = await stat(absPath)
+      // A shrink means the file was rewritten/truncated mid-flight — not
+      // stable, so retry. (Equality already implies this, but making it
+      // explicit clarifies the invariant: size must hold, never regress.)
+      if (s2.size < s1.size) return false
+      if (process.env.HORIZON_DEBUG && s2.size !== s1.size) {
+        console.log(`waitForFile: ${path.basename(absPath)} still growing ${s1.size}->${s2.size}, retrying`)
+      }
       return s2.size === s1.size
     } catch {
       return false
@@ -129,8 +138,12 @@ async function waitForFile(session: Session, absPath: string, timeoutMs: number)
       isStable().then(ok => {
         if (ok) finish(true)
         else {
+          // ffmpeg exit is a synchronous failure signal — stop waiting
+          // immediately rather than hanging until the deadline. The deadline
+          // timer (set below) remains as an independent backstop for the case
+          // where ffmpeg is still alive but the file never stabilises.
           const p = session.ffmpegProcess
-          if (p && (p.exitCode !== null || p.signalCode !== null) && Date.now() >= deadline) {
+          if (p && (p.exitCode !== null || p.signalCode !== null)) {
             finish(false)
           }
         }
@@ -249,7 +262,7 @@ export async function spawnFfmpeg(
     try {
       session.wsSocket?.send(JSON.stringify({
         type: 'error',
-        code: 'ffmpeg-spawn-failed',
+        code: ErrorCodes.FFMPEG_SPAWN_FAILED,
         message: err.message,
         fatal: true,
       }))
@@ -265,7 +278,7 @@ export async function spawnFfmpeg(
       try {
         session.wsSocket?.send(JSON.stringify({
           type: 'error',
-          code: 'transcode-failed',
+          code: ErrorCodes.TRANSCODE_FAILED,
           message: `FFmpeg exited with code ${code}`,
           fatal: true,
         }))

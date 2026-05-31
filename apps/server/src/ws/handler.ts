@@ -4,6 +4,7 @@ import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import type { SessionRuntime, TransitionResult } from '../session/runtime.ts'
+import { ErrorCodes } from '@horizon/sdk'
 import { PROFILES } from '../transcode/profiles.ts'
 import { pauseFfmpeg, resumeFfmpeg } from '../transcode/ffmpeg.ts'
 import { parseWsMessage, type WsMessage } from './messages.ts'
@@ -72,6 +73,24 @@ function handleTransition(
 // WeakMap: auto-GC'd when session object is released from manager.
 const sessionAbrState = new WeakMap<Session, AbrState>()
 
+// Tracks whether a socket has completed the `hello` handshake. A freshly
+// attached socket is unauthenticated and ONLY the `hello` handler runs; every
+// other command (seek, quality-override, park, progress, …) is dropped until
+// hello succeeds. This closes the window where an attacker who guessed the
+// session id could drive playback or exfiltrate state before the legitimate
+// client's hello arrives. Keyed on Session so it is GC'd with the session.
+const wsAuthenticated = new WeakMap<Session, boolean>()
+
+/** True once the socket has completed a successful `hello` handshake. */
+export function isWsAuthenticated(session: Session): boolean {
+  return wsAuthenticated.get(session) === true
+}
+
+/** Reset auth state — called by the attach handler when a new socket binds. */
+export function resetWsAuth(session: Session): void {
+  wsAuthenticated.delete(session)
+}
+
 type Handler = (msg: WsMessage, ctx: Ctx) => void | Promise<void>
 
 interface Ctx {
@@ -86,9 +105,13 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
   hello(msg, { session }) {
     if (msg.type !== 'hello') return
     if (msg.reconnectToken && msg.reconnectToken !== session.reconnectToken) {
-      session.wsSocket?.close(4401, 'invalid-reconnect-token')
+      session.wsSocket?.close(4401, ErrorCodes.INVALID_RECONNECT_TOKEN)
       return
     }
+    // Handshake accepted — mark the socket authenticated so subsequent
+    // commands are processed. (A present-but-wrong token was rejected above;
+    // a tokenless hello is the legitimate initial-attach path.)
+    wsAuthenticated.set(session, true)
     clearTimeout(session.graceTimer)
     session.state = 'active'
     send(session, {
@@ -153,6 +176,13 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
 
   'audio-track'(msg, { session, runtime }) {
     if (msg.type !== 'audio-track') return
+    // Bounds-check against the source's audio-track count (stamped at create).
+    // An out-of-range index would otherwise reach ffmpeg and crash the run —
+    // a trivial mid-session DoS. Reject and leave the session untouched.
+    if (msg.index < 0 || msg.index >= session.audioTrackCount) {
+      sendError(session, ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track index out of range')
+      return
+    }
     if (session.plan.method === 'direct-play') {
       // Direct-play doesn't restart; just update the plan in-place so the WS
       // notify reflects the new track. (Direct-play actually streams the
@@ -200,6 +230,11 @@ export function handleWsMessage(
 ): void {
   const msg = parseWsMessage(raw)
   if (!msg) return // unknown / malformed → silently drop (telemetry could log here)
+  // Until the socket has completed the `hello` handshake it is unauthenticated:
+  // only `hello` may run. Every other command is dropped. This prevents an
+  // attacker who guessed the session id from driving playback or reading state
+  // before the legitimate client authenticates.
+  if (msg.type !== 'hello' && !isWsAuthenticated(session)) return
   const handler = handlers[msg.type]
   const runtime = sessions.getRuntime(session.id)
   void handler(msg, { session, sessions, cfg, hwAccel, runtime })

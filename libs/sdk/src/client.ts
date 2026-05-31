@@ -1,6 +1,7 @@
 // sdk/src/client.ts
 import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch } from './types.ts'
 import type { Preferences } from './preferences.ts'
+import { ErrorCodes } from './types.ts'
 import { detectCapabilities } from './capabilities.ts'
 import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
 
@@ -25,8 +26,55 @@ export interface PlayOptions extends Omit<PlaybackSessionOptions, 'sessionInfo' 
 export function isRoleChangedError(err: unknown): boolean {
   return (
     err instanceof Error &&
-    (err as Error & { code?: string }).code === 'caller-forbidden'
+    (err as Error & { code?: string }).code === ErrorCodes.CALLER_FORBIDDEN
   )
+}
+
+/**
+ * Returns true when an error indicates the requested watch-progress record does
+ * not exist (server replied 404 with code `progress-not-found`). `progress.get`
+ * uses this to resolve to `null` rather than reject. Safe for any `unknown`
+ * value — verifies `instanceof Error` before touching `.code`.
+ */
+export function isProgressNotFoundError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err as Error & { code?: string }).code === ErrorCodes.PROGRESS_NOT_FOUND
+  )
+}
+
+/** Cap on raw-response text included in an error message, to keep messages sane. */
+const ERROR_TEXT_LIMIT = 200
+
+/**
+ * Build an Error for a non-ok HTTP response. Normal path is a JSON error body
+ * (`{ error, code }`). When the body is not valid JSON (e.g. an nginx/proxy HTML
+ * 502 page, or an unhandled server exception), fall back to `res.text()` and
+ * include a truncated snippet so the failure is debuggable instead of a bare
+ * `HTTP 502`. A `code` is attached only when the JSON body actually carried one.
+ */
+async function buildHttpError(res: Response): Promise<Error> {
+  let body: { error?: string; code?: string } | null = null
+  try {
+    body = await res.json()
+  } catch {
+    body = null
+  }
+  if (body && typeof body === 'object') {
+    const error = new Error(body.error ?? `HTTP ${res.status}`)
+    if (typeof body.code === 'string') (error as Error & { code?: string }).code = body.code
+    return error
+  }
+  // JSON parse failed — try to surface the raw response text for debugging.
+  let text = ''
+  try {
+    text = await res.text()
+  } catch {
+    text = ''
+  }
+  const snippet = text.trim().slice(0, ERROR_TEXT_LIMIT)
+  const suffix = snippet ? `: ${snippet}` : ''
+  return new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}${suffix}`)
 }
 
 export class HorizonClient {
@@ -55,8 +103,7 @@ export class HorizonClient {
       ...init,
     })
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw Object.assign(new Error(body.error ?? `HTTP ${res.status}`), { code: body.code })
+      throw await buildHttpError(res)
     }
     if (res.status === 204) return undefined as T
     return res.json()
@@ -93,7 +140,7 @@ export class HorizonClient {
       this.fetch<ContinueWatchingItem[]>(`/users/${userId}/continue-watching`),
     get: (userId: string, mediaId: string) =>
       this.fetch<WatchProgress>(`/users/${userId}/progress/${mediaId}`)
-        .catch(err => err.code === 'progress-not-found' ? null : Promise.reject(err)),
+        .catch(err => isProgressNotFoundError(err) ? null : Promise.reject(err)),
     markWatched: (userId: string, mediaId: string, watched: boolean) =>
       this.fetch<WatchProgress>(
         `/users/${userId}/progress/${mediaId}`,

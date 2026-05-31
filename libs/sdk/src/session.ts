@@ -4,6 +4,7 @@ import type {
   HorizonError, HorizonWarning, SessionInfo,
 } from './types.ts'
 import { BandwidthSampler } from './bandwidth.ts'
+import { parseServerMessage } from './ws-messages.ts'
 
 export type SessionState = 'attaching' | 'active' | 'detached' | 'destroyed'
 
@@ -25,8 +26,14 @@ const RECONNECT_BASE_MS = 1000
 export class PlaybackSession {
   readonly sessionId: string
   readonly method: PlaybackMethod
-  readonly streamUrl: string
   readonly wsUrl: string
+
+  /** Raw stream URL without the proof-of-knowledge token. hls.js requests
+   *  (transcode method) attach the token via the X-Reconnect-Token header in
+   *  xhrSetup, so the manifest URL stays clean. The token query param is only
+   *  appended for direct-play, where the browser `<video src>` cannot set
+   *  headers (see the `streamUrl` getter). */
+  private readonly _streamUrl: string
 
   private _profile: QualityProfile
   private _state: SessionState = 'attaching'
@@ -43,7 +50,7 @@ export class PlaybackSession {
     this._opts = opts
     this.sessionId = opts.sessionInfo.sessionId
     this.method = opts.sessionInfo.method
-    this.streamUrl = `${opts.baseUrl}${opts.sessionInfo.streamUrl}`
+    this._streamUrl = `${opts.baseUrl}${opts.sessionInfo.streamUrl}`
     // When baseUrl is empty (same-origin via Vite proxy), derive the WS origin
     // from window.location — WebSocket constructor rejects relative URLs.
     const wsOrigin = opts.baseUrl
@@ -67,15 +74,45 @@ export class PlaybackSession {
   get state(): SessionState { return this._state }
   get profile(): QualityProfile { return this._profile }
 
+  /** The session's reconnect token, assigned by the server on `session-ready`.
+   *  Doubles as a proof-of-knowledge credential the player must echo back on
+   *  every playlist/segment HTTP request via the `X-Reconnect-Token` header
+   *  (see apps/server/src/routes/segments.ts). Null until the handshake
+   *  completes; consumers should read it only after `onReady` has fired. */
+  get reconnectToken(): string | null { return this._reconnectToken }
+
+  /** Append the session's reconnect token as a `token` query param. Used for
+   *  transports that cannot set the X-Reconnect-Token header — a browser
+   *  `<video src>` (direct-play) or `<track src>` (subtitles). Returns the URL
+   *  unchanged when no token has been assigned yet (pre-handshake). */
+  private _withToken(url: string): string {
+    if (!this._reconnectToken) return url
+    return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(this._reconnectToken)}`
+  }
+
+  /** Playable stream URL. For direct-play this is the `/direct` endpoint with
+   *  the reconnect token appended as a query param, because the browser
+   *  `<video src>` cannot send the X-Reconnect-Token header the server requires.
+   *  For transcode (hls.js) the token rides on the header via xhrSetup, so the
+   *  manifest URL is returned unmodified. The web player only reads this after
+   *  onReady fires, by which point the token is assigned. */
+  get streamUrl(): string {
+    return this.method === 'direct-play' ? this._withToken(this._streamUrl) : this._streamUrl
+  }
+
   private _connect() {
     if (this._destroyed) return
     this._ws = new WebSocket(this.wsUrl)
 
     this._ws.onopen = () => {
       this._reconnectAttempts = 0
-      if (this._reconnectToken) {
-        this._send({ type: 'hello', reconnectToken: this._reconnectToken })
-      }
+      // Always send hello so the server can complete the handshake from this
+      // frame (it replies session-ready). reconnectToken is optional — included
+      // only on reconnect; the server guard tolerates its absence.
+      this._send({
+        type: 'hello',
+        ...(this._reconnectToken ? { reconnectToken: this._reconnectToken } : {}),
+      })
     }
 
     this._ws.onmessage = (ev) => {
@@ -111,7 +148,12 @@ export class PlaybackSession {
     this._reconnectTimer = setTimeout(() => this._connect(), delay)
   }
 
-  private _handleMessage(msg: any) {
+  private _handleMessage(raw: unknown) {
+    // Validate against the server-to-client schema before mutating any state or
+    // firing callbacks. Invalid / MITM-injected frames fail closed: silently
+    // dropped, no state change. (See ws-messages.ts.)
+    const msg = parseServerMessage(raw)
+    if (!msg) return
     switch (msg.type) {
       case 'session-ready':
         this._reconnectToken = msg.reconnectToken ?? null
@@ -130,7 +172,7 @@ export class PlaybackSession {
         this._opts.onWarning?.({ code: msg.code, message: msg.message })
         break
       case 'error':
-        this._opts.onError?.({ code: msg.code, message: msg.message, fatal: msg.fatal ?? true })
+        this._opts.onError?.({ code: msg.code as HorizonError['code'], message: msg.message, fatal: msg.fatal ?? true })
         if (msg.fatal) {
           // halt any pending reconnect — session is gone server-side
           if (this._reconnectTimer) clearTimeout(this._reconnectTimer)
@@ -200,7 +242,9 @@ export class PlaybackSession {
    *  embeddable text subs after ffmpeg starts; URL may 404 briefly while the
    *  extraction process is still running. */
   subtitleUrl(index: number): string {
-    return `${this._opts.baseUrl}/sessions/${this.sessionId}/subtitles/${index}.vtt`
+    // `<track src>` cannot send the X-Reconnect-Token header, so the server
+    // accepts the proof-of-knowledge token as a `token` query param here.
+    return this._withToken(`${this._opts.baseUrl}/sessions/${this.sessionId}/subtitles/${index}.vtt`)
   }
 
   park() { this._send({ type: 'park' }) }
@@ -214,8 +258,14 @@ export class PlaybackSession {
     this._reconnectTimer = null
     this._removeUnloadCleanup()
     this._ws?.close()
-    // fire and forget DELETE
-    fetch(`${this._opts.baseUrl}/sessions/${this.sessionId}`, { method: 'DELETE' }).catch(() => {})
+    // fire and forget DELETE. The server gates teardown behind the same
+    // proof-of-knowledge token as the data routes, so echo it back. (If the
+    // handshake never completed there is no token yet — the server treats an
+    // unknown/already-gone session as an idempotent 204, so the miss is benign.)
+    fetch(`${this._opts.baseUrl}/sessions/${this.sessionId}`, {
+      method: 'DELETE',
+      ...(this._reconnectToken ? { headers: { 'X-Reconnect-Token': this._reconnectToken } } : {}),
+    }).catch(() => {})
   }
 
   private _registerUnloadCleanup() {

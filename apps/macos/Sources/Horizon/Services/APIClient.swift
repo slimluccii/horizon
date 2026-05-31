@@ -9,7 +9,10 @@ enum HorizonServer {
 
     static var baseURL: URL {
         let raw = ProcessInfo.processInfo.environment["HORIZON_SERVER_URL"] ?? defaultUrl
-        return URL(string: raw)!
+        // Fall back to the known-good default if the env override is malformed,
+        // rather than crashing on launch. The final force-unwrap is safe by
+        // construction: `defaultUrl` is a hardcoded, valid URL string.
+        return URL(string: raw) ?? URL(string: defaultUrl)!
     }
 }
 

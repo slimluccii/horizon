@@ -35,6 +35,14 @@ import {
  *  segments ≈ 2 min at 4 s/seg; restarting is faster than waiting beyond. */
 export const SEEK_LOOKAHEAD_SEGMENTS = 30
 
+/** Hard ceiling on how long a single restart action (ffmpeg respawn +
+ *  pre-buffer) may run before the state machine gives up and returns to
+ *  `idle`. Without it, a hung ffmpeg leaves the runtime stuck in `restarting`
+ *  forever, so every subsequent seek/track-change returns `busy` — the session
+ *  is permanently wedged. On timeout the action keeps running in the
+ *  background (best-effort), but the runtime is unblocked. */
+export const RESTART_TIMEOUT_MS = 30_000
+
 export type RuntimeStateKind = 'idle' | 'restarting' | 'destroyed'
 
 export interface RestartTarget {
@@ -130,12 +138,25 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
     if (state.kind === 'destroyed') return { ok: false, reason: 'destroyed' }
     if (state.kind === 'restarting') return { ok: false, reason: 'busy' }
     state = { kind: 'restarting', target }
+    let timer: NodeJS.Timeout | undefined
     try {
-      await action()
+      // Race the restart against a hard timeout so a hung ffmpeg can never
+      // wedge the runtime in `restarting`. The losing action keeps running in
+      // the background (best-effort) but the state machine is freed.
+      await Promise.race([
+        action(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('restart-timeout')), RESTART_TIMEOUT_MS)
+        }),
+      ])
       return { ok: true }
     } catch (err) {
+      if (err instanceof Error && err.message === 'restart-timeout') {
+        console.error(`Session ${session.id}: ffmpeg restart timed out after ${RESTART_TIMEOUT_MS}ms`)
+      }
       return { ok: false, reason: 'busy', error: err }
     } finally {
+      clearTimeout(timer)
       const current = state as RuntimeState
       if (current.kind !== 'destroyed') state = { kind: 'idle' }
     }

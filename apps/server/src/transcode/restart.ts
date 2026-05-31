@@ -110,6 +110,14 @@ export async function restartWithReset(
   segNum: number,
 ): Promise<void> {
   killFfmpeg(session)
+  // Wait for the old process to fully exit (bounded by KILL_DRAIN_MS) before
+  // touching its outputs or spawning the replacement. Without this:
+  //   - cleanupRenditionFiles could delete files the old ffmpeg still has open
+  //     mid-write (#58), and
+  //   - spawnFfmpeg could start a second ffmpeg while the first is still alive,
+  //     leaving two processes briefly contending for the same output dir (#79).
+  // Mirrors the proven pattern in restartAtSegment.
+  await waitForExit(session)
   const renditionCount = plan.method === 'transcode' ? plan.renditions.length : 1
   await cleanupRenditionFiles(session, renditionCount, { keepInit: false })
   const ctx = applyStartSegment(session, segNum)

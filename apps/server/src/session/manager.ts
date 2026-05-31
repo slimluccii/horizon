@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { ErrorCodes } from '@horizon/sdk'
 import type { Session } from './types.ts'
 import type { SessionRuntime } from './runtime.ts'
 import type { ServerSettings } from '../repos/serverSettings.ts'
@@ -24,10 +25,20 @@ export function createSessionManager(serverSettings: ServerSettings): SessionMan
   const runtimes = new Map<string, SessionRuntime>()
   const byToken = new Map<string, string>()
 
+  /**
+   * Create a new Session and arm its WS-attach timeout.
+   *
+   * `maxSessions` and `wsAttachMs` are read LIVE from serverSettings here, so a
+   * PATCH /settings/server change takes effect on the very next `create()`
+   * with no server restart. This is existing correct behavior (not a fix):
+   * changes do NOT retroactively re-arm the attach timers of already-created
+   * sessions — each session keeps the value it was created with — but every
+   * new session picks up the current value. (CONTEXT.md → ServerSettings.)
+   */
   function create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs' | 'currentStartSegment'>): Session {
     const { maxSessions, wsAttachMs } = serverSettings.get()
     if (sessions.size >= maxSessions) {
-      throw Object.assign(new Error('Server at session capacity'), { code: 'max-sessions' })
+      throw Object.assign(new Error('Server at session capacity'), { code: ErrorCodes.MAX_SESSIONS })
     }
 
     const id = crypto.randomUUID()
@@ -65,19 +76,32 @@ export function createSessionManager(serverSettings: ServerSettings): SessionMan
     const session = sessions.get(id)
     if (!session) return
 
+    // Each cleanup step is isolated: a failure in one must never abort the
+    // others or prevent the session from being marked destroyed. This
+    // guarantees the ffmpeg process is killed and bookkeeping is cleared even
+    // if (say) cleanupSessionDir throws on a stuck filesystem.
+
     // Mark runtime destroyed first so any in-flight transition observes the
     // terminal state when it returns to update bookkeeping.
-    runtimes.get(id)?.markDestroyed()
+    try { runtimes.get(id)?.markDestroyed() } catch (err) {
+      console.error(`Session ${id}: markDestroyed failed`, err)
+    }
 
-    clearTimeout(session.attachTimer)
-    clearTimeout(session.graceTimer)
-    killFfmpeg(session)
+    try { clearTimeout(session.attachTimer) } catch {/* not set */}
+    try { clearTimeout(session.graceTimer) } catch {/* not set */}
+
+    try { killFfmpeg(session) } catch (err) {
+      console.error(`Session ${id}: killFfmpeg failed`, err)
+    }
+
     if (session.subtitleProcess && !session.subtitleProcess.killed) {
       try { session.subtitleProcess.kill('SIGTERM') } catch {/* gone */}
     }
+
     await cleanupSessionDir(session.sessionDir).catch((err) => {
       console.error(`Session ${id}: cleanup failed`, err)
     })
+
     byToken.delete(session.reconnectToken)
     sessions.delete(id)
     runtimes.delete(id)

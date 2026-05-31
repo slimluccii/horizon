@@ -6,6 +6,28 @@ const NS = 'tmdb'
 /** Cap concurrent in-flight requests so a fresh library scan can't burst past
  *  TMDB's 50 req/sec ceiling. */
 const MAX_CONCURRENT = 4
+/** Per-request timeout. Without this, a hung TMDB socket would pin a semaphore
+ *  slot forever and (in the scheduler) block the daily refresh indefinitely.
+ *  30s is standard for external JSON APIs — generous for slow networks without
+ *  starving the semaphore for too long. */
+const TMDB_FETCH_TIMEOUT_MS = 30_000
+
+/** True for the DOMException/Error fetch throws when an AbortSignal fires. */
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError'
+}
+
+/** fetch() with an AbortController-backed timeout. Caller owns error handling.
+ *  Always clears the timer so a fast response doesn't leak a pending timeout. */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 interface TmdbConfig {
   token: string
@@ -63,12 +85,12 @@ class Provider implements TmdbProvider {
 
     await this.acquire()
     try {
-      const res = await fetch(`${TMDB_BASE}${path}`, {
+      const res = await fetchWithTimeout(`${TMDB_BASE}${path}`, {
         headers: {
           Authorization: `Bearer ${this.cfg.token}`,
           Accept: 'application/json',
         },
-      })
+      }, TMDB_FETCH_TIMEOUT_MS)
       if (res.status === 404) return null
       if (!res.ok) {
         // Non-fatal: log and return null so enrichment falls back to file metadata.
@@ -79,7 +101,13 @@ class Provider implements TmdbProvider {
       await writeMetaCache(this.cfg.cacheDir, NS, parts, data)
       return data
     } catch (err) {
-      console.warn(`TMDB fetch failed ${path}: ${(err as Error).message}`)
+      // Distinguish a timeout (operator should check network/TMDB latency)
+      // from a transient network/DNS error so logs are actionable.
+      if (isAbortError(err)) {
+        console.warn(`TMDB timeout (>${TMDB_FETCH_TIMEOUT_MS}ms) ${path}`)
+      } else {
+        console.warn(`TMDB network error ${path}: ${(err as Error).message}`)
+      }
       return null
     } finally {
       this.release()
@@ -166,16 +194,23 @@ class Provider implements TmdbProvider {
       await this.acquire()
       let data: TmdbChangesResponse | null = null
       try {
-        const res = await fetch(`${TMDB_BASE}${url}`, {
+        const res = await fetchWithTimeout(`${TMDB_BASE}${url}`, {
           headers: { Authorization: `Bearer ${this.cfg.token}`, Accept: 'application/json' },
-        })
+        }, TMDB_FETCH_TIMEOUT_MS)
         if (!res.ok) {
           console.warn(`TMDB ${res.status} ${url}`)
           break
         }
         data = await res.json() as TmdbChangesResponse
       } catch (err) {
-        console.warn(`TMDB changes fetch failed ${url}: ${(err as Error).message}`)
+        // Each page gets its own timeout. On timeout/error we stop paging and
+        // return whatever ids accumulated so far — the changes feed is
+        // best-effort, partial results still provide value.
+        if (isAbortError(err)) {
+          console.warn(`TMDB changes timeout (>${TMDB_FETCH_TIMEOUT_MS}ms) ${url}`)
+        } else {
+          console.warn(`TMDB changes network error ${url}: ${(err as Error).message}`)
+        }
         break
       } finally {
         this.release()

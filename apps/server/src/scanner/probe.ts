@@ -1,10 +1,20 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, stat, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
 const execFileAsync = promisify(execFile)
+
+/** ffprobe wall-clock cap. Without it a pathological input could hang the
+ *  scan worker indefinitely. 60s (not 30s) tolerates ffprobe on very large
+ *  files (>50GB) on slow hardware; tune if probes legitimately time out. */
+const PROBE_TIMEOUT_MS = 60_000
+/** Max stdout we accept from ffprobe. Normal JSON output is <1MB even for
+ *  exotic files; 10MB is a generous ceiling that still bounds memory. Node
+ *  throws ENOBUFS past this, which the caller's .catch() handles like any
+ *  other probe failure. */
+const PROBE_MAX_BUFFER = 10 * 1024 * 1024
 
 export interface AudioTrack {
   index: number
@@ -74,7 +84,16 @@ function findSideData(stream: FfprobeStream | undefined, type: string): FfprobeS
 }
 
 export function parseProbeOutput(stdout: string): ProbeResult {
-  const data = JSON.parse(stdout) as FfprobeJson
+  let data: FfprobeJson
+  try {
+    data = JSON.parse(stdout) as FfprobeJson
+  } catch (e) {
+    // Malformed / truncated ffprobe output (e.g. hit maxBuffer, or ffprobe
+    // emitted garbage). Log the specific failure for debugging, then re-throw
+    // so the caller's .catch() still increments the failed count.
+    console.error(`Failed to parse ffprobe output: ${e instanceof Error ? e.message : String(e)}`)
+    throw e
+  }
   const streams = data.streams ?? []
   const format = data.format ?? {}
 
@@ -125,7 +144,10 @@ function cacheKey(filePath: string, mtimeMs: number, size: number) {
 }
 
 async function readCache(cacheDir: string, key: string): Promise<CacheEntry | null> {
-  const entryPath = path.join(cacheDir, `${key.slice(0, 8)}.json`)
+  // Use the FULL 40-char SHA1 key as the filename. Truncating to 8 chars
+  // risked collisions (two distinct files hashing to the same prefix would
+  // overwrite each other's cache).
+  const entryPath = path.join(cacheDir, `${key}.json`)
   try {
     const raw = await readFile(entryPath, 'utf8')
     return JSON.parse(raw) as CacheEntry
@@ -136,8 +158,18 @@ async function readCache(cacheDir: string, key: string): Promise<CacheEntry | nu
 
 async function writeCache(cacheDir: string, key: string, result: ProbeResult) {
   await mkdir(cacheDir, { recursive: true })
-  const entryPath = path.join(cacheDir, `${key.slice(0, 8)}.json`)
-  await writeFile(entryPath, JSON.stringify({ key, result }))
+  const entryPath = path.join(cacheDir, `${key}.json`)
+  // Write to a unique temp file, then atomically rename into place. Concurrent
+  // writers can no longer interleave bytes in the final file — the reader
+  // always sees either the old complete file or the new complete file.
+  const tempPath = path.join(cacheDir, `${key}-${Math.random().toString(36).slice(2)}.tmp`)
+  try {
+    await writeFile(tempPath, JSON.stringify({ key, result }))
+    await rename(tempPath, entryPath)
+  } finally {
+    // Best-effort cleanup if the rename never happened (e.g. write threw).
+    await unlink(tempPath).catch(() => {})
+  }
 }
 
 export async function probe(filePath: string, cacheDir: string): Promise<ProbeResult> {
@@ -152,7 +184,7 @@ export async function probe(filePath: string, cacheDir: string): Promise<ProbeRe
     '-show_streams',
     '-show_format',
     filePath,
-  ])
+  ], { timeout: PROBE_TIMEOUT_MS, maxBuffer: PROBE_MAX_BUFFER })
 
   const result = parseProbeOutput(stdout)
   await writeCache(cacheDir, key, result)

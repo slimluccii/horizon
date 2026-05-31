@@ -1,16 +1,9 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import type { ServerSettings } from '../repos/serverSettings.ts'
-import { badRequest, errorReply } from './errors.ts'
-
-function resolveCallerRole(users: UserRepo, req: FastifyRequest): { id: string; role: 'owner' | 'admin' | 'member' } | null {
-  const hdr = req.headers['x-horizon-user']
-  const id = typeof hdr === 'string' ? hdr : null
-  if (!id) return null
-  const u = users.get(id)
-  return u ? { id: u.id, role: u.role } : null
-}
+import { badRequest, errorReply, ErrorCodes } from './errors.ts'
+import { resolveCallerRole } from './authz.ts'
 
 /**
  * Zod schema for the writable subset of ServerSettingsRow.
@@ -24,7 +17,23 @@ const PatchBody = z.object({
   watchFs: z.boolean().optional(),
   watchDebounceMs: z.number().int().min(100).max(60_000).optional(),
   // Metadata
-  tmdbToken: z.string().nullable().optional(),
+  // tmdbToken is a TMDB v4 API read-access token — a JWT (3 base64url segments
+  // separated by dots, ~230 chars). Validate the shape to reject accidental
+  // plaintext / wrong-service keys. An empty string (clears the token) and
+  // null are allowed; any non-empty value must look like a JWT and be ≥48 chars.
+  // NOTE: revisit this regex if TMDB ever moves off JWT bearer tokens.
+  tmdbToken: z
+    .string()
+    .nullable()
+    .optional()
+    .refine(
+      (v) =>
+        v === null ||
+        v === undefined ||
+        v === '' ||
+        (v.length >= 48 && /^[A-Za-z0-9\-_.]+\.[A-Za-z0-9\-_.]+\.[A-Za-z0-9\-_.]+$/.test(v)),
+      { message: 'TMDB token must be in JWT format (3 base64url segments separated by dots, ≥48 chars)' },
+    ),
   metadataBatchSize: z.number().int().min(1).max(500).optional(),
   metadataMaxAgeMovieDays: z.number().int().min(1).optional(),
   metadataMaxAgeShowDays: z.number().int().min(1).optional(),
@@ -51,7 +60,7 @@ export function registerSettings(
    */
   app.get('/settings/server', async (req, reply) => {
     const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, 'no-user', 'Missing or unknown X-Horizon-User header')
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
 
     const row = serverSettings.get()
     return {
@@ -69,13 +78,13 @@ export function registerSettings(
    */
   app.patch('/settings/server', async (req, reply) => {
     const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, 'no-user', 'Missing or unknown X-Horizon-User header')
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
     if (caller.role === 'member') {
-      return errorReply(reply, 403, 'caller-forbidden', 'Only owner or admin can change server settings')
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can change server settings')
     }
 
     const parse = PatchBody.safeParse(req.body)
-    if (!parse.success) return badRequest(reply, 'invalid-input', parse.error.message)
+    if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
 
     const patch = { ...parse.data }
     // Normalise empty string → null (clears the token).

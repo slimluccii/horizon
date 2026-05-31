@@ -32,6 +32,8 @@ The `seeded_from_env` column is a one-time bootstrap flag. On first boot after u
 
 Consumers must call `serverSettings.get()` rather than `loadConfig()` for live settings. The `get()` call is cheap (returns cached values; cache is invalidated on `update()`). Wire a thunk — `getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct` — so consumers pick up changes without restart.
 
+Every config-consuming module must wire such a getter, never snapshot a value at construction. Established getters: `progressRepo` (`getWatchedThresholdPct`), `MetadataRefreshWorker` (a `() => MetadataRefreshConfig` getter read at the start of each `run()`, so `metadataBatchSize` / `metadataMaxAge*` apply on the next run), and `SessionManager.create()` (reads `maxSessions` / `wsAttachMs` live per session). When adding a new live-tunable setting, wire it through one of these getters — a constructor-time snapshot will silently go stale after a PATCH /settings/server.
+
 The `metadata_max_age_*_days` columns are stored in **days** (matching the `HORIZON_METADATA_MAX_AGE_*_DAYS` env-var unit). Consumers convert to milliseconds at the edge when wiring into workers (`days * 86_400_000`).
 
 Future schema additions (v5+) get only their hardcoded column defaults on existing rows — `seeded_from_env` will already be 1, so the bootstrap pass does not apply. A v5+ migration that adds a column should run its own targeted overlay for that column's env var.
@@ -87,6 +89,18 @@ A single client's streaming context: which MediaItem, the chosen playback
 method, the ffmpeg child process (if any), the on-disk session dir holding
 HLS segments, the WS socket, and lifecycle state. See
 [server/src/session/types.ts](server/src/session/types.ts).
+
+**Track-index bounds invariant.** A client-supplied `audioTrackIndex` /
+`subtitleTrackIndex` is validated at *both* entry points before it can reach
+ffmpeg — an out-of-range index is otherwise a trivial mid-session DoS (the
+ffmpeg run crashes). At session create, `PlaybackOrchestrator.startPlayback`
+checks the index against the probed `MediaItem` (rejecting with
+`audio-track-invalid` / `invalid-input`). Mid-session switches over the WS are
+checked in the `audio-track` handler against `Session.audioTrackCount` /
+`subtitleTrackCount`, which are stamped at create from the same probe (the
+`PlaybackPlan` does not carry the track list, so the counts live on the
+Session). The counts are stable because a MediaItem is immutable for the life
+of a Session.
 
 ### SessionState
 `pre-buffer | active | detached | parked | destroyed`. Transitions are driven
@@ -180,3 +194,32 @@ removed on destroy.
 ### reconnectToken
 Long random opaque token returned at session create. Lets a client reattach
 to a session after a WS drop without exposing the session ID in URLs.
+
+It is also the **proof-of-knowledge credential** for every session data route:
+the `sessionId` in a URL is *not* a capability on its own. Holding it does not
+grant access to media bytes or let you tear a session down. The caller must echo
+the `reconnectToken` back on `GET /sessions/:id/stream.m3u8`,
+`/renditions/:r.m3u8`, `/renditions/:r/:seg`, `/direct`,
+`/subtitles/:trackIdx.vtt`, and `DELETE /sessions/:id`, otherwise the route
+replies `400 invalid-reconnect-token`. (`DELETE` of an unknown/already-gone
+session is an idempotent `204` and needs no token.) The token is accepted via
+the `X-Reconnect-Token` header (hls.js playlist/segment loads + the teardown
+`fetch`) or a `token` query param for transports that cannot set headers — a
+browser `<video src>` (direct-play) or `<track src>` (subtitles). Treat the
+`sessionId` as opaque and the `reconnectToken` as the secret. See
+[apps/server/src/routes/segments.ts](apps/server/src/routes/segments.ts)
+(`requireReconnectToken`).
+
+### WS attach handshake
+A freshly attached `/sessions/:id/ws` socket is **unauthenticated**: the server
+processes only the `hello` message and drops every other command (seek,
+quality-override, audio-track, subtitle-track, park/resume, progress,
+bandwidth-report) until the handshake completes. `hello` authenticates the
+socket — a present-but-mismatched `reconnectToken` closes the socket with code
+`4401 invalid-reconnect-token`; a tokenless `hello` is the legitimate
+initial-attach path (the token is only learned from the `session-ready` reply,
+so the first connection cannot echo it). This gate prevents a party who guessed
+the session id from driving playback or mutating session state before the
+legitimate client's `hello` arrives. Each new socket (including reconnects)
+must re-handshake — auth state is reset on attach. See
+[apps/server/src/ws/handler.ts](apps/server/src/ws/handler.ts).

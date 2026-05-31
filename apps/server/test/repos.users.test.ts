@@ -113,4 +113,30 @@ describe('userRepo', () => {
     try { repo.update(member.id, { role: 'owner' }) } catch (e) { caught = e }
     expect((caught as { code?: string }).code).toBe('owner-exists')
   })
+
+  it('first user in concurrent creates is owner, others are members', async () => {
+    // better-sqlite3 is synchronous, so Promise.all serialises these creates;
+    // the transaction in create() guarantees the COUNT+INSERT stay atomic so
+    // exactly one owner is elected regardless of interleaving.
+    const results = await Promise.all([
+      Promise.resolve().then(() => repo.create({ name: 'A' })),
+      Promise.resolve().then(() => repo.create({ name: 'B' })),
+    ])
+    expect(results).toHaveLength(2)
+    const owners = repo.list().filter(u => u.role === 'owner')
+    expect(owners).toHaveLength(1)
+    const members = repo.list().filter(u => u.role === 'member')
+    expect(members).toHaveLength(1)
+  })
+
+  it('transaction rollback on name conflict leaves DB clean', () => {
+    repo.create({ name: 'A' }) // owner
+    expect(() => repo.create({ name: 'a' })).toThrow(/name-taken/)
+    // Rollback must leave no partial row and a usable connection for the next
+    // create (no dangling open transaction).
+    expect(repo.list()).toHaveLength(1)
+    const next = repo.create({ name: 'B' })
+    expect(next.role).toBe('member')
+    expect(repo.list()).toHaveLength(2)
+  })
 })

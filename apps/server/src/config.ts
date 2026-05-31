@@ -41,6 +41,12 @@ export interface Config {
   /** Enable POST /dev/seed/:scenario (mock fixture loader). Off by default —
    *  only set HORIZON_DEV_SEED=1 in dev + e2e environments. */
   devSeedEnabled: boolean
+  /** Runtime environment from NODE_ENV. Defaults to 'development' so existing
+   *  dev setups (which rarely set NODE_ENV) keep working. Production
+   *  deployments MUST set NODE_ENV=production — the startup guard then refuses
+   *  to boot with HORIZON_DEV_SEED=1, so the dev seed routes can never be
+   *  exposed in production. */
+  nodeEnv: string
 }
 
 /** Parse env var as positive integer, falling back to default on missing/NaN. */
@@ -87,6 +93,7 @@ export function loadConfig(): Config {
     metadataMaxAgeShowMs: envInt('HORIZON_METADATA_MAX_AGE_SHOW_DAYS', 7) * 86_400_000,
     metadataMaxAgeEpisodeMs: envInt('HORIZON_METADATA_MAX_AGE_EPISODE_DAYS', 60) * 86_400_000,
     devSeedEnabled: envBool('HORIZON_DEV_SEED', false),
+    nodeEnv: process.env.NODE_ENV || 'development',
   }
 }
 
