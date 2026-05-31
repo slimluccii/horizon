@@ -59,9 +59,22 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
   app.patch<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
     const parse = PatchBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
+    // Every PATCH must identify its caller. Without this gate any client could
+    // mutate any other user's profile (IDOR).
+    const caller = resolveCallerRole(users, req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    // Profile fields (name / avatar / preferences) are personal: a caller may
+    // only edit their own profile. This closes the IDOR for non-role fields.
+    const editsProfile =
+      parse.data.name !== undefined ||
+      parse.data.avatar !== undefined ||
+      parse.data.preferences !== undefined
+    if (editsProfile && caller.id !== req.params.id) {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Can only edit your own profile')
+    }
+    // Role changes are a household-management action: only owner/admin may
+    // perform them (on themselves or others). Members cannot change any role.
     if (parse.data.role !== undefined) {
-      const caller = resolveCallerRole(users, req)
-      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
       if (caller.role === 'member') return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can change roles')
     }
     try {

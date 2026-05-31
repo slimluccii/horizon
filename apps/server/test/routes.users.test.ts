@@ -127,9 +127,74 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
     const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${u.id}`, payload: { name: 'B' } })
+    const res = await app.inject({ method: 'PATCH', url: `/users/${u.id}`, payload: { name: 'B' }, headers: { 'x-horizon-user': u.id } })
     expect(res.statusCode).toBe(200)
     expect(res.json().name).toBe('B')
+  })
+
+  it('PATCH own profile name as member returns 200', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'Alice' }) // owner
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { name: 'Bobby' }, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().name).toBe('Bobby')
+  })
+
+  it('PATCH own profile preferences as member returns 200', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'Alice' }) // owner
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { preferences: { theme: 'dark' } }, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().preferences).toEqual({ theme: 'dark' })
+  })
+
+  it('PATCH other user profile name as member returns 403 (IDOR closed)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { name: 'Mallory' }, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+  })
+
+  it('PATCH other user profile preferences as member returns 403 (IDOR closed)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { preferences: { theme: 'dark' } }, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+  })
+
+  it('PATCH other user profile name as owner returns 403 (self-edit only)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const owner = users.create({ name: 'Alice' })
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { name: 'Robert' }, headers: { 'x-horizon-user': owner.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+  })
+
+  it('PATCH profile without x-horizon-user header returns 400 no-user', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const u = users.create({ name: 'A' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${u.id}`, payload: { name: 'B' } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('no-user')
   })
 
   it('deletes + subsequent 404', async () => {
@@ -256,6 +321,7 @@ describe('PATCH /users/:id preferences', () => {
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { theme: 'light' } },
+      headers: { 'x-horizon-user': u.id },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().preferences).toEqual({ theme: 'light', audioLanguage: 'en' })
@@ -309,6 +375,7 @@ describe('PATCH /users/:id preferences', () => {
       const res = await app.inject({
         method: 'PATCH', url: `/users/${u.id}`,
         payload: { preferences: { audioLanguage: code, subtitleLanguage: code } },
+        headers: { 'x-horizon-user': u.id },
       })
       expect(res.statusCode, `expected 200 for language code ${code}`).toBe(200)
       expect(res.json().preferences.audioLanguage).toBe(code)
@@ -337,6 +404,7 @@ describe('PATCH /users/:id preferences', () => {
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { name: 'B' },
+      headers: { 'x-horizon-user': u.id },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().preferences).toEqual({ theme: 'light' })
@@ -350,6 +418,7 @@ describe('PATCH /users/:id preferences', () => {
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { theme: 'dark' } },
+      headers: { 'x-horizon-user': u.id },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().preferences).toEqual({ theme: 'dark', subtitlesEnabled: true, audioLanguage: 'fr' })
