@@ -25,6 +25,16 @@ export function createSessionManager(serverSettings: ServerSettings): SessionMan
   const runtimes = new Map<string, SessionRuntime>()
   const byToken = new Map<string, string>()
 
+  /**
+   * Create a new Session and arm its WS-attach timeout.
+   *
+   * `maxSessions` and `wsAttachMs` are read LIVE from serverSettings here, so a
+   * PATCH /settings/server change takes effect on the very next `create()`
+   * with no server restart. This is existing correct behavior (not a fix):
+   * changes do NOT retroactively re-arm the attach timers of already-created
+   * sessions — each session keeps the value it was created with — but every
+   * new session picks up the current value. (CONTEXT.md → ServerSettings.)
+   */
   function create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs' | 'currentStartSegment'>): Session {
     const { maxSessions, wsAttachMs } = serverSettings.get()
     if (sessions.size >= maxSessions) {

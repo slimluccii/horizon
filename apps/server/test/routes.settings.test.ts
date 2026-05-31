@@ -518,6 +518,59 @@ describe('PATCH /settings/server — metadata fields', () => {
     expect(res.json().metadataMaxAgeShowDays).toBe(3)
     expect(res.json().metadataMaxAgeEpDays).toBe(45)
   })
+
+  it('PATCH metadataBatchSize is reflected in the next MetadataRefreshWorker run (#61/#65)', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+
+    // The worker reads config from the SAME serverSettings the route mutates,
+    // via a live getter — so a PATCH propagates to the next run().
+    const wdb = openDatabase(':memory:')
+    migrate(wdb)
+    const media = createMediaRepo(wdb)
+    for (let i = 0; i < 10; i++) {
+      wdb.prepare(
+        `INSERT INTO media_items (id, kind, title, file_path, mtime_ms, size_bytes,
+                                  first_seen_at, last_seen_at, tmdb_id)
+         VALUES (?, 'movie', ?, ?, 0, 0, 0, 0, ?)`,
+      ).run(`m${i}`, `T${i}`, `/m/${i}.mkv`, 200 + i)
+    }
+    const tmdb: TmdbProvider = {
+      async movieByTmdbId(id: number) { return { kind: 'movie', tmdbId: id, title: `M${id}` } as any },
+      async movieByImdbId() { return null },
+      async searchMovie() { return null },
+      async showByTmdbId() { return null },
+      async showByTvdbId() { return null },
+      async searchShow() { return null },
+      async episode() { return null },
+      async changedMovieIds() { return [] },
+      async changedShowIds() { return [] },
+    } as any
+    const DAY_MS = 86_400_000
+    const worker = createMetadataRefreshWorker(
+      () => ({
+        ...DEFAULT_REFRESH_CONFIG,
+        changesFeedExtraCap: 0,
+        batchSize: serverSettings.get().metadataBatchSize,
+        maxAgeMs: {
+          movie: serverSettings.get().metadataMaxAgeMovieDays * DAY_MS,
+          show: serverSettings.get().metadataMaxAgeShowDays * DAY_MS,
+          episode: serverSettings.get().metadataMaxAgeEpDays * DAY_MS,
+        },
+      }),
+      { media, tmdb, changesCursor: createChangesCursorRepo(wdb) },
+    )
+
+    // Shrink the batch size over HTTP, then run — the worker must honor it.
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { metadataBatchSize: 4 },
+    })
+    expect(res.statusCode).toBe(200)
+    const r = await worker.run({ useChangesFeed: false })
+    expect(r.refreshed).toBe(4)
+  })
 })
 
 describe('MetadataRefreshWorker — setTmdb (hot-swap)', () => {
