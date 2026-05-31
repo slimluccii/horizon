@@ -180,3 +180,17 @@ removed on destroy.
 ### reconnectToken
 Long random opaque token returned at session create. Lets a client reattach
 to a session after a WS drop without exposing the session ID in URLs.
+
+### WS attach handshake
+A freshly attached `/sessions/:id/ws` socket is **unauthenticated**: the server
+processes only the `hello` message and drops every other command (seek,
+quality-override, audio-track, subtitle-track, park/resume, progress,
+bandwidth-report) until the handshake completes. `hello` authenticates the
+socket — a present-but-mismatched `reconnectToken` closes the socket with code
+`4401 invalid-reconnect-token`; a tokenless `hello` is the legitimate
+initial-attach path (the token is only learned from the `session-ready` reply,
+so the first connection cannot echo it). This gate prevents a party who guessed
+the session id from driving playback or mutating session state before the
+legitimate client's `hello` arrives. Each new socket (including reconnects)
+must re-handshake — auth state is reset on attach. See
+[apps/server/src/ws/handler.ts](apps/server/src/ws/handler.ts).

@@ -7,7 +7,7 @@ import type { ProgressRepo } from '../repos/progress.ts'
 import type { ServerSettings } from '../repos/serverSettings.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { PlaybackOrchestrator, StartPlaybackInput } from '../session/playback.ts'
-import { handleWsMessage } from '../ws/handler.ts'
+import { handleWsMessage, resetWsAuth } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
 import { sendNotFound, overCapacity, badRequest, ErrorCodes } from './errors.ts'
 
@@ -80,6 +80,10 @@ export function registerSessions(
     clearTimeout(session.graceTimer)
     session.wsSocket = socket
     session.state = 'active'
+    // A fresh socket is unauthenticated until it sends a valid `hello`. Reset
+    // any prior auth state so a reconnecting client must re-handshake before
+    // its playback commands are honoured.
+    resetWsAuth(session)
 
     if (session.sessionReady) {
       socket.send(JSON.stringify({
