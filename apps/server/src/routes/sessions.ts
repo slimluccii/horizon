@@ -9,7 +9,8 @@ import type { SessionManager } from '../session/manager.ts'
 import type { PlaybackOrchestrator, StartPlaybackInput } from '../session/playback.ts'
 import { handleWsMessage } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
-import { sendNotFound, overCapacity, badRequest, ErrorCodes } from './errors.ts'
+import { sendNotFound, overCapacity, badRequest, errorReply, ErrorCodes } from './errors.ts'
+import { resolveCallerRole } from './authz.ts'
 
 const WS_PING_INTERVAL_MS = 15_000
 
@@ -21,11 +22,24 @@ export function registerSessions(
   progressRepo: ProgressRepo,
   orchestrator: PlaybackOrchestrator,
   serverSettings: ServerSettings,
+  users: UserRepo,
 ) {
   app.post<{ Body: StartPlaybackInput }>('/sessions', async (req, reply) => {
+    // Authenticate the caller via X-Horizon-User. Playback is always tied to a
+    // user (for watch-history + capacity accounting). owner/admin may delegate
+    // playback on behalf of another household member; members may only play as
+    // themselves.
+    const caller = resolveCallerRole(users, req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+
+    const requestedUserId = req.body?.userId
+    if (requestedUserId && requestedUserId !== caller.id && caller.role === 'member') {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner/admin can start playback for another user')
+    }
+
     let started
     try {
-      started = orchestrator.startPlayback(req.body)
+      started = orchestrator.startPlayback({ ...req.body, userId: requestedUserId || caller.id })
     } catch (err) {
       const code = (err as { code?: string }).code
       if (code === ErrorCodes.MEDIA_NOT_FOUND) return sendNotFound(reply, ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
