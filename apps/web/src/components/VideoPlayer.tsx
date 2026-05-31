@@ -3,6 +3,12 @@ import { useEffect, useRef, type RefObject } from 'react'
 import Hls from 'hls.js'
 import type { PlaybackSession, QualityProfile, SubtitleTrack } from '@horizon/sdk'
 
+/** Delay (ms) before tearing down an old hls.js instance on reload. Gives any
+ *  in-flight MSE buffer appends time to settle so destroy() doesn't abort them
+ *  mid-flight and stall the freshly-created instance. Environment-dependent;
+ *  100ms is enough on the dev environment and is validated by the e2e suite. */
+const DESTROY_DEFER_MS = 100
+
 interface Props {
   session: PlaybackSession
   /** Bumped by parent to force HLS source reload after server restarts ffmpeg
@@ -11,7 +17,8 @@ interface Props {
   reloadKey?: number
   /** Resume position (seconds) for hls.js after a reloadKey bump. Parent captures
    *  the player's currentTime before triggering the restart so the client picks
-   *  up playback where it left off instead of seeking to zero. */
+   *  up playback where it left off instead of seeking to zero. Applied exactly
+   *  once per reloadKey bump; does not re-apply on subsequent renders. */
   resumeAtSec?: number
   /** Selected subtitle track from media.subtitleTracks; null = off. */
   subtitle: SubtitleTrack | null
@@ -27,6 +34,9 @@ export default function VideoPlayer({
   const internalRef = useRef<HTMLVideoElement>(null)
   const videoRef = externalRef ?? internalRef
   const hlsRef = useRef<Hls | null>(null)
+  // Track which reloadKey has had its resumeAtSec applied. Prevents re-applying
+  // a stale position if the init effect ever re-runs for the same reloadKey.
+  const appliedReloadKeyRef = useRef<number>(-1)
 
   useEffect(() => {
     const video = videoRef.current
@@ -42,13 +52,20 @@ export default function VideoPlayer({
       return
     }
 
+    // Apply resumeAtSec exactly once per reloadKey bump. If this effect re-runs
+    // for a reloadKey we've already handled, fall back to -1 so we never re-seek
+    // to a stale position the user has since moved past.
+    const isFreshReload = reloadKey !== appliedReloadKeyRef.current
+    const startPosition = isFreshReload && resumeAtSec > 0 ? resumeAtSec : -1
+    appliedReloadKeyRef.current = reloadKey
+
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: false,
       backBufferLength: 90,
       // On reload (quality/audio switch) resume at the position captured before
       // restart so MSE begins fetching the segment the user was watching.
-      startPosition: resumeAtSec > 0 ? resumeAtSec : -1,
+      startPosition,
     })
     hlsRef.current = hls
 
@@ -82,7 +99,12 @@ export default function VideoPlayer({
     video.play().catch(() => {})
 
     return () => {
-      hls.destroy()
+      // Defer hls.destroy() by a macrotask so any in-flight MSE buffer appends
+      // (microtask-scheduled by hls.js) settle before we tear MSE down. A
+      // synchronous destroy here races with the encoder restart and can abort
+      // SourceBuffer operations mid-flight, leaving the next instance stalled.
+      // `hls` is captured per-effect-run, so each instance destroys exactly once.
+      setTimeout(() => hls.destroy(), DESTROY_DEFER_MS)
       hlsRef.current = null
     }
     // reloadKey is intentional: bumping it tears down + recreates hls.js so the

@@ -10,6 +10,12 @@ import Icon from '../components/chrome/Icon.tsx'
 import type { PlaybackSession, QualityProfile, MediaItem } from '@horizon/sdk'
 import './Player.css'
 
+/** Delay (ms) after a reloadKey bump before clearing resumeAtSec. Must outlast
+ *  VideoPlayer applying the value to the fresh hls.js instance (which happens
+ *  synchronously on the reload render) yet be short enough that a subsequent
+ *  switch captures a fresh position rather than the stale one. */
+const RESUME_CLEAR_MS = 150
+
 export default function Player() {
   const { mediaId } = useParams<{ mediaId: string }>()
   const navigate = useNavigate()
@@ -34,6 +40,17 @@ export default function Player() {
   // Position (seconds) to resume at after a reload. Captured BEFORE we trigger
   // the server restart so the client picks up where playback was instead of 0.
   const [resumeAtSec, setResumeAtSec] = useState(0)
+
+  // Clear resumeAtSec shortly after a reload key bump so a stale position can't
+  // leak into the *next* quality/audio switch. Flow: capture position → call
+  // session method → server restarts ffmpeg → onQualityChange/onTrackChange
+  // bumps reloadKey → VideoPlayer applies resumeAtSec once → this clears it.
+  // The delay must outlast VideoPlayer's one-shot application of the value.
+  useEffect(() => {
+    if (reloadKey === 0) return
+    const timer = setTimeout(() => setResumeAtSec(0), RESUME_CLEAR_MS)
+    return () => clearTimeout(timer)
+  }, [reloadKey])
 
   // Resume-toast state. `resume` holds the fetched progress; `decision` gates
   // session creation: null = not yet fetched, 'pending' = showing the toast,
