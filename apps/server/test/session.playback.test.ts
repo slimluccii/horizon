@@ -23,8 +23,8 @@ const browserCaps: ClientCapabilities = {
 
 function fakeMedia(items: Record<string, Partial<MediaItemRow>> = {}): MediaRepo {
   return {
-    // Orchestrator uses getInternal (needs filePath for ffmpeg spawn).
-    getInternal: (id: string) => (items[id] ? { ...items[id], id } as MediaItemRow : null),
+    // Orchestrator uses getInternalRow (needs filePath for ffmpeg spawn).
+    getInternalRow: (id: string) => (items[id] ? { ...items[id], id } as MediaItemRow : null),
   } as MediaRepo
 }
 

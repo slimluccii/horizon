@@ -69,7 +69,7 @@ describe('mediaRepo.upsertMovie', () => {
     const { repo } = freshRepo()
     const m = repo.upsertMovie(movie())
     // Bookkeeping fields live on the row, not the domain projection.
-    const row = repo.getInternal(m.id)!
+    const row = repo.getInternalRow(m.id)!
     expect(row.firstSeenAt).toBe(row.lastSeenAt)
     expect(row.deletedAt).toBeNull()
   })
@@ -79,8 +79,8 @@ describe('mediaRepo.upsertMovie', () => {
     const m1 = repo.upsertMovie(movie())
     const m2 = repo.upsertMovie(movie({ mtimeMs: 1000 }))
     expect(m2.id).toBe(m1.id)
-    const r1 = repo.getInternal(m1.id)!
-    const r2 = repo.getInternal(m2.id)!
+    const r1 = repo.getInternalRow(m1.id)!
+    const r2 = repo.getInternalRow(m2.id)!
     expect(r2.firstSeenAt).toBe(r1.firstSeenAt)
     expect(r2.lastSeenAt).toBeGreaterThanOrEqual(r1.lastSeenAt)
   })
@@ -97,7 +97,7 @@ describe('mediaRepo.upsertMovie', () => {
     repo.upsertMovie(movie())
     db.prepare('UPDATE media_items SET deleted_at = ? WHERE id = ?').run(999, 'mv-1')
     repo.upsertMovie(movie())
-    expect(repo.getInternal('mv-1')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('mv-1')!.deletedAt).toBeNull()
   })
 })
 
@@ -107,8 +107,8 @@ describe('mediaRepo.softDeleteMissing', () => {
     const a = repo.upsertMovie(movie({ id: 'a', filePath: '/a.mkv' }))
     repo.upsertMovie(movie({ id: 'b', filePath: '/b.mkv' }))
     repo.softDeleteMissing(new Set([a.id]))
-    expect(repo.getInternal('a')!.deletedAt).toBeNull()
-    expect(repo.getInternal('b')!.deletedAt).not.toBeNull()
+    expect(repo.getInternalRow('a')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('b')!.deletedAt).not.toBeNull()
     // Domain getById hides soft-deleted rows entirely.
     expect(repo.getById('b')).toBeNull()
   })
@@ -118,7 +118,7 @@ describe('mediaRepo.softDeleteMissing', () => {
     repo.upsertMovie(movie({ id: 'a', filePath: '/a.mkv' }))
     db.prepare('UPDATE media_items SET deleted_at = ? WHERE id = ?').run(500, 'a')
     repo.softDeleteMissing(new Set())
-    expect(repo.getInternal('a')!.deletedAt).toBe(500)
+    expect(repo.getInternalRow('a')!.deletedAt).toBe(500)
   })
 
   it('commits when all INSERTs succeed (b and c soft-deleted, temp table cleaned up)', () => {
@@ -127,8 +127,8 @@ describe('mediaRepo.softDeleteMissing', () => {
     repo.upsertMovie(movie({ id: 'b', filePath: '/b.mkv' }))
     repo.upsertMovie(movie({ id: 'c', filePath: '/c.mkv' }))
     repo.softDeleteMissing(new Set([a.id]))
-    expect(repo.getInternal('b')!.deletedAt).not.toBeNull()
-    expect(repo.getInternal('c')!.deletedAt).not.toBeNull()
+    expect(repo.getInternalRow('b')!.deletedAt).not.toBeNull()
+    expect(repo.getInternalRow('c')!.deletedAt).not.toBeNull()
     // temp table dropped
     const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
     expect(t).toBeUndefined()
@@ -154,9 +154,9 @@ describe('mediaRepo.softDeleteMissing', () => {
       },
     } as unknown as Set<string>
     expect(() => repo.softDeleteMissing(exploding)).toThrow('corrupt seen-id stream')
-    expect(repo.getInternal('a')!.deletedAt).toBeNull()
-    expect(repo.getInternal('b')!.deletedAt).toBeNull()
-    expect(repo.getInternal('c')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('a')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('b')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('c')!.deletedAt).toBeNull()
     const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
     expect(t).toBeUndefined()
   })
@@ -169,9 +169,9 @@ describe('mediaRepo.softDeleteMissingUnder', () => {
     repo.upsertMovie(movie({ id: 'mb', filePath: '/movies/b.mkv' }))
     repo.upsertMovie(movie({ id: 'oc', filePath: '/other/c.mkv' }))
     repo.softDeleteMissingUnder('/movies/', new Set(['ma']))
-    expect(repo.getInternal('ma')!.deletedAt).toBeNull()
-    expect(repo.getInternal('mb')!.deletedAt).not.toBeNull()
-    expect(repo.getInternal('oc')!.deletedAt).toBeNull() // outside prefix
+    expect(repo.getInternalRow('ma')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('mb')!.deletedAt).not.toBeNull()
+    expect(repo.getInternalRow('oc')!.deletedAt).toBeNull() // outside prefix
     const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
     expect(t).toBeUndefined()
   })
@@ -194,9 +194,9 @@ describe('mediaRepo.softDeleteMissingUnder', () => {
       },
     } as unknown as Set<string>
     expect(() => repo.softDeleteMissingUnder('/movies/', exploding)).toThrow('boom')
-    expect(repo.getInternal('ma')!.deletedAt).toBeNull()
-    expect(repo.getInternal('mb')!.deletedAt).toBeNull()
-    expect(repo.getInternal('oc')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('ma')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('mb')!.deletedAt).toBeNull()
+    expect(repo.getInternalRow('oc')!.deletedAt).toBeNull()
     const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
     expect(t).toBeUndefined()
   })
@@ -236,6 +236,27 @@ describe('mediaRepo.getById', () => {
     repo.upsertMovie(movie())
     const m = repo.getById('mv-1')
     expect(m!.hdr).toEqual({ dv: true, hdr10: true, hdr10plus: false })
+  })
+})
+
+describe('mediaRepo.getInternalRow — wire-safety audit (#66)', () => {
+  it('getInternalRow returns the full row with sensitive fields intact', () => {
+    const { repo } = freshRepo()
+    repo.upsertMovie(movie())
+    const row = repo.getInternalRow('mv-1')!
+    expect(row.filePath).toBe('/x/Oppenheimer.mkv')
+    expect(row.mtimeMs).not.toBeNull()
+    expect(row.sizeBytes).not.toBeNull()
+  })
+
+  it('getById strips the sensitive row-only fields', () => {
+    const { repo } = freshRepo()
+    repo.upsertMovie(movie())
+    const item = repo.getById('mv-1')!
+    expect('filePath' in item).toBe(false)
+    expect('mtimeMs' in item).toBe(false)
+    expect('sizeBytes' in item).toBe(false)
+    expect('deletedAt' in item).toBe(false)
   })
 })
 

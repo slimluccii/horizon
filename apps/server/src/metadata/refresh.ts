@@ -160,7 +160,7 @@ export function createMetadataRefreshWorker(
       if (!m) m = await tmdb.searchMovie(pick.title, pick.sortYear ?? undefined)
       if (!m) { deps.media.markMetadataFailed(pick.id, now); return false }
 
-      const existing = deps.media.getInternal(pick.id)
+      const existing = deps.media.getInternalRow(pick.id)
       if (!existing || !existing.filePath) {
         deps.media.markMetadataFailed(pick.id, now)
         return false
@@ -193,7 +193,7 @@ export function createMetadataRefreshWorker(
       if (!s) s = await tmdb.searchShow(pick.title)
       if (!s) { deps.media.markMetadataFailed(pick.id, now); return false }
 
-      const existing = deps.media.getInternal(pick.id)
+      const existing = deps.media.getInternalRow(pick.id)
       if (!existing) { deps.media.markMetadataFailed(pick.id, now); return false }
       deps.media.upsertShow({
         id: existing.id,
@@ -211,7 +211,7 @@ export function createMetadataRefreshWorker(
       deps.media.markMetadataFailed(pick.id, now)
       return false
     }
-    const parent = deps.media.getInternal(pick.parentId)
+    const parent = deps.media.getInternalRow(pick.parentId)
     const parentMeta = parent?.metadata as { tmdbId?: number } | null | undefined
     const showTmdbId: number | undefined =
       parent?.tmdbId
@@ -224,7 +224,7 @@ export function createMetadataRefreshWorker(
     const ep = await tmdb.episode(showTmdbId, pick.season, pick.episode)
     if (!ep) { deps.media.markMetadataFailed(pick.id, now); return false }
 
-    const existing = deps.media.getInternal(pick.id)
+    const existing = deps.media.getInternalRow(pick.id)
     if (!existing || !existing.filePath) {
       deps.media.markMetadataFailed(pick.id, now)
       return false

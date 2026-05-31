@@ -149,10 +149,19 @@ export interface MediaRepo {
   listShows(): MediaItem[]
   getEpisodes(showId: string): MediaItem[]
   getById(id: string): MediaItem | null
-  /** Row-level access for internal callers (orchestrator, refresh, scanner).
-   *  Returns the full DB row including filePath + bookkeeping. Routes MUST
-   *  NOT serialize this — use `getById` for wire responses. */
-  getInternal(id: string): MediaItemRow | null
+  /**
+   * INTERNAL ONLY: returns the full DB row including filePath, mtimeMs,
+   * sizeBytes, tmdbId, and metadata-refresh bookkeeping. NEVER serialize this
+   * to the wire. Only called by PlaybackOrchestrator (needs filePath for the
+   * ffmpeg spawn) and MetadataRefreshWorker (needs tmdbId / metadataFetchedAt).
+   * Routes MUST use `getById()` instead — it returns the wire-safe MediaItem.
+   *
+   * The `Row` suffix is a naming signal that this is the unsafe, full-row
+   * accessor; paired with issue #63's type split (MediaItem vs MediaItemRow are
+   * sibling types), a route that mistakenly calls this can't even assign the
+   * result where a MediaItem is expected.
+   */
+  getInternalRow(id: string): MediaItemRow | null
   /** Internal-only enumeration (used by MetadataRefresh). Returns the full
    *  row including bookkeeping. Never expose this over the wire. */
   getByTmdbId(tmdbId: number): MediaItemRow[]
@@ -319,19 +328,21 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
   `)
 
   // Domain getById hides soft-deleted rows from wire/business callers.
-  // getInternal returns them so the scanner / tests can inspect deletion state.
+  // getInternalRow returns them so the scanner / tests can inspect deletion state.
   const getById = (id: string): MediaItem | null => {
     const row = db.prepare('SELECT * FROM media_items WHERE id = ? AND deleted_at IS NULL').get(id)
     return row ? rowToMedia(row) : null
   }
 
-  const getInternal = (id: string): MediaItemRow | null => {
+  // getInternalRow is sealed to internal callers only via naming convention.
+  // Routes must call getById() for the wire-safe projection.
+  const getInternalRow = (id: string): MediaItemRow | null => {
     const row = db.prepare('SELECT * FROM media_items WHERE id = ?').get(id)
     return row ? rowToInternal(row) : null
   }
 
   return {
-    getInternal,
+    getInternalRow,
     upsertMovie(input) {
       const now = Date.now()
       upsertMovieStmt.run(
