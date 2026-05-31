@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { ErrorCodes } from '@horizon/sdk'
 import type { Session } from './types.ts'
 import type { SessionRuntime } from './runtime.ts'
 import type { ServerSettings } from '../repos/serverSettings.ts'
@@ -27,7 +28,7 @@ export function createSessionManager(serverSettings: ServerSettings): SessionMan
   function create(partial: Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state' | 'seekPositionMs' | 'currentStartSegment'>): Session {
     const { maxSessions, wsAttachMs } = serverSettings.get()
     if (sessions.size >= maxSessions) {
-      throw Object.assign(new Error('Server at session capacity'), { code: 'max-sessions' })
+      throw Object.assign(new Error('Server at session capacity'), { code: ErrorCodes.MAX_SESSIONS })
     }
 
     const id = crypto.randomUUID()

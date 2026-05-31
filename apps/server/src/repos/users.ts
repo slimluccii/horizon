@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { ErrorCodes } from '@horizon/sdk'
 import type { DatabaseSync } from '../db/index.ts'
 import { UserRowSchema } from '../db/rowSchemas.ts'
 
@@ -62,7 +63,7 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
   return {
     create(input) {
       if (nameTaken(db, input.name)) {
-        throw Object.assign(new Error('name-taken'), { code: 'name-taken' })
+        throw Object.assign(new Error(ErrorCodes.NAME_TAKEN), { code: ErrorCodes.NAME_TAKEN })
       }
       const now = Date.now()
       const id = crypto.randomUUID()
@@ -76,7 +77,7 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
         ).run(id, input.name, input.avatar ?? null, prefsJson, role, now, now)
       } catch (err) {
         if (String((err as Error).message).includes('users.role')) {
-          throw Object.assign(new Error('owner-exists'), { code: 'owner-exists' })
+          throw Object.assign(new Error(ErrorCodes.OWNER_EXISTS), { code: ErrorCodes.OWNER_EXISTS })
         }
         throw err
       }
@@ -97,10 +98,10 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
       const existing = this.get(id)
       if (!existing) return null
       if (patch.name && nameTaken(db, patch.name, id)) {
-        throw Object.assign(new Error('name-taken'), { code: 'name-taken' })
+        throw Object.assign(new Error(ErrorCodes.NAME_TAKEN), { code: ErrorCodes.NAME_TAKEN })
       }
       if (patch.role !== undefined && existing.role === 'owner' && patch.role !== 'owner') {
-        throw Object.assign(new Error('role-immutable'), { code: 'role-immutable' })
+        throw Object.assign(new Error(ErrorCodes.ROLE_IMMUTABLE), { code: ErrorCodes.ROLE_IMMUTABLE })
       }
       const next = {
         name: patch.name ?? existing.name,
@@ -115,7 +116,7 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
         ).run(next.name, next.avatar, JSON.stringify(next.preferences), patch.role ?? null, Date.now(), id)
       } catch (err) {
         if (String((err as Error).message).includes('users.role')) {
-          throw Object.assign(new Error('owner-exists'), { code: 'owner-exists' })
+          throw Object.assign(new Error(ErrorCodes.OWNER_EXISTS), { code: ErrorCodes.OWNER_EXISTS })
         }
         throw err
       }
@@ -126,7 +127,7 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
       const existing = this.get(id)
       if (!existing) return false
       if (existing.role === 'owner') {
-        throw Object.assign(new Error('owner-protected'), { code: 'owner-protected' })
+        throw Object.assign(new Error(ErrorCodes.OWNER_PROTECTED), { code: ErrorCodes.OWNER_PROTECTED })
       }
       const res = db.prepare('DELETE FROM users WHERE id = ?').run(id)
       return res.changes > 0

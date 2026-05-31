@@ -1,6 +1,7 @@
 // sdk/src/client.ts
 import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch } from './types.ts'
 import type { Preferences } from './preferences.ts'
+import { ErrorCodes } from './types.ts'
 import { detectCapabilities } from './capabilities.ts'
 import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
 
@@ -25,7 +26,7 @@ export interface PlayOptions extends Omit<PlaybackSessionOptions, 'sessionInfo' 
 export function isRoleChangedError(err: unknown): boolean {
   return (
     err instanceof Error &&
-    (err as Error & { code?: string }).code === 'caller-forbidden'
+    (err as Error & { code?: string }).code === ErrorCodes.CALLER_FORBIDDEN
   )
 }
 
@@ -38,7 +39,7 @@ export function isRoleChangedError(err: unknown): boolean {
 export function isProgressNotFoundError(err: unknown): boolean {
   return (
     err instanceof Error &&
-    (err as Error & { code?: string }).code === 'progress-not-found'
+    (err as Error & { code?: string }).code === ErrorCodes.PROGRESS_NOT_FOUND
   )
 }
 

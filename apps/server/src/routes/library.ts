@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { MediaRepo } from '../repos/media.ts'
 import type { CollectionsRepo } from '../repos/collections.ts'
 import type { ScanWorkers } from '../server.ts'
+import { sendNotFound, badRequest, overCapacity, ErrorCodes } from './errors.ts'
 
 export function registerLibrary(
   app: FastifyInstance,
@@ -24,7 +25,7 @@ export function registerLibrary(
     '/library/movies/collections/:collection',
     async (req, reply) => {
       const col = collections.list().find(c => c.id === req.params.collection)
-      if (!col) return reply.status(404).send({ error: 'Collection not found', code: 'not-found' })
+      if (!col) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Collection not found')
       return {
         id: col.id,
         name: col.name,
@@ -43,7 +44,7 @@ export function registerLibrary(
     async (req, reply) => {
       const show = media.getById(req.params.show)
       if (!show || show.kind !== 'show') {
-        return reply.status(404).send({ error: 'Show not found', code: 'not-found' })
+        return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Show not found')
       }
       return { ...show, seasons: media.getSeasons(show.id) }
     },
@@ -53,7 +54,7 @@ export function registerLibrary(
     '/library/shows/:show/seasons',
     async (req, reply) => {
       const show = media.getById(req.params.show)
-      if (!show) return reply.status(404).send({ error: 'Show not found', code: 'not-found' })
+      if (!show) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Show not found')
       return media.getSeasons(show.id)
     },
   )
@@ -62,10 +63,10 @@ export function registerLibrary(
     '/library/shows/:show/seasons/:season',
     async (req, reply) => {
       const show = media.getById(req.params.show)
-      if (!show) return reply.status(404).send({ error: 'Show not found', code: 'not-found' })
+      if (!show) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Show not found')
       const season = parseInt(req.params.season, 10)
       if (!Number.isFinite(season)) {
-        return reply.status(400).send({ error: 'Invalid season', code: 'invalid-input' })
+        return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid season')
       }
       return media.getEpisodes(show.id).filter(e => e.season === season)
     },
@@ -96,9 +97,7 @@ export function registerLibrary(
    */
   app.post('/library/metadata-refresh', async (_req, reply) => {
     if (!workers.refreshWorker.status().configured) {
-      return reply.status(503).send({
-        error: 'TMDB not configured', code: 'tmdb-disabled',
-      })
+      return overCapacity(reply, ErrorCodes.TMDB_DISABLED, 'TMDB not configured')
     }
     void workers.refreshWorker.run({ useChangesFeed: true })
       .catch(err => app.log.error({ err }, 'Metadata refresh failed'))

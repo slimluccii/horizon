@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import type { ProgressRepo } from '../repos/progress.ts'
-import { sendNotFound, badRequest } from './errors.ts'
+import { sendNotFound, badRequest, ErrorCodes } from './errors.ts'
 import { requireUser } from './authz.ts'
 
 const PatchBody = z.object({ watched: z.boolean() })
@@ -27,7 +27,7 @@ export function registerProgress(
       const userId = requireUser(users, req, reply, req.params.userId)
       if (!userId) return
       const wp = progress.getProgress(userId, req.params.mediaId)
-      if (!wp) return sendNotFound(reply, 'progress-not-found', 'No progress for media')
+      if (!wp) return sendNotFound(reply, ErrorCodes.PROGRESS_NOT_FOUND, 'No progress for media')
       return wp
     },
   )
@@ -38,9 +38,9 @@ export function registerProgress(
       const userId = requireUser(users, req, reply, req.params.userId)
       if (!userId) return
       const parse = PatchBody.safeParse(req.body)
-      if (!parse.success) return badRequest(reply, 'invalid-input', parse.error.message)
+      if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
       const wp = progress.markWatched(userId, req.params.mediaId, parse.data.watched)
-      if (!wp) return sendNotFound(reply, 'progress-not-found', 'No progress for media')
+      if (!wp) return sendNotFound(reply, ErrorCodes.PROGRESS_NOT_FOUND, 'No progress for media')
       return wp
     },
   )

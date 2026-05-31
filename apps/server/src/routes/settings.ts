@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import type { ServerSettings } from '../repos/serverSettings.ts'
-import { badRequest, errorReply } from './errors.ts'
+import { badRequest, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
 
 /**
@@ -44,7 +44,7 @@ export function registerSettings(
    */
   app.get('/settings/server', async (req, reply) => {
     const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, 'no-user', 'Missing or unknown X-Horizon-User header')
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
 
     const row = serverSettings.get()
     return {
@@ -62,13 +62,13 @@ export function registerSettings(
    */
   app.patch('/settings/server', async (req, reply) => {
     const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, 'no-user', 'Missing or unknown X-Horizon-User header')
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
     if (caller.role === 'member') {
-      return errorReply(reply, 403, 'caller-forbidden', 'Only owner or admin can change server settings')
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can change server settings')
     }
 
     const parse = PatchBody.safeParse(req.body)
-    if (!parse.success) return badRequest(reply, 'invalid-input', parse.error.message)
+    if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
 
     const patch = { ...parse.data }
     // Normalise empty string → null (clears the token).

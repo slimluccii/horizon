@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import type { UserRepo } from '../repos/users.ts'
-import { badRequest } from './errors.ts'
+import { badRequest, ErrorCodes } from './errors.ts'
 
 /**
  * Resolve the calling user from the X-Horizon-User header.
@@ -31,8 +31,8 @@ export function requireUser(
 ): string | null {
   const hdr = req.headers['x-horizon-user']
   const id = typeof hdr === 'string' ? hdr : null
-  if (!id) { badRequest(reply, 'no-user', 'Missing X-Horizon-User header'); return null }
-  if (id !== pathUserId) { badRequest(reply, 'user-mismatch', 'Header user does not match path'); return null }
-  if (!users.get(id)) { badRequest(reply, 'no-user', 'User not found'); return null }
+  if (!id) { badRequest(reply, ErrorCodes.NO_USER, 'Missing X-Horizon-User header'); return null }
+  if (id !== pathUserId) { badRequest(reply, ErrorCodes.USER_MISMATCH, 'Header user does not match path'); return null }
+  if (!users.get(id)) { badRequest(reply, ErrorCodes.NO_USER, 'User not found'); return null }
   return id
 }
