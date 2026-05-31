@@ -130,8 +130,12 @@ async function waitForFile(session: Session, absPath: string, timeoutMs: number)
       isStable().then(ok => {
         if (ok) finish(true)
         else {
+          // ffmpeg exit is a synchronous failure signal — stop waiting
+          // immediately rather than hanging until the deadline. The deadline
+          // timer (set below) remains as an independent backstop for the case
+          // where ffmpeg is still alive but the file never stabilises.
           const p = session.ffmpegProcess
-          if (p && (p.exitCode !== null || p.signalCode !== null) && Date.now() >= deadline) {
+          if (p && (p.exitCode !== null || p.signalCode !== null)) {
             finish(false)
           }
         }
