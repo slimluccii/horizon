@@ -17,7 +17,23 @@ const PatchBody = z.object({
   watchFs: z.boolean().optional(),
   watchDebounceMs: z.number().int().min(100).max(60_000).optional(),
   // Metadata
-  tmdbToken: z.string().nullable().optional(),
+  // tmdbToken is a TMDB v4 API read-access token — a JWT (3 base64url segments
+  // separated by dots, ~230 chars). Validate the shape to reject accidental
+  // plaintext / wrong-service keys. An empty string (clears the token) and
+  // null are allowed; any non-empty value must look like a JWT and be ≥48 chars.
+  // NOTE: revisit this regex if TMDB ever moves off JWT bearer tokens.
+  tmdbToken: z
+    .string()
+    .nullable()
+    .optional()
+    .refine(
+      (v) =>
+        v === null ||
+        v === undefined ||
+        v === '' ||
+        (v.length >= 48 && /^[A-Za-z0-9\-_.]+\.[A-Za-z0-9\-_.]+\.[A-Za-z0-9\-_.]+$/.test(v)),
+      { message: 'TMDB token must be in JWT format (3 base64url segments separated by dots, ≥48 chars)' },
+    ),
   metadataBatchSize: z.number().int().min(1).max(500).optional(),
   metadataMaxAgeMovieDays: z.number().int().min(1).optional(),
   metadataMaxAgeShowDays: z.number().int().min(1).optional(),

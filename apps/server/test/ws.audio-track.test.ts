@@ -15,7 +15,9 @@ function fakeSession(overrides: Partial<Session> = {}): { session: Session; sent
     plan: {
       method: 'direct-play',
       audioTrackIndex: 0,
-      renditions: [],
+      // One rendition so the `hello` handshake (which reads renditions[0].profile
+      // when emitting session-ready) succeeds. Method stays direct-play.
+      renditions: [{ profile: { name: 'src' } }],
     },
     selectedSubtitleTrack: null,
     audioTrackCount: 2,
@@ -38,9 +40,20 @@ const sessions = { getRuntime: () => undefined } as unknown as SessionManager
 const cfg = {} as Config
 const hwAccel = {} as HwAccel
 
+// The WS auth gate drops every non-`hello` command until the socket completes
+// the handshake. Real clients send `hello` first; the tests do the same so the
+// audio-track commands are actually processed.
+function authenticate(session: Session, sent: any[]) {
+  handleWsMessage({ type: 'hello' }, session, sessions, cfg, hwAccel)
+  // Drop any frames emitted by the handshake so assertions see only the
+  // frames produced by the command under test.
+  sent.length = 0
+}
+
 describe('WS audio-track bounds validation (#77)', () => {
   it('rejects an out-of-range audio-track index without mutating the session', () => {
     const { session, sent } = fakeSession({ audioTrackCount: 2 })
+    authenticate(session, sent)
     const planBefore = session.plan
     handleWsMessage({ type: 'audio-track', index: 999, positionMs: 0 }, session, sessions, cfg, hwAccel)
 
@@ -58,12 +71,14 @@ describe('WS audio-track bounds validation (#77)', () => {
     // the session is untouched. The handler bound-check guards the remaining
     // out-of-range (too-high) case.
     const { session, sent } = fakeSession({ audioTrackCount: 2 })
+    authenticate(session, sent)
     handleWsMessage({ type: 'audio-track', index: -1, positionMs: 0 }, session, sessions, cfg, hwAccel)
     expect(sent).toHaveLength(0)
   })
 
   it('accepts an in-range audio-track index on direct-play (updates plan)', () => {
     const { session, sent } = fakeSession({ audioTrackCount: 2 })
+    authenticate(session, sent)
     handleWsMessage({ type: 'audio-track', index: 1, positionMs: 0 }, session, sessions, cfg, hwAccel)
     expect(sent.find(f => f.type === 'error')).toBeUndefined()
     const changed = sent.find(f => f.type === 'track-changed')

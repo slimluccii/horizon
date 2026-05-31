@@ -32,6 +32,8 @@ The `seeded_from_env` column is a one-time bootstrap flag. On first boot after u
 
 Consumers must call `serverSettings.get()` rather than `loadConfig()` for live settings. The `get()` call is cheap (returns cached values; cache is invalidated on `update()`). Wire a thunk — `getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct` — so consumers pick up changes without restart.
 
+Every config-consuming module must wire such a getter, never snapshot a value at construction. Established getters: `progressRepo` (`getWatchedThresholdPct`), `MetadataRefreshWorker` (a `() => MetadataRefreshConfig` getter read at the start of each `run()`, so `metadataBatchSize` / `metadataMaxAge*` apply on the next run), and `SessionManager.create()` (reads `maxSessions` / `wsAttachMs` live per session). When adding a new live-tunable setting, wire it through one of these getters — a constructor-time snapshot will silently go stale after a PATCH /settings/server.
+
 The `metadata_max_age_*_days` columns are stored in **days** (matching the `HORIZON_METADATA_MAX_AGE_*_DAYS` env-var unit). Consumers convert to milliseconds at the edge when wiring into workers (`days * 86_400_000`).
 
 Future schema additions (v5+) get only their hardcoded column defaults on existing rows — `seeded_from_env` will already be 1, so the bootstrap pass does not apply. A v5+ migration that adds a column should run its own targeted overlay for that column's env var.

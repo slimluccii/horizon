@@ -118,10 +118,10 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
 
   return {
     startPlayback(input) {
-      // Orchestrator needs filePath for ffmpeg spawn — use getInternal.
+      // Orchestrator needs filePath for ffmpeg spawn — use getInternalRow.
       // Routes never see this row; they fetch via getById which returns
       // the domain projection.
-      const mediaItem = media.getInternal(input.mediaId)
+      const mediaItem = media.getInternalRow(input.mediaId)
       if (!mediaItem) throw new PlaybackError(ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
 
       if (input.userId !== undefined && !users.get(input.userId)) {

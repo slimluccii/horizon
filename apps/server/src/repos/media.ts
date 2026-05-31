@@ -52,17 +52,19 @@ export interface EpisodeUpsert extends Omit<MovieUpsert, 'sortYear'> {
 }
 
 /**
- * Domain MediaItem — wire-safe + business-logic shape returned by every
- * public `MediaRepo.get*` / `list*` method. NO filesystem paths, NO DB
- * bookkeeping (firstSeenAt/lastSeenAt/deletedAt/mtimeMs/sizeBytes), NO
- * metadata refresh state (tmdbId, metadataFetchedAt, metadataFailedAt, etc).
+ * Shared base for MediaItem (wire-safe) and MediaItemRow (internal-only).
+ * Carries only the PUBLIC fields — the contract both shapes agree on.
  *
- * Internal callers that need those fields (orchestrator for filePath,
- * refresh worker for fetch bookkeeping) use `getInternal(id) → MediaItemRow`.
+ * Do NOT extend MediaItem from MediaItemRow (or vice versa); they are sibling
+ * types with the same public contract but different scopes. Keeping the
+ * inheritance broken means TypeScript's structural subtyping will reject a
+ * `MediaItemRow` where a `MediaItem` is expected — so a route that
+ * accidentally calls `getInternalRow` can never serialize server internals to
+ * the wire by construction.
  *
  * See CONTEXT.md → MediaItem / MediaItemRow.
  */
-export interface MediaItem {
+export interface MediaItemBase {
   id: string
   kind: 'movie' | 'show' | 'episode'
   parentId: string | null
@@ -84,14 +86,31 @@ export interface MediaItem {
 }
 
 /**
- * Row shape — domain MediaItem + filesystem + DB bookkeeping. Returned by
- * `MediaRepo.getInternal(id)` only. Used by:
+ * Domain MediaItem — wire-safe + business-logic shape returned by every
+ * public `MediaRepo.get*` / `list*` method. NO filesystem paths, NO DB
+ * bookkeeping (firstSeenAt/lastSeenAt/deletedAt/mtimeMs/sizeBytes), NO
+ * metadata refresh state (tmdbId, metadataFetchedAt, metadataFailedAt, etc).
+ *
+ * Internal callers that need those fields (orchestrator for filePath,
+ * refresh worker for fetch bookkeeping) use `getInternalRow(id) → MediaItemRow`.
+ *
+ * Wire-safe projection of MediaItemBase — adds no fields.
+ * See CONTEXT.md → MediaItem / MediaItemRow.
+ */
+export interface MediaItem extends MediaItemBase {}
+
+/**
+ * Row shape — public base + filesystem + DB bookkeeping. Returned by
+ * `MediaRepo.getInternalRow(id)` only. Used by:
  *   - PlaybackOrchestrator (needs filePath for ffmpeg spawn)
  *   - MetadataRefreshWorker (already uses tmdbId / metadataFetchedAt via
- *     findStaleMetadata; but getInternal is available for ad-hoc reads)
+ *     findStaleMetadata; but getInternalRow is available for ad-hoc reads)
  *   - Scanner (writes mtimeMs / sizeBytes via upserts; doesn't read row)
+ *
+ * Extends MediaItemBase (NOT MediaItem) so the compiler rejects assigning a
+ * MediaItemRow where a MediaItem is expected.
  */
-export interface MediaItemRow extends MediaItem {
+export interface MediaItemRow extends MediaItemBase {
   filePath: string | null
   mtimeMs: number | null
   sizeBytes: number | null
@@ -130,10 +149,19 @@ export interface MediaRepo {
   listShows(): MediaItem[]
   getEpisodes(showId: string): MediaItem[]
   getById(id: string): MediaItem | null
-  /** Row-level access for internal callers (orchestrator, refresh, scanner).
-   *  Returns the full DB row including filePath + bookkeeping. Routes MUST
-   *  NOT serialize this — use `getById` for wire responses. */
-  getInternal(id: string): MediaItemRow | null
+  /**
+   * INTERNAL ONLY: returns the full DB row including filePath, mtimeMs,
+   * sizeBytes, tmdbId, and metadata-refresh bookkeeping. NEVER serialize this
+   * to the wire. Only called by PlaybackOrchestrator (needs filePath for the
+   * ffmpeg spawn) and MetadataRefreshWorker (needs tmdbId / metadataFetchedAt).
+   * Routes MUST use `getById()` instead — it returns the wire-safe MediaItem.
+   *
+   * The `Row` suffix is a naming signal that this is the unsafe, full-row
+   * accessor; paired with issue #63's type split (MediaItem vs MediaItemRow are
+   * sibling types), a route that mistakenly calls this can't even assign the
+   * result where a MediaItem is expected.
+   */
+  getInternalRow(id: string): MediaItemRow | null
   /** Internal-only enumeration (used by MetadataRefresh). Returns the full
    *  row including bookkeeping. Never expose this over the wire. */
   getByTmdbId(tmdbId: number): MediaItemRow[]
@@ -192,7 +220,7 @@ function rowToInternal(row: any): MediaItemRow {
 
 /** Strip row-only fields (filePath + bookkeeping) for wire/business use.
  *  Pure projection — single source of truth for what's in domain vs row. */
-function rowToDomain(row: MediaItemRow): MediaItem {
+function rowToDomain(row: MediaItemBase): MediaItem {
   return {
     id: row.id,
     kind: row.kind,
@@ -300,19 +328,21 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
   `)
 
   // Domain getById hides soft-deleted rows from wire/business callers.
-  // getInternal returns them so the scanner / tests can inspect deletion state.
+  // getInternalRow returns them so the scanner / tests can inspect deletion state.
   const getById = (id: string): MediaItem | null => {
     const row = db.prepare('SELECT * FROM media_items WHERE id = ? AND deleted_at IS NULL').get(id)
     return row ? rowToMedia(row) : null
   }
 
-  const getInternal = (id: string): MediaItemRow | null => {
+  // getInternalRow is sealed to internal callers only via naming convention.
+  // Routes must call getById() for the wire-safe projection.
+  const getInternalRow = (id: string): MediaItemRow | null => {
     const row = db.prepare('SELECT * FROM media_items WHERE id = ?').get(id)
     return row ? rowToInternal(row) : null
   }
 
   return {
-    getInternal,
+    getInternalRow,
     upsertMovie(input) {
       const now = Date.now()
       upsertMovieStmt.run(
@@ -354,8 +384,12 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       // Match file_path begins-with prefix; trailing-slash sensitive so we
       // don't match `/movies/Foo (2010)` when scanning `/movies/Foo`.
       const like = pathPrefix.endsWith('/') ? `${pathPrefix}%` : `${pathPrefix}/%`
-      db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
+      // Wrap the whole populate-then-update sequence in a transaction so a
+      // failure partway through the INSERT loop (or the UPDATE) leaves the DB
+      // untouched — never soft-deleting items off an incomplete `seen` set.
       try {
+        db.exec('BEGIN')
+        db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
         db.exec('DELETE FROM seen')
         const ins = db.prepare('INSERT OR IGNORE INTO seen (id) VALUES (?)')
         for (const id of seenIds) ins.run(id)
@@ -366,7 +400,11 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
              AND file_path LIKE ?
              AND id NOT IN (SELECT id FROM seen)`,
         ).run(now, like)
+        db.exec('COMMIT')
         return res.changes
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
       } finally {
         db.exec('DROP TABLE IF EXISTS seen')
       }
@@ -375,11 +413,14 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
     /**
      * Soft-delete rows whose id is NOT in seenIds and are not already deleted.
      * Uses a temp table to avoid SQLite's parameter-count limits on huge libraries.
+     * Wrapped in an explicit transaction so a mid-loop failure rolls back
+     * atomically rather than soft-deleting against a partial `seen` set.
      */
     softDeleteMissing(seenIds) {
       const now = Date.now()
-      db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
       try {
+        db.exec('BEGIN')
+        db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
         db.exec('DELETE FROM seen')
         const ins = db.prepare('INSERT OR IGNORE INTO seen (id) VALUES (?)')
         for (const id of seenIds) ins.run(id)
@@ -389,7 +430,11 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
            WHERE deleted_at IS NULL
              AND id NOT IN (SELECT id FROM seen)`,
         ).run(now)
+        db.exec('COMMIT')
         return res.changes
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
       } finally {
         db.exec('DROP TABLE IF EXISTS seen')
       }
