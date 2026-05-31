@@ -224,6 +224,26 @@ describe('PlaybackOrchestrator', () => {
     ).toThrow(expect.objectContaining({ code: 'invalid-input' }))
   })
 
+  it('throws invalid-input when subtitleTrackIndex exceeds available subtitle tracks', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const twoSubs: Partial<MediaItemRow> = {
+      ...sampleMovie,
+      subtitleTracks: [
+        { index: 0, codec: 'subrip', language: 'eng', forced: false, embeddable: true },
+        { index: 1, codec: 'subrip', language: 'nld', forced: false, embeddable: true },
+      ],
+    }
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: twoSubs }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, subtitleTrackIndex: 5 })
+    ).toThrow(expect.objectContaining({ code: 'invalid-input' }))
+  })
+
   it('accepts subtitleTrackIndex of -1 (no subtitles)', () => {
     const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
