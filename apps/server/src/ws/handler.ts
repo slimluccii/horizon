@@ -73,6 +73,24 @@ function handleTransition(
 // WeakMap: auto-GC'd when session object is released from manager.
 const sessionAbrState = new WeakMap<Session, AbrState>()
 
+// Tracks whether a socket has completed the `hello` handshake. A freshly
+// attached socket is unauthenticated and ONLY the `hello` handler runs; every
+// other command (seek, quality-override, park, progress, …) is dropped until
+// hello succeeds. This closes the window where an attacker who guessed the
+// session id could drive playback or exfiltrate state before the legitimate
+// client's hello arrives. Keyed on Session so it is GC'd with the session.
+const wsAuthenticated = new WeakMap<Session, boolean>()
+
+/** True once the socket has completed a successful `hello` handshake. */
+export function isWsAuthenticated(session: Session): boolean {
+  return wsAuthenticated.get(session) === true
+}
+
+/** Reset auth state — called by the attach handler when a new socket binds. */
+export function resetWsAuth(session: Session): void {
+  wsAuthenticated.delete(session)
+}
+
 type Handler = (msg: WsMessage, ctx: Ctx) => void | Promise<void>
 
 interface Ctx {
@@ -90,6 +108,10 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
       session.wsSocket?.close(4401, 'invalid-reconnect-token')
       return
     }
+    // Handshake accepted — mark the socket authenticated so subsequent
+    // commands are processed. (A present-but-wrong token was rejected above;
+    // a tokenless hello is the legitimate initial-attach path.)
+    wsAuthenticated.set(session, true)
     clearTimeout(session.graceTimer)
     session.state = 'active'
     send(session, {
@@ -208,6 +230,11 @@ export function handleWsMessage(
 ): void {
   const msg = parseWsMessage(raw)
   if (!msg) return // unknown / malformed → silently drop (telemetry could log here)
+  // Until the socket has completed the `hello` handshake it is unauthenticated:
+  // only `hello` may run. Every other command is dropped. This prevents an
+  // attacker who guessed the session id from driving playback or reading state
+  // before the legitimate client authenticates.
+  if (msg.type !== 'hello' && !isWsAuthenticated(session)) return
   const handler = handlers[msg.type]
   const runtime = sessions.getRuntime(session.id)
   void handler(msg, { session, sessions, cfg, hwAccel, runtime })
