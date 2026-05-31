@@ -6,6 +6,16 @@ import crypto from 'node:crypto'
 
 const execFileAsync = promisify(execFile)
 
+/** ffprobe wall-clock cap. Without it a pathological input could hang the
+ *  scan worker indefinitely. 60s (not 30s) tolerates ffprobe on very large
+ *  files (>50GB) on slow hardware; tune if probes legitimately time out. */
+const PROBE_TIMEOUT_MS = 60_000
+/** Max stdout we accept from ffprobe. Normal JSON output is <1MB even for
+ *  exotic files; 10MB is a generous ceiling that still bounds memory. Node
+ *  throws ENOBUFS past this, which the caller's .catch() handles like any
+ *  other probe failure. */
+const PROBE_MAX_BUFFER = 10 * 1024 * 1024
+
 export interface AudioTrack {
   index: number
   codec: string
@@ -74,7 +84,16 @@ function findSideData(stream: FfprobeStream | undefined, type: string): FfprobeS
 }
 
 export function parseProbeOutput(stdout: string): ProbeResult {
-  const data = JSON.parse(stdout) as FfprobeJson
+  let data: FfprobeJson
+  try {
+    data = JSON.parse(stdout) as FfprobeJson
+  } catch (e) {
+    // Malformed / truncated ffprobe output (e.g. hit maxBuffer, or ffprobe
+    // emitted garbage). Log the specific failure for debugging, then re-throw
+    // so the caller's .catch() still increments the failed count.
+    console.error(`Failed to parse ffprobe output: ${e instanceof Error ? e.message : String(e)}`)
+    throw e
+  }
   const streams = data.streams ?? []
   const format = data.format ?? {}
 
@@ -152,7 +171,7 @@ export async function probe(filePath: string, cacheDir: string): Promise<ProbeRe
     '-show_streams',
     '-show_format',
     filePath,
-  ])
+  ], { timeout: PROBE_TIMEOUT_MS, maxBuffer: PROBE_MAX_BUFFER })
 
   const result = parseProbeOutput(stdout)
   await writeCache(cacheDir, key, result)

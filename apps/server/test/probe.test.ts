@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { parseProbeOutput } from '../src/scanner/probe.ts'
 
 const FAKE_PROBE_OUTPUT = JSON.stringify({
@@ -83,5 +83,17 @@ describe('parseProbeOutput', () => {
     const result = parseProbeOutput(FAKE_PROBE_OUTPUT)
     const srt = result.subtitleTracks.find(s => s.codec === 'subrip')
     expect(srt?.embeddable).toBe(true)
+  })
+})
+
+describe('parseProbeOutput — malformed input (#72)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('logs and re-throws on a JSON parse error', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Truncated / non-JSON output (e.g. ffprobe hit maxBuffer mid-write).
+    expect(() => parseProbeOutput('{ not valid json')).toThrow()
+    const logged = errSpy.mock.calls.some(c => String(c[0]).includes('Failed to parse ffprobe output'))
+    expect(logged).toBe(true)
   })
 })
