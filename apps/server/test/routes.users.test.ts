@@ -36,9 +36,9 @@ describe('POST /users', () => {
   it('409 on duplicate name', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    users.create({ name: 'Luuk' })
+    const owner = users.create({ name: 'Luuk' })
     const app = await buildApp(users)
-    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'luuk' } })
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'luuk' }, headers: { 'x-horizon-user': owner.id } })
     expect(res.statusCode).toBe(409)
     expect(res.json().code).toBe('name-taken')
   })
@@ -55,11 +55,41 @@ describe('POST /users', () => {
   it('second POST returns role member', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    users.create({ name: 'Alice' })
+    const owner = users.create({ name: 'Alice' })
     const app = await buildApp(users)
-    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Bob' } })
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Bob' }, headers: { 'x-horizon-user': owner.id } })
     expect(res.statusCode).toBe(200)
     expect(res.json().role).toBe('member')
+  })
+
+  it('rejects unauthenticated creation when users exist', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'Alice' }) // owner
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Bob' } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('no-user')
+  })
+
+  it('rejects member-authenticated creation when users exist', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'Alice' }) // owner
+    const member = users.create({ name: 'Bob' })
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Carol' }, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+  })
+
+  it('allows unauthenticated creation on empty database', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Alice' } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().role).toBe('owner')
   })
 })
 

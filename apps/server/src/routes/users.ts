@@ -21,6 +21,15 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
   app.post('/users', async (req, reply) => {
     const parse = CreateBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
+    // First-boot exemption: unauthenticated creation is allowed only while the
+    // household is empty (the first user is auto-elected owner). Once any user
+    // exists, creating further profiles requires an owner/admin caller.
+    const isEmptyDatabase = users.list().length === 0
+    if (!isEmptyDatabase) {
+      const caller = resolveCallerRole(users, req)
+      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Cannot create user without authentication')
+      if (caller.role === 'member') return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can create users')
+    }
     try {
       const { preferences, ...rest } = parse.data
       return users.create({
