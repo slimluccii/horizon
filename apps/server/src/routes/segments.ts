@@ -1,10 +1,11 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import path from 'node:path'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Session } from '../session/types.ts'
 import type { SessionManager } from '../session/manager.ts'
+import type { MediaRepo } from '../repos/media.ts'
 import { waitForSegment, waitForInit } from '../transcode/ffmpeg.ts'
 import { sendNotFound, badRequest, serverError, ErrorCodes } from './errors.ts'
 
@@ -23,19 +24,45 @@ function logFirstSegment(session: Session, segNum: number): void {
   }
 }
 
+/**
+ * Proof-of-knowledge gate for raw segment access. A bare sessionId in a URL is
+ * not enough to fetch media bytes — the caller must echo back the session's
+ * reconnectToken (issued only to the client that created the session) via the
+ * X-Reconnect-Token header. Returns true when the token matches; otherwise
+ * writes a 400 and returns false so the caller can early-return.
+ */
+function requireReconnectToken(
+  session: Session,
+  req: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  const provided = req.headers['x-reconnect-token']
+  const token = Array.isArray(provided) ? provided[0] : provided
+  if (token !== session.reconnectToken) {
+    badRequest(reply, ErrorCodes.INVALID_RECONNECT_TOKEN, 'Invalid reconnect token')
+    return false
+  }
+  return true
+}
+
 export function registerSegments(
   app: FastifyInstance,
   _hwAccel: HwAccel,
   sessions: SessionManager,
+  media: MediaRepo,
 ): void {
   app.get<{ Params: { id: string; r: string; seg: string } }>(
     '/sessions/:id/renditions/:r/:seg',
     async (req, reply) => {
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
+      if (!requireReconnectToken(session, req, reply)) return
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
 
       const r = parseInt(req.params.r, 10)
+      if (r < 0 || r >= session.plan.renditions.length) {
+        return badRequest(reply, ErrorCodes.INVALID_INPUT, `Rendition ${r} does not exist`)
+      }
       const segReq = path.basename(req.params.seg)
       const segPath = path.join(session.sessionDir, `r${r}`, segReq)
 
@@ -110,6 +137,17 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!/^\d+$/.test(req.params.trackIdx)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid track index')
+
+      // Validate the requested track exists in the source media before touching
+      // the filesystem. A session for deleted media (no mediaItem) has zero
+      // tracks, so every index is rejected. existsSync below remains a secondary
+      // guard for the case where extraction failed or files were cleaned up.
+      const trackIdx = parseInt(req.params.trackIdx, 10)
+      const mediaItem = media.getById(session.mediaId)
+      const maxTracks = mediaItem?.subtitleTracks?.length ?? 0
+      if (trackIdx >= maxTracks) {
+        return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Track index out of range')
+      }
 
       const vttPath = path.join(session.sessionDir, `sub_${req.params.trackIdx}.vtt`)
       if (!existsSync(vttPath)) return sendNotFound(reply, ErrorCodes.NOT_READY, 'Subtitle not ready')
