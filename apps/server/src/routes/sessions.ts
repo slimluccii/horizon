@@ -9,7 +9,7 @@ import type { SessionManager } from '../session/manager.ts'
 import type { PlaybackOrchestrator, StartPlaybackInput } from '../session/playback.ts'
 import { handleWsMessage } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
-import { sendNotFound, overCapacity, badRequest } from './errors.ts'
+import { sendNotFound, overCapacity, badRequest, ErrorCodes } from './errors.ts'
 
 const WS_PING_INTERVAL_MS = 15_000
 
@@ -28,9 +28,9 @@ export function registerSessions(
       started = orchestrator.startPlayback(req.body)
     } catch (err) {
       const code = (err as { code?: string }).code
-      if (code === 'media-not-found') return sendNotFound(reply, code, 'Media not found')
-      if (code === 'user-not-found') return badRequest(reply, 'no-user', 'User not found')
-      if (code === 'max-sessions') return overCapacity(reply, code, 'Server at capacity')
+      if (code === ErrorCodes.MEDIA_NOT_FOUND) return sendNotFound(reply, ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
+      if (code === ErrorCodes.USER_NOT_FOUND) return badRequest(reply, ErrorCodes.NO_USER, 'User not found')
+      if (code === ErrorCodes.MAX_SESSIONS) return overCapacity(reply, ErrorCodes.MAX_SESSIONS, 'Server at capacity')
       throw err
     }
 
@@ -72,7 +72,7 @@ export function registerSessions(
     const socket = connection.socket
     const session = sessions.get(req.params.id)
     if (!session) {
-      socket.close(4004, 'session-not-found')
+      socket.close(4004, ErrorCodes.SESSION_NOT_FOUND)
       return
     }
 

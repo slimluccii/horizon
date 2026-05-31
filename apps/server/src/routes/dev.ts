@@ -13,7 +13,7 @@ import type { MediaRepo } from '../repos/media.ts'
 import type { CollectionsRepo } from '../repos/collections.ts'
 import type { DatabaseSync } from '../db/index.ts'
 import { applyScenario, isScenarioName, SCENARIO_NAMES } from '../seed/scenarios.ts'
-import { badRequest } from './errors.ts'
+import { badRequest, ErrorCodes } from './errors.ts'
 
 export interface DevDeps {
   media: MediaRepo
@@ -29,7 +29,7 @@ export function registerDev(app: FastifyInstance, deps: DevDeps): void {
     async (req, reply) => {
       const name = req.params.scenario
       if (!isScenarioName(name)) {
-        return badRequest(reply, 'unknown-scenario',
+        return badRequest(reply, ErrorCodes.UNKNOWN_SCENARIO,
           `Unknown scenario "${name}". Valid: ${SCENARIO_NAMES.join(', ')}`)
       }
       const result = applyScenario(name, {

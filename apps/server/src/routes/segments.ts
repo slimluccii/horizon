@@ -6,7 +6,7 @@ import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Session } from '../session/types.ts'
 import type { SessionManager } from '../session/manager.ts'
 import { waitForSegment, waitForInit } from '../transcode/ffmpeg.ts'
-import { sendNotFound, badRequest, serverError } from './errors.ts'
+import { sendNotFound, badRequest, serverError, ErrorCodes } from './errors.ts'
 
 const INIT_WAIT_MS = 30_000
 const SEGMENT_WAIT_MS = 60_000
@@ -32,8 +32,8 @@ export function registerSegments(
     '/sessions/:id/renditions/:r/:seg',
     async (req, reply) => {
       const session = sessions.get(req.params.id)
-      if (!session) return sendNotFound(reply, 'session-not-found', 'Session not found')
-      if (!/^\d+$/.test(req.params.r)) return badRequest(reply, 'invalid-input', 'Invalid rendition')
+      if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
+      if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
 
       const r = parseInt(req.params.r, 10)
       const segReq = path.basename(req.params.seg)
@@ -44,12 +44,12 @@ export function registerSegments(
       // seg0, so a freshly-spawned run may not have flushed it yet.
       if (segReq === 'init.mp4' || segReq.startsWith('init_')) {
         if (!existsSync(segPath)) await waitForInit(session, r, INIT_WAIT_MS)
-        if (!existsSync(segPath)) return sendNotFound(reply, 'not-ready', 'Init not ready')
+        if (!existsSync(segPath)) return sendNotFound(reply, ErrorCodes.NOT_READY, 'Init not ready')
         return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
       }
 
       const m = SEGMENT_NAME_RE.exec(segReq)
-      if (!m) return badRequest(reply, 'invalid-input', 'Invalid segment name')
+      if (!m) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid segment name')
       const segNum = parseInt(m[1], 10)
 
       // Fast path: segment already on disk
@@ -69,12 +69,12 @@ export function registerSegments(
           console.log(`Session ${session.id}: seek waiting on in-flight restart (req seg${segNum})`)
         } else if (!res.ok) {
           console.error(`Session ${session.id}: seek-restart failed`, res.error)
-          return serverError(reply, 'seek-restart-failed', 'Seek restart failed')
+          return serverError(reply, ErrorCodes.SEEK_RESTART_FAILED, 'Seek restart failed')
         }
       }
 
       const ok = await waitForSegment(session, r, segNum, SEGMENT_WAIT_MS)
-      if (!ok || !existsSync(segPath)) return sendNotFound(reply, 'not-ready', 'Segment not produced')
+      if (!ok || !existsSync(segPath)) return sendNotFound(reply, ErrorCodes.NOT_READY, 'Segment not produced')
       logFirstSegment(session, segNum)
       return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
     },
@@ -82,7 +82,7 @@ export function registerSegments(
 
   app.get<{ Params: { id: string } }>('/sessions/:id/direct', async (req, reply) => {
     const session = sessions.get(req.params.id)
-    if (!session) return sendNotFound(reply, 'session-not-found', 'Session not found')
+    if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
 
     const { size } = statSync(session.filePath)
     const range = req.headers.range
@@ -108,11 +108,11 @@ export function registerSegments(
     '/sessions/:id/subtitles/:trackIdx.vtt',
     async (req, reply) => {
       const session = sessions.get(req.params.id)
-      if (!session) return sendNotFound(reply, 'session-not-found', 'Session not found')
-      if (!/^\d+$/.test(req.params.trackIdx)) return badRequest(reply, 'invalid-input', 'Invalid track index')
+      if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
+      if (!/^\d+$/.test(req.params.trackIdx)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid track index')
 
       const vttPath = path.join(session.sessionDir, `sub_${req.params.trackIdx}.vtt`)
-      if (!existsSync(vttPath)) return sendNotFound(reply, 'not-ready', 'Subtitle not ready')
+      if (!existsSync(vttPath)) return sendNotFound(reply, ErrorCodes.NOT_READY, 'Subtitle not ready')
       const content = await readFile(vttPath, 'utf8')
       return reply.header('Content-Type', 'text/vtt').send(content)
     },

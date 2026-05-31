@@ -31,6 +31,7 @@ import type { PlaybackPlan, ClientCapabilities, PlaybackMethod } from '../transc
 import type { RenderContext } from '../transcode/render.ts'
 import type { ToneMapConfig, ToneMapOperator } from '../transcode/tonemap.ts'
 import { isToneMapOperator } from '../transcode/tonemap.ts'
+import { ErrorCodes } from '@horizon/sdk'
 import { buildPlan } from '../transcode/plan.ts'
 import {
   createSessionDir,
@@ -95,8 +96,13 @@ export interface PlaybackOrchestratorDeps {
   extractSubtitles?: SubtitleExtractor
 }
 
+type PlaybackErrorCode =
+  | typeof ErrorCodes.MEDIA_NOT_FOUND
+  | typeof ErrorCodes.USER_NOT_FOUND
+  | typeof ErrorCodes.MAX_SESSIONS
+
 class PlaybackError extends Error {
-  constructor(public code: 'media-not-found' | 'user-not-found' | 'max-sessions', message: string) {
+  constructor(public code: PlaybackErrorCode, message: string) {
     super(message)
   }
 }
@@ -112,10 +118,10 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
       // Routes never see this row; they fetch via getById which returns
       // the domain projection.
       const mediaItem = media.getInternal(input.mediaId)
-      if (!mediaItem) throw new PlaybackError('media-not-found', 'Media not found')
+      if (!mediaItem) throw new PlaybackError(ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
 
       if (input.userId !== undefined && !users.get(input.userId)) {
-        throw new PlaybackError('user-not-found', 'User not found')
+        throw new PlaybackError(ErrorCodes.USER_NOT_FOUND, 'User not found')
       }
 
       // Read playback knobs live from serverSettings so changes take effect
@@ -123,7 +129,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
       const liveSettings = serverSettings.get()
 
       if (sessions.size() >= liveSettings.maxSessions) {
-        throw new PlaybackError('max-sessions', 'Server at session capacity')
+        throw new PlaybackError(ErrorCodes.MAX_SESSIONS, 'Server at session capacity')
       }
 
       const audioTrackIndex = input.audioTrackIndex ?? 0

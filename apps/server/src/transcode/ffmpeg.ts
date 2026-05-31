@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { ErrorCodes } from '@horizon/sdk'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import path from 'node:path'
@@ -249,7 +250,7 @@ export async function spawnFfmpeg(
     try {
       session.wsSocket?.send(JSON.stringify({
         type: 'error',
-        code: 'ffmpeg-spawn-failed',
+        code: ErrorCodes.FFMPEG_SPAWN_FAILED,
         message: err.message,
         fatal: true,
       }))
@@ -265,7 +266,7 @@ export async function spawnFfmpeg(
       try {
         session.wsSocket?.send(JSON.stringify({
           type: 'error',
-          code: 'transcode-failed',
+          code: ErrorCodes.TRANSCODE_FAILED,
           message: `FFmpeg exited with code ${code}`,
           fatal: true,
         }))
