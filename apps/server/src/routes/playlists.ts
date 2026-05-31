@@ -1,16 +1,21 @@
 import type { FastifyInstance } from 'fastify'
 import type { SessionManager } from '../session/manager.ts'
+import type { UserRepo } from '../repos/users.ts'
 import { buildRenditionPlaylist, buildMasterPlaylist } from '../transcode/playlist.ts'
-import { sendNotFound, badRequest, ErrorCodes } from './errors.ts'
+import { sendNotFound, badRequest, errorReply, ErrorCodes } from './errors.ts'
 import { requireReconnectToken } from './segments.ts'
+import { resolveCallerRole, canAccessSession } from './authz.ts'
 
 const HLS_CONTENT_TYPE = 'application/vnd.apple.mpegurl'
 
-export function registerPlaylists(app: FastifyInstance, sessions: SessionManager): void {
+export function registerPlaylists(app: FastifyInstance, sessions: SessionManager, users: UserRepo): void {
   app.get<{ Params: { id: string }; Querystring: { token?: string } }>('/sessions/:id/stream.m3u8', async (req, reply) => {
     const session = sessions.get(req.params.id)
     if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
     if (!requireReconnectToken(session, req, reply)) return
+    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+    }
 
     // When there's exactly one rendition, skip the master wrapper and serve
     // the variant playlist directly. AVFoundation silently refuses any
@@ -32,6 +37,9 @@ export function registerPlaylists(app: FastifyInstance, sessions: SessionManager
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
+      if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+        return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+      }
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
       const r = parseInt(req.params.r, 10)
       if (r < 0 || r >= session.plan.renditions.length) {

@@ -11,7 +11,7 @@ import type { PlaybackOrchestrator, StartPlaybackInput } from '../session/playba
 import { handleWsMessage, resetWsAuth } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
 import { sendNotFound, overCapacity, badRequest, errorReply, ErrorCodes } from './errors.ts'
-import { resolveCallerRole } from './authz.ts'
+import { resolveCallerRole, canAccessSession } from './authz.ts'
 import { requireReconnectToken } from './segments.ts'
 
 const WS_PING_INTERVAL_MS = 15_000
@@ -125,6 +125,12 @@ export function registerSessions(
     // holds its reconnectToken, so require it here — otherwise anyone who guessed
     // a sessionId could tear down another user's playback.
     if (!requireReconnectToken(session, req, reply)) return
+    // Ownership gate on top of the token: a member who somehow holds a token
+    // for another user's session still may not tear it down. owner/admin may
+    // destroy any session; headless sessions are destroyable by anyone.
+    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+    }
     await sessions.destroy(req.params.id)
     return reply.status(204).send()
   })
@@ -134,6 +140,15 @@ export function registerSessions(
     const session = sessions.get(req.params.id)
     if (!session) {
       socket.close(4004, ErrorCodes.SESSION_NOT_FOUND)
+      return
+    }
+
+    // Ownership gate. The hello handshake later proves token knowledge, but the
+    // X-Horizon-User identity must also be entitled to this session: a member
+    // may attach only to their own session, owner/admin to any, and a headless
+    // session (no userId) to anyone. 4001 = unauthorized close code.
+    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+      socket.close(4001, 'unauthorized')
       return
     }
 

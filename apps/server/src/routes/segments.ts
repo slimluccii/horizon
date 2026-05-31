@@ -6,8 +6,10 @@ import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Session } from '../session/types.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { MediaRepo } from '../repos/media.ts'
+import type { UserRepo } from '../repos/users.ts'
 import { waitForSegment, waitForInit } from '../transcode/ffmpeg.ts'
-import { sendNotFound, badRequest, serverError, ErrorCodes } from './errors.ts'
+import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from './errors.ts'
+import { resolveCallerRole, canAccessSession } from './authz.ts'
 
 const INIT_WAIT_MS = 30_000
 const SEGMENT_WAIT_MS = 60_000
@@ -57,6 +59,7 @@ export function registerSegments(
   _hwAccel: HwAccel,
   sessions: SessionManager,
   media: MediaRepo,
+  users: UserRepo,
 ): void {
   app.get<{ Params: { id: string; r: string; seg: string } }>(
     '/sessions/:id/renditions/:r/:seg',
@@ -64,6 +67,9 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
+      if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+        return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+      }
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
 
       const r = parseInt(req.params.r, 10)
@@ -118,6 +124,9 @@ export function registerSegments(
     const session = sessions.get(req.params.id)
     if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
     if (!requireReconnectToken(session, req, reply)) return
+    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+    }
 
     const { size } = statSync(session.filePath)
     const range = req.headers.range
@@ -145,6 +154,9 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
+      if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+        return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+      }
       if (!/^\d+$/.test(req.params.trackIdx)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid track index')
 
       // Validate the requested track exists in the source media before touching
