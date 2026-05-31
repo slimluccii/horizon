@@ -47,6 +47,7 @@ function baseCfg(overrides: Partial<Config> = {}): Config {
     metadataBatchSize: 50,
     metadataMaxAgeMovieMs: 0, metadataMaxAgeShowMs: 0, metadataMaxAgeEpisodeMs: 0,
     devSeedEnabled: false,
+    nodeEnv: 'development',
     ...overrides,
   }
 }

@@ -19,6 +19,14 @@ import { buildServer } from './server.ts'
 
 async function main() {
   const cfg = loadConfig()
+
+  // Hard fail-fast: the dev-seed routes are destructive and unauthenticated.
+  // Never let them be exposed in a production deployment, even by accident.
+  if (cfg.devSeedEnabled && cfg.nodeEnv === 'production') {
+    console.error('ERROR: HORIZON_DEV_SEED=1 with NODE_ENV=production is not allowed. Dev seed routes cannot be exposed in production.')
+    process.exit(1)
+  }
+
   const hwAccel = await detectHwAccel(cfg.forceEncoder)
 
   const db = openDatabase(cfg.dbPath)

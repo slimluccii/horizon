@@ -105,7 +105,7 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
   hello(msg, { session }) {
     if (msg.type !== 'hello') return
     if (msg.reconnectToken && msg.reconnectToken !== session.reconnectToken) {
-      session.wsSocket?.close(4401, 'invalid-reconnect-token')
+      session.wsSocket?.close(4401, ErrorCodes.INVALID_RECONNECT_TOKEN)
       return
     }
     // Handshake accepted — mark the socket authenticated so subsequent

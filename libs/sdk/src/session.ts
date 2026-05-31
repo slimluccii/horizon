@@ -68,6 +68,13 @@ export class PlaybackSession {
   get state(): SessionState { return this._state }
   get profile(): QualityProfile { return this._profile }
 
+  /** The session's reconnect token, assigned by the server on `session-ready`.
+   *  Doubles as a proof-of-knowledge credential the player must echo back on
+   *  every playlist/segment HTTP request via the `X-Reconnect-Token` header
+   *  (see apps/server/src/routes/segments.ts). Null until the handshake
+   *  completes; consumers should read it only after `onReady` has fired. */
+  get reconnectToken(): string | null { return this._reconnectToken }
+
   private _connect() {
     if (this._destroyed) return
     this._ws = new WebSocket(this.wsUrl)

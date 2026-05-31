@@ -43,6 +43,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     metadataMaxAgeShowMs: 7 * 86_400_000,
     metadataMaxAgeEpisodeMs: 60 * 86_400_000,
     devSeedEnabled: false,
+    nodeEnv: 'development',
     ...overrides,
   }
 }

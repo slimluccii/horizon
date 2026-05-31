@@ -80,3 +80,22 @@ describe('PlaybackSession hello handshake (#74)', () => {
     }
   })
 })
+
+describe('PlaybackSession.reconnectToken getter (#78)', () => {
+  it('is null before session-ready arrives', async () => {
+    const session = newSession()
+    await flush()
+    lastWs().onopen?.()
+    // No session-ready yet → nothing for the player to put in X-Reconnect-Token.
+    expect(session.reconnectToken).toBeNull()
+  })
+
+  it('exposes the server-assigned token after session-ready so the player can inject the X-Reconnect-Token header', async () => {
+    const session = newSession()
+    await flush()
+    lastWs().onopen?.()
+    lastWs().onmessage?.({ data: JSON.stringify({ type: 'session-ready', profile: { videoBitrate: 8000, audioBitrate: 192 }, reconnectToken: 'seg-tok' }) })
+    expect(session.state).toBe('active')
+    expect(session.reconnectToken).toBe('seg-tok')
+  })
+})

@@ -7,6 +7,12 @@
  *
  * Used by Playwright e2e specs to deterministically set library state before
  * each test, and by humans poking at the UI during development.
+ *
+ * POST /dev/seed/:scenario is destructive (it wipes + reseeds the DB) and is
+ * rate-limited to 1 call per 5 minutes per IP to blunt rapid-fire abuse even
+ * where HORIZON_DEV_SEED=1 is intentionally enabled. GET /dev/seed is not
+ * limited. The accompanying startup guard (index.ts) refuses to boot when the
+ * flag is set with NODE_ENV=production, so these routes can never reach prod.
  */
 import type { FastifyInstance } from 'fastify'
 import type { MediaRepo } from '../repos/media.ts'
@@ -14,6 +20,10 @@ import type { CollectionsRepo } from '../repos/collections.ts'
 import type { DatabaseSync } from '../db/index.ts'
 import { applyScenario, isScenarioName, SCENARIO_NAMES } from '../seed/scenarios.ts'
 import { badRequest, ErrorCodes } from './errors.ts'
+import { IpRateLimiter, rateLimit } from './rate-limit.ts'
+
+const SEED_WINDOW_MS = 5 * 60 * 1000
+const SEED_MAX_PER_WINDOW = 1
 
 export interface DevDeps {
   media: MediaRepo
@@ -24,8 +34,11 @@ export interface DevDeps {
 export function registerDev(app: FastifyInstance, deps: DevDeps): void {
   app.get('/dev/seed', async () => ({ scenarios: SCENARIO_NAMES }))
 
+  const seedLimiter = new IpRateLimiter(SEED_WINDOW_MS)
+
   app.post<{ Params: { scenario: string } }>(
     '/dev/seed/:scenario',
+    { preHandler: rateLimit(seedLimiter, SEED_MAX_PER_WINDOW) }, // 1 req / 5 min / IP
     async (req, reply) => {
       const name = req.params.scenario
       if (!isScenarioName(name)) {
