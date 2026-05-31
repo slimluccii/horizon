@@ -56,7 +56,7 @@ export async function buildServer(
   await app.register(fastifyWebSocket)
 
   registerHealth(app, hwAccel)
-  registerLibrary(app, repos.mediaRepo, repos.collectionsRepo, workers)
+  registerLibrary(app, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo)
   registerSessions(app, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
   registerPlaylists(app, sessions)
   registerSegments(app, hwAccel, sessions, repos.mediaRepo)
