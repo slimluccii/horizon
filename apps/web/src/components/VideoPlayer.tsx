@@ -66,6 +66,18 @@ export default function VideoPlayer({
       // On reload (quality/audio switch) resume at the position captured before
       // restart so MSE begins fetching the segment the user was watching.
       startPosition,
+      // Inject the session's reconnect token on every playlist + segment HTTP
+      // request. The server gates raw segment access behind a proof-of-knowledge
+      // check (apps/server/src/routes/segments.ts): a bare sessionId in the URL
+      // is rejected with 400 invalid-reconnect-token unless the caller echoes
+      // back the token in this header. xhrSetup fires for both manifest and
+      // fragment loads (the default loader is XHR-based), so one hook covers
+      // playlists and segments alike. Read the token lazily per-request so a
+      // value assigned slightly after hls construction is still picked up.
+      xhrSetup: (xhr, _url) => {
+        const token = session.reconnectToken
+        if (token) xhr.setRequestHeader('X-Reconnect-Token', token)
+      },
     })
     hlsRef.current = hls
 
