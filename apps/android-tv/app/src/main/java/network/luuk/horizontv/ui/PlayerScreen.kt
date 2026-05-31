@@ -119,7 +119,8 @@ fun PlayerScreen(
     val socket = remember { ProgressSocket(state.api.okHttp, BuildConfig.SERVER_URL) }
 
     val sess = session
-    LaunchedEffect(sess) {
+    LaunchedEffect(sess, phase) {
+        if (phase != Phase.Ready) return@LaunchedEffect
         if (sess == null) return@LaunchedEffect
         val streamUrl = if (sess.streamUrl.startsWith("http")) sess.streamUrl
                         else BuildConfig.SERVER_URL + sess.streamUrl
@@ -133,8 +134,8 @@ fun PlayerScreen(
     // Use a DisposableEffect so the polling coroutine is explicitly cancelled
     // when the session changes or PlayerScreen exits, preventing coroutine
     // leaks and stalled delay() calls on a stale session/socket.
-    DisposableEffect(sess) {
-        val progressJob = if (sess != null) {
+    DisposableEffect(sess, phase) {
+        val progressJob = if (sess != null && phase == Phase.Ready) {
             scope.launch {
                 while (true) {
                     delay(5_000)
