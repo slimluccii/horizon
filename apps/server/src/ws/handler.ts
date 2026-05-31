@@ -4,6 +4,7 @@ import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import type { SessionRuntime, TransitionResult } from '../session/runtime.ts'
+import { ErrorCodes } from '@horizon/sdk'
 import { PROFILES } from '../transcode/profiles.ts'
 import { pauseFfmpeg, resumeFfmpeg } from '../transcode/ffmpeg.ts'
 import { parseWsMessage, type WsMessage } from './messages.ts'
@@ -157,7 +158,7 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
     // An out-of-range index would otherwise reach ffmpeg and crash the run —
     // a trivial mid-session DoS. Reject and leave the session untouched.
     if (msg.index < 0 || msg.index >= session.audioTrackCount) {
-      sendError(session, 'audio-track-invalid', 'Audio track index out of range')
+      sendError(session, ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track index out of range')
       return
     }
     if (session.plan.method === 'direct-play') {
