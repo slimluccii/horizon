@@ -135,6 +135,8 @@ async function main() {
     // In-flight requests on the old client complete; subsequent calls use
     // the new auth header. No process restart needed.
     if (patch.tmdbToken !== undefined) {
+      // Audit trail — NEVER log the token value, only that it changed.
+      console.log(`Server settings: TMDB token ${patch.tmdbToken ? 'updated' : 'cleared'}`)
       const newTmdb = createTmdbProvider(patch.tmdbToken ?? undefined, cfg.cacheDir)
       refreshWorker.setTmdb(newTmdb)
       console.log(`MetadataRefresh: TMDB client ${newTmdb ? 'updated' : 'cleared'} after token change`)

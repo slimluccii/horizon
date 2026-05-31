@@ -448,17 +448,47 @@ describe('PATCH /settings/server — tmdbToken', () => {
     expect(serverSettings.get().tmdbToken).toBeNull()
   })
 
-  it('non-empty token saves and returns "set"', async () => {
+  // A syntactically valid (mock) TMDB v4 JWT — header.payload.signature, all
+  // base64url, comfortably over the 48-char minimum.
+  const VALID_JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0IiwibmJmIjoxNzAwMDAwMDAwfQ.c2lnbmF0dXJlc2lnbmF0dXJlc2lnbmF0dXJl'
+
+  it('valid JWT-format token saves and returns "set"', async () => {
     const { users, serverSettings, owner } = setup()
     const app = await buildApp(users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
       headers: { 'x-horizon-user': owner.id },
-      payload: { tmdbToken: 'new-token-xyz' },
+      payload: { tmdbToken: VALID_JWT },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().tmdbToken).toBe('set')
+  })
+
+  it('rejects a non-JWT token with 400 invalid-input (#76)', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { tmdbToken: 'not-a-valid-token' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('rejects a too-short token with 400 invalid-input (#76)', async () => {
+    const { users, serverSettings, owner } = setup()
+    const app = await buildApp(users, serverSettings)
+
+    const res = await app.inject({
+      method: 'PATCH', url: '/settings/server',
+      headers: { 'x-horizon-user': owner.id },
+      payload: { tmdbToken: 'a.b.c' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
   })
 
   it('GET never leaks the actual token value', async () => {
