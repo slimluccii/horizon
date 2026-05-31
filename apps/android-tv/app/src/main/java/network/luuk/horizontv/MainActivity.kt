@@ -41,7 +41,12 @@ class MainActivity : ComponentActivity() {
                         Routes.SHOW_DETAIL,
                         arguments = listOf(navArgument("showId") { type = NavType.StringType }),
                     ) { entry ->
-                        val id = entry.arguments!!.getString("showId")!!
+                        val id = entry.arguments?.getString("showId") ?: run {
+                            nav.navigate(Routes.LIBRARY) {
+                                popUpTo(Routes.SHOW_DETAIL) { inclusive = true }
+                            }
+                            return@composable
+                        }
                         ShowDetailScreen(
                             showId = id,
                             onPlayEpisode = { episodeId -> nav.navigate(Routes.player(episodeId)) },
@@ -57,8 +62,13 @@ class MainActivity : ComponentActivity() {
                             },
                         ),
                     ) { entry ->
-                        val id = entry.arguments!!.getString("mediaId")!!
-                        val resume = entry.arguments!!.getBoolean("resume", false)
+                        val id = entry.arguments?.getString("mediaId") ?: run {
+                            nav.navigate(Routes.LIBRARY) {
+                                popUpTo(Routes.PLAYER) { inclusive = true }
+                            }
+                            return@composable
+                        }
+                        val resume = entry.arguments?.getBoolean("resume", false) ?: false
                         PlayerScreen(
                             mediaId = id,
                             resumeDefault = resume,

@@ -54,6 +54,14 @@ android {
             "/META-INF/DEPENDENCIES",
         )
     }
+
+    testOptions {
+        unitTests {
+            // Let stubbed android.* APIs (e.g. android.util.Log) return default
+            // values instead of throwing in JVM unit tests.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

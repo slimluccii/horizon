@@ -119,7 +119,8 @@ fun PlayerScreen(
     val socket = remember { ProgressSocket(state.api.okHttp, BuildConfig.SERVER_URL) }
 
     val sess = session
-    LaunchedEffect(sess) {
+    LaunchedEffect(sess, phase) {
+        if (phase != Phase.Ready) return@LaunchedEffect
         if (sess == null) return@LaunchedEffect
         val streamUrl = if (sess.streamUrl.startsWith("http")) sess.streamUrl
                         else BuildConfig.SERVER_URL + sess.streamUrl
@@ -129,14 +130,35 @@ fun PlayerScreen(
         socket.connect(sess.wsUrl)
     }
 
+    // Socket lifecycle is decoupled from the player lifecycle. The socket is
+    // closed whenever the session id changes OR the phase transitions (e.g. to
+    // Error), not only when the composable unmounts. This prevents socket leaks
+    // during recomposition for non-player reasons and guarantees the WebSocket
+    // is torn down on playback errors. socket.disconnect() is idempotent.
+    DisposableEffect(sess?.sessionId, phase) {
+        onDispose { socket.disconnect() }
+    }
+
     // Periodic progress reports, every 5 s.
-    LaunchedEffect(sess) {
-        if (sess == null) return@LaunchedEffect
-        while (true) {
-            delay(5_000)
-            val pos = player.currentPosition.toInt()
-            val dur = player.duration.takeIf { it > 0 }?.toInt() ?: 0
-            if (dur > 0) socket.reportProgress(pos, dur)
+    // Use a DisposableEffect so the polling coroutine is explicitly cancelled
+    // when the session changes or PlayerScreen exits, preventing coroutine
+    // leaks and stalled delay() calls on a stale session/socket.
+    DisposableEffect(sess, phase) {
+        val progressJob = if (sess != null && phase == Phase.Ready) {
+            scope.launch {
+                while (true) {
+                    delay(5_000)
+                    val pos = player.currentPosition.toInt()
+                    val dur = player.duration.takeIf { it > 0 }?.toInt() ?: 0
+                    if (dur > 0) socket.reportProgress(pos, dur)
+                }
+            }
+        } else null
+        onDispose {
+            /* Explicitly cancel the progress-reporting job when the session
+             * changes or PlayerScreen exits, to prevent coroutine leaks and
+             * stalled delay() calls. */
+            progressJob?.cancel()
         }
     }
 
