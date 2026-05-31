@@ -6,8 +6,10 @@ import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Session } from '../session/types.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { MediaRepo } from '../repos/media.ts'
+import type { UserRepo } from '../repos/users.ts'
 import { waitForSegment, waitForInit } from '../transcode/ffmpeg.ts'
-import { sendNotFound, badRequest, serverError, ErrorCodes } from './errors.ts'
+import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from './errors.ts'
+import { resolveCallerRole, canAccessSession } from './authz.ts'
 
 const INIT_WAIT_MS = 30_000
 const SEGMENT_WAIT_MS = 60_000
@@ -25,19 +27,26 @@ function logFirstSegment(session: Session, segNum: number): void {
 }
 
 /**
- * Proof-of-knowledge gate for raw segment access. A bare sessionId in a URL is
- * not enough to fetch media bytes — the caller must echo back the session's
- * reconnectToken (issued only to the client that created the session) via the
- * X-Reconnect-Token header. Returns true when the token matches; otherwise
- * writes a 400 and returns false so the caller can early-return.
+ * Proof-of-knowledge gate for raw session data access. A bare sessionId in a
+ * URL is not enough to fetch media bytes — the caller must echo back the
+ * session's reconnectToken (issued only to the client that created the session).
+ *
+ * The token is accepted from EITHER the `X-Reconnect-Token` header OR a `token`
+ * query parameter. The header is used by HLS playlist/segment requests (hls.js
+ * sets it via xhrSetup), while the query param exists for transports that
+ * cannot set custom headers: a browser `<video src>` (direct-play) or
+ * `<track src>` (subtitles) element. Returns true when the token matches;
+ * otherwise writes a 400 and returns false so the caller can early-return.
  */
-function requireReconnectToken(
+export function requireReconnectToken(
   session: Session,
   req: FastifyRequest,
   reply: FastifyReply,
 ): boolean {
   const provided = req.headers['x-reconnect-token']
-  const token = Array.isArray(provided) ? provided[0] : provided
+  const headerToken = Array.isArray(provided) ? provided[0] : provided
+  const queryToken = (req.query as { token?: string } | undefined)?.token
+  const token = headerToken ?? queryToken
   if (token !== session.reconnectToken) {
     badRequest(reply, ErrorCodes.INVALID_RECONNECT_TOKEN, 'Invalid reconnect token')
     return false
@@ -50,6 +59,7 @@ export function registerSegments(
   _hwAccel: HwAccel,
   sessions: SessionManager,
   media: MediaRepo,
+  users: UserRepo,
 ): void {
   app.get<{ Params: { id: string; r: string; seg: string } }>(
     '/sessions/:id/renditions/:r/:seg',
@@ -57,6 +67,9 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
+      if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+        return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+      }
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
 
       const r = parseInt(req.params.r, 10)
@@ -107,9 +120,13 @@ export function registerSegments(
     },
   )
 
-  app.get<{ Params: { id: string } }>('/sessions/:id/direct', async (req, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { token?: string } }>('/sessions/:id/direct', async (req, reply) => {
     const session = sessions.get(req.params.id)
     if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
+    if (!requireReconnectToken(session, req, reply)) return
+    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+    }
 
     const { size } = statSync(session.filePath)
     const range = req.headers.range
@@ -131,11 +148,15 @@ export function registerSegments(
     return reply.send(createReadStream(session.filePath))
   })
 
-  app.get<{ Params: { id: string; trackIdx: string } }>(
+  app.get<{ Params: { id: string; trackIdx: string }; Querystring: { token?: string } }>(
     '/sessions/:id/subtitles/:trackIdx.vtt',
     async (req, reply) => {
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
+      if (!requireReconnectToken(session, req, reply)) return
+      if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+        return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
+      }
       if (!/^\d+$/.test(req.params.trackIdx)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid track index')
 
       // Validate the requested track exists in the source media before touching
