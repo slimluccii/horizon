@@ -280,6 +280,7 @@ describe('serverSettings — bootstrapFromEnv', () => {
       cacheDir: '/tmp',
       dbPath: ':memory:',
       devSeedEnabled: false,
+      nodeEnv: 'development',
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
     } as import('../src/config.ts').Config)
 
@@ -318,6 +319,7 @@ describe('serverSettings — bootstrapFromEnv', () => {
       cacheDir: '/tmp',
       dbPath: ':memory:',
       devSeedEnabled: false,
+      nodeEnv: 'development',
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
     } as import('../src/config.ts').Config
 
