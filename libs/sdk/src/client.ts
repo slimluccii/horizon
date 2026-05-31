@@ -29,6 +29,19 @@ export function isRoleChangedError(err: unknown): boolean {
   )
 }
 
+/**
+ * Returns true when an error indicates the requested watch-progress record does
+ * not exist (server replied 404 with code `progress-not-found`). `progress.get`
+ * uses this to resolve to `null` rather than reject. Safe for any `unknown`
+ * value — verifies `instanceof Error` before touching `.code`.
+ */
+export function isProgressNotFoundError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err as Error & { code?: string }).code === 'progress-not-found'
+  )
+}
+
 export class HorizonClient {
   private baseUrl: string
   private activeUserId: string | null = null
@@ -56,7 +69,11 @@ export class HorizonClient {
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      throw Object.assign(new Error(body.error ?? `HTTP ${res.status}`), { code: body.code })
+      const error = new Error(body.error ?? `HTTP ${res.status}`)
+      // Only attach a code when the server actually sent one — otherwise the
+      // error carries `code: undefined`, which silently breaks code checks.
+      if (typeof body.code === 'string') (error as Error & { code?: string }).code = body.code
+      throw error
     }
     if (res.status === 204) return undefined as T
     return res.json()
@@ -93,7 +110,7 @@ export class HorizonClient {
       this.fetch<ContinueWatchingItem[]>(`/users/${userId}/continue-watching`),
     get: (userId: string, mediaId: string) =>
       this.fetch<WatchProgress>(`/users/${userId}/progress/${mediaId}`)
-        .catch(err => err.code === 'progress-not-found' ? null : Promise.reject(err)),
+        .catch(err => isProgressNotFoundError(err) ? null : Promise.reject(err)),
     markWatched: (userId: string, mediaId: string, watched: boolean) =>
       this.fetch<WatchProgress>(
         `/users/${userId}/progress/${mediaId}`,
