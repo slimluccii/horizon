@@ -74,9 +74,13 @@ export class PlaybackSession {
 
     this._ws.onopen = () => {
       this._reconnectAttempts = 0
-      if (this._reconnectToken) {
-        this._send({ type: 'hello', reconnectToken: this._reconnectToken })
-      }
+      // Always send hello so the server can complete the handshake from this
+      // frame (it replies session-ready). reconnectToken is optional — included
+      // only on reconnect; the server guard tolerates its absence.
+      this._send({
+        type: 'hello',
+        ...(this._reconnectToken ? { reconnectToken: this._reconnectToken } : {}),
+      })
     }
 
     this._ws.onmessage = (ev) => {
