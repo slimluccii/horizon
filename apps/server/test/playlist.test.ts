@@ -53,14 +53,26 @@ describe('buildMasterPlaylist', () => {
     expect(streamLines[1]).toContain('RESOLUTION=1280x720')
   })
 
-  it('uses fallback codec when not provided', () => {
+  // Master playlist deliberately omits CODECS — h264_videotoolbox writes an
+  // avcC box without a valid profile/level in some builds, so AVFoundation's
+  // strict CODECS validation fails with CoreMediaErrorDomain -12927. Letting
+  // the player probe the init segment is slower but correct on every client.
+  // See the comment in buildMasterPlaylist. Do not re-add a CODECS assertion.
+  it('omits CODECS so clients probe the init segment', () => {
     const pl = buildMasterPlaylist('sess1', profiles, [])
-    expect(pl).toContain('avc1.640028')
+    expect(pl).not.toContain('CODECS')
+    // renditionCodecs is intentionally unused; passing it changes nothing.
+    const withCodecs = buildMasterPlaylist('sess1', profiles, ['avc1.640028', 'avc1.640028'])
+    expect(withCodecs).not.toContain('CODECS')
   })
 
-  it('points URIs at the rendition playlist endpoints', () => {
+  // Variant URIs are RELATIVE to the master playlist URL — AVFoundation refuses
+  // absolute-path variants and fails silently (CoreMediaErrorDomain -12927).
+  it('points URIs at relative rendition playlist endpoints', () => {
     const pl = buildMasterPlaylist('sess1', profiles, ['avc1.640028', 'avc1.640028'])
-    expect(pl).toContain('/sessions/sess1/renditions/0.m3u8')
-    expect(pl).toContain('/sessions/sess1/renditions/1.m3u8')
+    expect(pl).toContain('renditions/0.m3u8')
+    expect(pl).toContain('renditions/1.m3u8')
+    // Must NOT be absolute / session-prefixed.
+    expect(pl).not.toContain('/sessions/')
   })
 })
