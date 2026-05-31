@@ -10,6 +10,7 @@ import type { HwAccel } from '../src/transcode/hwaccel.ts'
 import type { MediaRepo, MediaItemRow } from '../src/repos/media.ts'
 import type { UserRepo } from '../src/repos/users.ts'
 import type { ClientCapabilities } from '../src/transcode/plan.ts'
+import type { ServerSettings, ServerSettingsRow } from '../src/repos/serverSettings.ts'
 
 const browserCaps: ClientCapabilities = {
   videoCodecs: ['h264'],
@@ -49,6 +50,39 @@ function baseCfg(overrides: Partial<Config> = {}): Config {
   }
 }
 
+function fakeServerSettings(overrides: Partial<ServerSettingsRow> = {}): ServerSettings {
+  const base: ServerSettingsRow = {
+    watchedThresholdPct: 90,
+    scanCronHour: 3,
+    scanConcurrency: 4,
+    watchFs: false,
+    watchDebounceMs: 5000,
+    tmdbToken: null,
+    metadataBatchSize: 50,
+    metadataMaxAgeMovieDays: 30,
+    metadataMaxAgeShowDays: 7,
+    metadataMaxAgeEpDays: 60,
+    maxSessions: 4,
+    maxRenditions: 3,
+    wsGraceMs: 1_000,
+    wsAttachMs: 1_000,
+    forceEncoder: null,
+    tonemapOperator: 'hable',
+    tonemapParam: null,
+    tonemapDesat: null,
+    seededFromEnv: false,
+    updatedAt: 0,
+    ...overrides,
+  }
+  return {
+    get: () => ({ ...base }),
+    update: (patch) => { Object.assign(base, patch); return { ...base } },
+    bootstrapFromEnv: () => { /* no-op in tests */ },
+    on: () => ({} as ServerSettings),
+    off: () => ({} as ServerSettings),
+  }
+}
+
 const hwAccel = { name: 'cpu' } as unknown as HwAccel
 
 const sampleMovie: Partial<MediaItemRow> = {
@@ -67,6 +101,7 @@ const sampleMovie: Partial<MediaItemRow> = {
 interface Harness {
   cfg: Config
   sessions: SessionManager
+  serverSettings: ServerSettings
   spawner: ReturnType<typeof makeSpawner>
   extractSubtitles: ReturnType<typeof vi.fn<Parameters<SubtitleExtractor>, ReturnType<SubtitleExtractor>>>
 }
@@ -83,22 +118,23 @@ function makeSpawner() {
   return Object.assign(fn, { resolve, reject })
 }
 
-function harness(overrides: Partial<Config> = {}): Harness {
-  const cfg = baseCfg(overrides)
-  const sessions = createSessionManager(cfg)
+function harness(settingsOverrides: Partial<ServerSettingsRow> = {}): Harness {
+  const cfg = baseCfg()
+  const serverSettings = fakeServerSettings(settingsOverrides)
+  const sessions = createSessionManager(serverSettings)
   const spawner = makeSpawner()
   const extractSubtitles = vi.fn(() => Promise.resolve()) as unknown as Harness['extractSubtitles']
-  return { cfg, sessions, spawner, extractSubtitles }
+  return { cfg, sessions, serverSettings, spawner, extractSubtitles }
 }
 
 describe('PlaybackOrchestrator', () => {
   it('throws media-not-found when MediaItem is missing', () => {
-    const { cfg, sessions, spawner, extractSubtitles } = harness()
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
       cfg, hwAccel,
       media: fakeMedia({}),
       users: fakeUsers(new Set()),
-      sessions, spawner, extractSubtitles,
+      sessions, serverSettings, spawner, extractSubtitles,
     })
     expect(() =>
       orch.startPlayback({ mediaId: 'nope', capabilities: browserCaps })
@@ -106,12 +142,12 @@ describe('PlaybackOrchestrator', () => {
   })
 
   it('throws user-not-found when userId is given but unknown', () => {
-    const { cfg, sessions, spawner, extractSubtitles } = harness()
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
       cfg, hwAccel,
       media: fakeMedia({ m1: sampleMovie }),
       users: fakeUsers(new Set(['u1'])),
-      sessions, spawner, extractSubtitles,
+      sessions, serverSettings, spawner, extractSubtitles,
     })
     expect(() =>
       orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, userId: 'u-ghost' })
@@ -119,12 +155,12 @@ describe('PlaybackOrchestrator', () => {
   })
 
   it('throws max-sessions when capacity is reached', () => {
-    const { cfg, sessions, spawner, extractSubtitles } = harness({ maxSessions: 1 })
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness({ maxSessions: 1 })
     const orch = createPlaybackOrchestrator({
       cfg, hwAccel,
       media: fakeMedia({ m1: sampleMovie }),
       users: fakeUsers(new Set()),
-      sessions, spawner, extractSubtitles,
+      sessions, serverSettings, spawner, extractSubtitles,
     })
 
     orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps })
@@ -135,12 +171,12 @@ describe('PlaybackOrchestrator', () => {
   })
 
   it('returns sessionInfo synchronously and resolves ready after spawn', async () => {
-    const { cfg, sessions, spawner, extractSubtitles } = harness()
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
       cfg, hwAccel,
       media: fakeMedia({ m1: sampleMovie }),
       users: fakeUsers(new Set()),
-      sessions, spawner, extractSubtitles,
+      sessions, serverSettings, spawner, extractSubtitles,
     })
 
     // Capabilities mismatch on container forces direct-stream (still spawns ffmpeg).
@@ -165,12 +201,12 @@ describe('PlaybackOrchestrator', () => {
   })
 
   it('destroys session and rejects ready when spawn fails', async () => {
-    const { cfg, sessions, spawner, extractSubtitles } = harness()
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
       cfg, hwAccel,
       media: fakeMedia({ m1: sampleMovie }),
       users: fakeUsers(new Set()),
-      sessions, spawner, extractSubtitles,
+      sessions, serverSettings, spawner, extractSubtitles,
     })
 
     const transcodeCaps: ClientCapabilities = { ...browserCaps, container: ['mkv'] }
@@ -187,13 +223,13 @@ describe('PlaybackOrchestrator', () => {
   })
 
   it('skips ffmpeg spawn for direct-play and resolves ready immediately', async () => {
-    const { cfg, sessions, spawner, extractSubtitles } = harness()
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
       cfg, hwAccel,
       // h264/aac/mp4 → direct-play under browserCaps
       media: fakeMedia({ m1: sampleMovie }),
       users: fakeUsers(new Set()),
-      sessions, spawner, extractSubtitles,
+      sessions, serverSettings, spawner, extractSubtitles,
     })
 
     const { info, ready } = orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps })
@@ -208,12 +244,12 @@ describe('PlaybackOrchestrator', () => {
   })
 
   it('seeds seek state when startPositionMs is provided on transcode path', async () => {
-    const { cfg, sessions, spawner, extractSubtitles } = harness()
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
       cfg, hwAccel,
       media: fakeMedia({ m1: sampleMovie }),
       users: fakeUsers(new Set()),
-      sessions, spawner, extractSubtitles,
+      sessions, serverSettings, spawner, extractSubtitles,
     })
 
     const transcodeCaps: ClientCapabilities = { ...browserCaps, container: ['mkv'] }

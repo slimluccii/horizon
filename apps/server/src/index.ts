@@ -2,17 +2,17 @@ import { loadConfig } from './config.ts'
 import { detectHwAccel } from './transcode/hwaccel.ts'
 import { openDatabase } from './db/index.ts'
 import { migrate } from './db/migrations.ts'
-import { bootstrapFromEnv, createServerSettings } from './serverSettings.ts'
 import { createMediaRepo } from './repos/media.ts'
 import { createCollectionsRepo } from './repos/collections.ts'
 import { createUserRepo } from './repos/users.ts'
 import { createProgressRepo } from './repos/progress.ts'
+import { createServerSettings } from './repos/serverSettings.ts'
 import { createScanRootsRepo, createChangesCursorRepo, createScanHistoryRepo } from './repos/scanState.ts'
 import { createTmdbProvider } from './metadata/tmdb.ts'
 import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from './metadata/refresh.ts'
 import { createScanManager } from './scanner/manager.ts'
-import { startWatcher } from './scanner/watcher.ts'
-import { startDailySchedule } from './scheduler.ts'
+import { startWatcher, type WatcherHandle } from './scanner/watcher.ts'
+import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
 import { createSessionManager } from './session/manager.ts'
 import { createPlaybackOrchestrator } from './session/playback.ts'
 import { buildServer } from './server.ts'
@@ -23,55 +23,55 @@ async function main() {
 
   const db = openDatabase(cfg.dbPath)
   migrate(db)
-  bootstrapFromEnv(db)
-  const serverSettings = createServerSettings(db)
   const mediaRepo = createMediaRepo(db)
   const collectionsRepo = createCollectionsRepo(db)
   const userRepo = createUserRepo(db)
+  const serverSettings = createServerSettings(db)
+  // Overlay env values exactly once (fresh install / first boot after upgrade).
+  serverSettings.bootstrapFromEnv(cfg)
+
   const progressRepo = createProgressRepo(db, mediaRepo, {
     getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct,
   })
+
   const scanRootsRepo = createScanRootsRepo(db)
   const changesCursorRepo = createChangesCursorRepo(db)
   const scanHistoryRepo = createScanHistoryRepo(db)
 
-  const tmdb = createTmdbProvider(cfg.tmdbToken, cfg.cacheDir)
+  const initialTmdb = createTmdbProvider(cfg.tmdbToken, cfg.cacheDir)
 
-  // Metadata refresh worker — wired only if TMDB is configured.
-  const refreshWorker = tmdb
-    ? createMetadataRefreshWorker(
-        {
-          ...DEFAULT_REFRESH_CONFIG,
-          batchSize: cfg.metadataBatchSize,
-          maxAgeMs: {
-            movie: cfg.metadataMaxAgeMovieMs,
-            show: cfg.metadataMaxAgeShowMs,
-            episode: cfg.metadataMaxAgeEpisodeMs,
-          },
-        },
-        { media: mediaRepo, tmdb, changesCursor: changesCursorRepo },
-      )
-    : null
+  // Metadata refresh worker — always created so the tmdbToken change handler
+  // can swap the client without restarting the server.
+  const refreshWorker = createMetadataRefreshWorker(
+    {
+      ...DEFAULT_REFRESH_CONFIG,
+      batchSize: cfg.metadataBatchSize,
+      maxAgeMs: {
+        movie: cfg.metadataMaxAgeMovieMs,
+        show: cfg.metadataMaxAgeShowMs,
+        episode: cfg.metadataMaxAgeEpisodeMs,
+      },
+    },
+    { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo },
+  )
 
   const scanManager = createScanManager(cfg, {
     media: mediaRepo,
     collections: collectionsRepo,
     scanRoots: scanRootsRepo,
     scanHistory: scanHistoryRepo,
-    onScanFinished: refreshWorker
-      ? () => { void refreshWorker.run({ useChangesFeed: false }) }   // newly indexed items get metadata fast
-      : undefined,
+    onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false }) },  // newly indexed items get metadata fast
   })
 
-  const sessions = createSessionManager(cfg)
+  const sessions = createSessionManager(serverSettings)
   const orchestrator = createPlaybackOrchestrator({
-    cfg, hwAccel, media: mediaRepo, users: userRepo, sessions,
+    cfg, hwAccel, media: mediaRepo, users: userRepo, sessions, serverSettings,
   })
 
   const app = await buildServer(
     cfg,
     hwAccel,
-    { mediaRepo, collectionsRepo, userRepo, progressRepo },
+    { mediaRepo, collectionsRepo, userRepo, progressRepo, serverSettings },
     sessions,
     { scanManager, refreshWorker, scanHistory: scanHistoryRepo },
     orchestrator,
@@ -85,25 +85,79 @@ async function main() {
   void scanManager.request({ trigger: 'boot', paths: [] })
 
   // Filesystem watcher — opt-in for reliable filesystems.
-  if (cfg.watchFs) {
-    startWatcher(
-      { roots: [...cfg.moviesRoots, ...cfg.showsRoots], debounceMs: cfg.watchDebounceMs },
-      scanManager,
-    )
+  // Mutable handle so the settings change handler can swap it out.
+  let watcherHandle: WatcherHandle | null = null
+
+  function startWatcherIfEnabled(): void {
+    const s = serverSettings.get()
+    if (s.watchFs) {
+      watcherHandle = startWatcher(
+        { roots: [...cfg.moviesRoots, ...cfg.showsRoots], debounceMs: s.watchDebounceMs },
+        scanManager,
+      )
+    }
   }
+
+  startWatcherIfEnabled()
 
   // Nightly schedule: full library scan + (after) a metadata refresh that
   // includes the TMDB /changes feed so pre-existing items pick up upstream
   // edits even when the file didn't change.
   const lastScan = scanRootsRepo.list().reduce((max, r) => Math.max(max, r.lastScannedAt), 0)
-  startDailySchedule({
-    hourLocal: cfg.scanCronHour,
+  const settings = serverSettings.get()
+  let scheduleHandle: DailyScheduleHandle = startDailySchedule({
+    hourLocal: settings.scanCronHour,
     catchUpIfOlderThanMs: 36 * 60 * 60 * 1000,    // catch up if missed > 36 h (downtime)
     lastFiredAt: lastScan,
     task: async () => {
       await scanManager.request({ trigger: 'cron', paths: [] })
-      if (refreshWorker) await refreshWorker.run({ useChangesFeed: true })
+      await refreshWorker.run({ useChangesFeed: true })
     },
+  })
+
+  // Subscribe to settings changes to react to active knobs.
+  serverSettings.on('change', ({ patch }) => {
+    // tmdbToken change → swap the TMDB client on the refresh worker.
+    // In-flight requests on the old client complete; subsequent calls use
+    // the new auth header. No process restart needed.
+    if (patch.tmdbToken !== undefined) {
+      const newTmdb = createTmdbProvider(patch.tmdbToken ?? undefined, cfg.cacheDir)
+      refreshWorker.setTmdb(newTmdb)
+      console.log(`MetadataRefresh: TMDB client ${newTmdb ? 'updated' : 'cleared'} after token change`)
+    }
+
+    // scanCronHour change → reschedule nightly scan.
+    if (patch.scanCronHour !== undefined) {
+      scheduleHandle.stop()
+      scheduleHandle = startDailySchedule({
+        hourLocal: patch.scanCronHour,
+        catchUpIfOlderThanMs: 36 * 60 * 60 * 1000,
+        lastFiredAt: lastScan,
+        task: async () => {
+          await scanManager.request({ trigger: 'cron', paths: [] })
+          await refreshWorker.run({ useChangesFeed: true })
+        },
+      })
+      console.log(`Scheduler: rescheduled nightly scan to ${patch.scanCronHour}:00 local time`)
+    }
+
+    // watchFs / watchDebounceMs change → restart watcher.
+    if (patch.watchFs !== undefined || patch.watchDebounceMs !== undefined) {
+      if (watcherHandle) {
+        watcherHandle.stop()
+        watcherHandle = null
+      }
+      const s = serverSettings.get()
+      if (s.watchFs) {
+        watcherHandle = startWatcher(
+          { roots: [...cfg.moviesRoots, ...cfg.showsRoots], debounceMs: s.watchDebounceMs },
+          scanManager,
+        )
+        console.log('Watcher: restarted after settings change')
+      } else {
+        console.log('Watcher: stopped (watchFs disabled)')
+      }
+    }
   })
 }
 

@@ -1,5 +1,5 @@
 // sdk/src/client.ts
-import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem } from './types.ts'
+import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch } from './types.ts'
 import type { Preferences } from './preferences.ts'
 import { detectCapabilities } from './capabilities.ts'
 import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
@@ -14,6 +14,19 @@ export interface PlayOptions extends Omit<PlaybackSessionOptions, 'sessionInfo' 
   subtitleTrackIndex?: number | null
   startPositionMs?: number
   autoCleanup?: boolean
+}
+
+/**
+ * Returns true when an error thrown by HorizonClient indicates the caller's
+ * role was insufficient — typically because an admin demoted themselves and
+ * then attempted a privileged mutation. The web client should use this to
+ * redirect to the Personal tab and show "Your role changed."
+ */
+export function isRoleChangedError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err as Error & { code?: string }).code === 'caller-forbidden'
+  )
 }
 
 export class HorizonClient {
@@ -67,6 +80,12 @@ export class HorizonClient {
       this.fetch<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) =>
       this.fetch<void>(`/users/${id}`, { method: 'DELETE' }),
+  }
+
+  readonly settings = {
+    getServer: () => this.fetch<ServerSettings>('/settings/server'),
+    patchServer: (patch: ServerSettingsPatch) =>
+      this.fetch<ServerSettings>('/settings/server', { method: 'PATCH', body: JSON.stringify(patch) }),
   }
 
   readonly progress = {

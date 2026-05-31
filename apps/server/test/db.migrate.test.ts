@@ -36,6 +36,8 @@ describe('migrate', () => {
     expect(names).toContain('scan_roots')
     expect(names).toContain('tmdb_changes_cursor')
     expect(names).toContain('scan_history')
+    // v4 additions
+    expect(names).toContain('server_settings')
   })
 
   it('enforces kind CHECK on media_items', () => {

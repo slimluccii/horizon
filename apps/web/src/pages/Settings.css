@@ -3,6 +3,30 @@
   background: var(--bg-deep);
 }
 
+/* Toast notification */
+.settings__toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  white-space: nowrap;
+  animation: settings-toast-in var(--dur-fast) var(--ease-out);
+}
+
+@keyframes settings-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 .settings__body {
   max-width: 720px;
   margin: 0 auto;
@@ -88,6 +112,31 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-dim);
 }
+
+.settings__input {
+  height: 48px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  padding: 0 16px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color var(--dur-fast);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-dim);
+}
+
+/* Remove number input spinners for a cleaner look */
+.settings__input::-webkit-inner-spin-button,
+.settings__input::-webkit-outer-spin-button { opacity: 0.5; }
 
 /* Toggle row */
 .settings__toggle-row {
@@ -243,4 +292,79 @@
   font-size: 13px;
   color: var(--danger);
   margin-top: 8px;
+}
+
+/* Token control (TMDB token field) */
+.settings__token-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  padding: 0 16px;
+}
+
+.settings__token-status {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings__token-status--set {
+  color: var(--text);
+}
+
+.settings__token-status--unset {
+  color: var(--muted);
+}
+
+.settings__token-replace {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast);
+  white-space: nowrap;
+}
+
+.settings__token-replace:hover {
+  background: var(--accent-dim);
+}
+
+.settings__token-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.settings__token-input-row .settings__input {
+  flex: 1;
+}
+
+.settings__token-cancel {
+  height: 48px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  color: var(--text-soft);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-fast);
+}
+
+.settings__token-cancel:hover {
+  color: var(--text);
 }

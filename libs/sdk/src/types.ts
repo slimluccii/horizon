@@ -13,6 +13,7 @@ export type HorizonErrorCode =
   | 'capabilities-unsupported' | 'transcode-failed' | 'file-read-error'
   | 'audio-track-invalid' | 'max-sessions' | 'probe-failed'
   | 'session-destroyed' | 'network-error'
+  | 'caller-forbidden'
 
 export interface HorizonError {
   code: HorizonErrorCode
@@ -192,3 +193,34 @@ export interface ContinueWatchingItem {
   media: MediaItem
   show?: MediaItem
 }
+
+/**
+ * Wire shape returned by GET/PATCH /settings/server.
+ * tmdbToken is masked: "set" | "unset" — never the real value.
+ */
+export interface ServerSettings {
+  // Library
+  watchedThresholdPct: number
+  scanCronHour: number
+  scanConcurrency: number
+  watchFs: boolean
+  watchDebounceMs: number
+  // Metadata
+  tmdbToken: 'set' | 'unset'
+  metadataBatchSize: number
+  metadataMaxAgeMovieDays: number
+  metadataMaxAgeShowDays: number
+  metadataMaxAgeEpDays: number
+  // Playback
+  maxSessions: number
+  maxRenditions: number
+  wsGraceMs: number
+  wsAttachMs: number
+  forceEncoder: string | null
+  tonemapOperator: string
+  tonemapParam: number | null
+  tonemapDesat: number | null
+  updatedAt: number
+}
+
+export type ServerSettingsPatch = Partial<Omit<ServerSettings, 'tmdbToken' | 'updatedAt'> & { tmdbToken?: string | null }>

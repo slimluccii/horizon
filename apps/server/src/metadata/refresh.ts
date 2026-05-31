@@ -32,7 +32,7 @@ export const DEFAULT_REFRESH_CONFIG: MetadataRefreshConfig = {
 
 export interface MetadataRefreshDeps {
   media: MediaRepo
-  tmdb: TmdbProvider
+  tmdb: TmdbProvider | null
   changesCursor: ChangesCursorRepo
 }
 
@@ -56,6 +56,9 @@ export function createMetadataRefreshWorker(
   cfg: MetadataRefreshConfig,
   deps: MetadataRefreshDeps,
 ) {
+  // Mutable reference so `setTmdb` can hot-swap the client on token change.
+  let tmdb: TmdbProvider | null = deps.tmdb
+
   let running = false
   let lastResult: RefreshResult | null = null
 
@@ -70,9 +73,10 @@ export function createMetadataRefreshWorker(
     const tvCursor = deps.changesCursor.get('tv')
     const movieStartTs = movieCursor?.lastWindowEnd ?? (now - cfg.initialLookbackDays * 86_400_000)
     const tvStartTs = tvCursor?.lastWindowEnd ?? (now - cfg.initialLookbackDays * 86_400_000)
-    const movieIds = await deps.tmdb.changedMovieIds(isoDate(movieStartTs), isoDate(todayEnd))
+    if (!tmdb) return { ids: [], windowEnd: todayEnd }
+    const movieIds = await tmdb.changedMovieIds(isoDate(movieStartTs), isoDate(todayEnd))
       .catch(() => [])
-    const tvIds = await deps.tmdb.changedShowIds(isoDate(tvStartTs), isoDate(todayEnd))
+    const tvIds = await tmdb.changedShowIds(isoDate(tvStartTs), isoDate(todayEnd))
       .catch(() => [])
     deps.changesCursor.set({ kind: 'movie', lastWindowEnd: todayEnd, lastFetchedAt: now })
     deps.changesCursor.set({ kind: 'tv', lastWindowEnd: todayEnd, lastFetchedAt: now })
@@ -108,11 +112,12 @@ export function createMetadataRefreshWorker(
 
   async function refreshOne(pick: StaleMetadataPick): Promise<boolean> {
     const now = Date.now()
+    if (!tmdb) return false
     if (pick.kind === 'movie') {
-      let m = pick.tmdbId ? await deps.tmdb.movieByTmdbId(pick.tmdbId) : null
-      if (!m && pick.externalIds.tmdb) m = await deps.tmdb.movieByTmdbId(pick.externalIds.tmdb)
-      if (!m && pick.externalIds.imdb) m = await deps.tmdb.movieByImdbId(pick.externalIds.imdb)
-      if (!m) m = await deps.tmdb.searchMovie(pick.title, pick.sortYear ?? undefined)
+      let m = pick.tmdbId ? await tmdb.movieByTmdbId(pick.tmdbId) : null
+      if (!m && pick.externalIds.tmdb) m = await tmdb.movieByTmdbId(pick.externalIds.tmdb)
+      if (!m && pick.externalIds.imdb) m = await tmdb.movieByImdbId(pick.externalIds.imdb)
+      if (!m) m = await tmdb.searchMovie(pick.title, pick.sortYear ?? undefined)
       if (!m) { deps.media.markMetadataFailed(pick.id, now); return false }
 
       const existing = deps.media.getInternal(pick.id)
@@ -142,10 +147,10 @@ export function createMetadataRefreshWorker(
     }
 
     if (pick.kind === 'show') {
-      let s = pick.tmdbId ? await deps.tmdb.showByTmdbId(pick.tmdbId) : null
-      if (!s && pick.externalIds.tmdb) s = await deps.tmdb.showByTmdbId(pick.externalIds.tmdb)
-      if (!s && pick.externalIds.tvdb) s = await deps.tmdb.showByTvdbId(pick.externalIds.tvdb)
-      if (!s) s = await deps.tmdb.searchShow(pick.title)
+      let s = pick.tmdbId ? await tmdb.showByTmdbId(pick.tmdbId) : null
+      if (!s && pick.externalIds.tmdb) s = await tmdb.showByTmdbId(pick.externalIds.tmdb)
+      if (!s && pick.externalIds.tvdb) s = await tmdb.showByTvdbId(pick.externalIds.tvdb)
+      if (!s) s = await tmdb.searchShow(pick.title)
       if (!s) { deps.media.markMetadataFailed(pick.id, now); return false }
 
       const existing = deps.media.getInternal(pick.id)
@@ -176,7 +181,7 @@ export function createMetadataRefreshWorker(
       deps.media.markMetadataFailed(pick.id, now)
       return false
     }
-    const ep = await deps.tmdb.episode(showTmdbId, pick.season, pick.episode)
+    const ep = await tmdb.episode(showTmdbId, pick.season, pick.episode)
     if (!ep) { deps.media.markMetadataFailed(pick.id, now); return false }
 
     const existing = deps.media.getInternal(pick.id)
@@ -209,11 +214,22 @@ export function createMetadataRefreshWorker(
 
   return {
     /**
+     * Swap the TMDB client (called on `tmdbToken` settings change).
+     * In-flight requests on the old client complete naturally;
+     * subsequent calls in the same or future run use the new client.
+     */
+    setTmdb(provider: TmdbProvider | null): void {
+      tmdb = provider
+    },
+
+    /**
      * Run one refresh pass. Returns counts; updates cursor + media rows.
      * Concurrent calls coalesce — second caller waits for first to finish
      * and gets the same result (cheap deduplication).
+     * Returns early with zero counts if no TMDB client is configured.
      */
     async run(opts: { useChangesFeed: boolean }): Promise<RefreshResult> {
+      if (!tmdb) return { refreshed: 0, failed: 0, changesFeedHits: 0, durationMs: 0 }
       if (running) {
         // Wait until current run finishes, return its result.
         while (running) await new Promise(r => setTimeout(r, 50))
@@ -262,7 +278,7 @@ export function createMetadataRefreshWorker(
     },
 
     status() {
-      return { running, lastResult }
+      return { running, lastResult, configured: tmdb !== null }
     },
   }
 }

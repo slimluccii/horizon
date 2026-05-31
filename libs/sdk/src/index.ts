@@ -1,5 +1,5 @@
 // sdk/src/index.ts
-export { HorizonClient } from './client.ts'
+export { HorizonClient, isRoleChangedError } from './client.ts'
 export { PlaybackSession } from './session.ts'
 export type { PlaybackSessionOptions, SessionState } from './session.ts'
 export { detectCapabilities } from './capabilities.ts'
@@ -12,6 +12,7 @@ export type {
   ShowSummary, SeasonSummary,
   ExternalIds, MovieMetadata, ShowMetadataInfo, EpisodeMetadata, Person,
   User, WatchProgress, ContinueWatchingItem,
+  ServerSettings, ServerSettingsPatch,
 } from './types.ts'
 export { tmdbImageUrl } from './metadata.ts'
 export { PreferencesSchema, SUPPORTED_LANGUAGES } from './preferences.ts'

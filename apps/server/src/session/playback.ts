@@ -22,12 +22,15 @@ import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { MediaRepo, MediaItemRow } from '../repos/media.ts'
 import type { UserRepo } from '../repos/users.ts'
+import type { ServerSettings } from '../repos/serverSettings.ts'
 import type { SessionManager } from './manager.ts'
 import type { Session } from './types.ts'
 import type { ProbeResult } from '../scanner/probe.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import type { PlaybackPlan, ClientCapabilities, PlaybackMethod } from '../transcode/plan.ts'
 import type { RenderContext } from '../transcode/render.ts'
+import type { ToneMapConfig, ToneMapOperator } from '../transcode/tonemap.ts'
+import { isToneMapOperator } from '../transcode/tonemap.ts'
 import { buildPlan } from '../transcode/plan.ts'
 import {
   createSessionDir,
@@ -85,6 +88,7 @@ export interface PlaybackOrchestratorDeps {
   media: MediaRepo
   users: UserRepo
   sessions: SessionManager
+  serverSettings: ServerSettings
   /** Injection point for tests. Defaults to the real `spawnFfmpeg`. */
   spawner?: Spawner
   /** Injection point for tests. Defaults to the real `extractSubtitles`. */
@@ -98,7 +102,7 @@ class PlaybackError extends Error {
 }
 
 export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): PlaybackOrchestrator {
-  const { cfg, hwAccel, media, users, sessions } = deps
+  const { cfg, hwAccel, media, users, sessions, serverSettings } = deps
   const spawner: Spawner = deps.spawner ?? defaultSpawnFfmpeg
   const extractSubtitles: SubtitleExtractor = deps.extractSubtitles ?? defaultExtractSubtitles
 
@@ -114,7 +118,11 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         throw new PlaybackError('user-not-found', 'User not found')
       }
 
-      if (sessions.size() >= cfg.maxSessions) {
+      // Read playback knobs live from serverSettings so changes take effect
+      // on the next session create without a server restart.
+      const liveSettings = serverSettings.get()
+
+      if (sessions.size() >= liveSettings.maxSessions) {
         throw new PlaybackError('max-sessions', 'Server at session capacity')
       }
 
@@ -126,8 +134,8 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         capabilities: input.capabilities,
         hwAccel,
         audioTrackIndex,
-        maxRenditions: cfg.maxRenditions,
-        toneMap: cfg.toneMap,
+        maxRenditions: liveSettings.maxRenditions,
+        toneMap: settingsToToneMap(liveSettings),
       })
 
       const session = sessions.create({
@@ -224,5 +232,22 @@ function mediaItemToProbeView(item: MediaItemRow): ProbeResult {
     audioTracks: item.audioTracks ?? [],
     subtitleTracks: item.subtitleTracks ?? [],
     container: item.container ?? '',
+  }
+}
+
+/** Build a ToneMapConfig from the live ServerSettings row.
+ *  Falls back to 'hable' when the stored operator is unrecognised
+ *  (guards against stale DB values after a downgrade). peak and
+ *  postCorrection are not stored — use in-code defaults instead. */
+function settingsToToneMap(s: ReturnType<ServerSettings['get']>): ToneMapConfig {
+  const operator: ToneMapOperator = isToneMapOperator(s.tonemapOperator)
+    ? (s.tonemapOperator as ToneMapOperator)
+    : 'hable'
+  return {
+    operator,
+    param: s.tonemapParam ?? undefined,
+    desat: s.tonemapDesat ?? undefined,
+    // peak and postCorrection are not UI-editable in v1 — keep in-code defaults.
+    postCorrection: true,
   }
 }

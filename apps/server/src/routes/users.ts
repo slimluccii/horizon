@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import { sendNotFound, badRequest, errorReply } from './errors.ts'
-import { SUPPORTED_LANGUAGES } from '@horizon/sdk/preferences'
+import { PreferencesSchema } from '@horizon/sdk/preferences'
 
 function resolveCallerRole(users: UserRepo, req: FastifyRequest): { id: string; role: 'owner' | 'admin' | 'member' } | null {
   const hdr = req.headers['x-horizon-user']
@@ -12,26 +12,15 @@ function resolveCallerRole(users: UserRepo, req: FastifyRequest): { id: string; 
   return u ? { id: u.id, role: u.role } : null
 }
 
-// Preferences schema re-declared with the server's Zod instance (v4) to avoid
-// cross-version Zod schema mixing. Shape must stay in sync with @horizon/sdk/preferences.
-const languageCodes = SUPPORTED_LANGUAGES.map(l => l.code) as [string, ...string[]]
-const PreferencesSchemaLocal = z.object({
-  theme: z.enum(['dark', 'light']).optional(),
-  audioLanguage: z.enum(languageCodes).optional(),
-  subtitleLanguage: z.enum(languageCodes).optional(),
-  subtitlesEnabled: z.boolean().optional(),
-  preferredQuality: z.enum(['auto', '1080p', '720p', '480p']).optional(),
-}).strict()
-
 const CreateBody = z.object({
   name: z.string().min(1).max(100),
   avatar: z.string().nullable().optional(),
-  preferences: PreferencesSchemaLocal.optional(),
+  preferences: PreferencesSchema.optional(),
 })
 const PatchBody = z.object({
   name: z.string().min(1).max(100).optional(),
   avatar: z.string().nullable().optional(),
-  preferences: PreferencesSchemaLocal.optional(),
+  preferences: PreferencesSchema.optional(),
   role: z.enum(['owner', 'admin', 'member']).optional(),
 })
 
@@ -75,11 +64,11 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
     }
     try {
       const { preferences, ...rest } = parse.data
-      const updateData: import('../repos/users.ts').UserPatch = rest
+      let updateData: typeof parse.data = rest
       if (preferences !== undefined) {
         const existing = users.get(req.params.id)
         if (!existing) return sendNotFound(reply, 'user-not-found', 'User not found')
-        updateData.preferences = { ...existing.preferences, ...(preferences as Record<string, unknown>) }
+        updateData = { ...rest, preferences: { ...existing.preferences, ...preferences } }
       }
       const u = users.update(req.params.id, updateData)
       if (!u) return sendNotFound(reply, 'user-not-found', 'User not found')

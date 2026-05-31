@@ -68,3 +68,30 @@ test('admin can demote another admin', async ({ page, request }) => {
 
   await expect(admin2Row.locator('select')).toHaveValue('member')
 })
+
+test('self-demote: admin demotes self → redirected to Personal tab + toast', async ({ page, request }) => {
+  const ownerRes = await request.post(`${BASE}/users`, { data: { name: 'Owner' } })
+  const owner = await ownerRes.json()
+  const adminRes = await request.post(`${BASE}/users`, { data: { name: 'Self' } })
+  const admin = await adminRes.json()
+
+  // Promote admin via API (owner header required)
+  await request.patch(`${BASE}/users/${admin.id}`, {
+    data: { role: 'admin' },
+    headers: { 'x-horizon-user': owner.id },
+  })
+
+  // Switch to admin user, open Settings > Profiles
+  await page.goto(`${BASE}/profiles`)
+  await page.getByText('Self').click()
+  await page.goto(`${BASE}/settings`)
+  await page.getByRole('button', { name: 'Profiles' }).click()
+
+  // Demote self (Self row — non-owner, should have a select)
+  const selfRow = page.locator('.settings__profile-row', { hasText: 'Self' })
+  await selfRow.locator('select').selectOption('member')
+
+  // Should redirect to Personal tab and show toast
+  await expect(page.getByRole('button', { name: 'Personal' })).toHaveClass(/is-active/)
+  await expect(page.getByRole('status')).toHaveText('Your role changed.')
+})
