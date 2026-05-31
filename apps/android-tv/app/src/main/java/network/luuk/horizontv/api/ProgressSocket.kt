@@ -41,7 +41,7 @@ class ProgressSocket(
 
     /** Abstraction over opening a WebSocket so tests can avoid a real network. */
     fun interface Connector {
-        fun open(wsUrl: String, listener: WebSocketListener): WebSocket?
+        fun open(wsUrl: String, listener: WebSocketListener): WebSocket
     }
 
     private val json = Json { encodeDefaults = true }
