@@ -47,7 +47,12 @@ export async function extractSubtitles(
       stderrBuf = (stderrBuf + chunk.toString()).slice(-4096)
     })
 
+    // Distinguish a timeout-kill (an error) from a session-cleanup kill
+    // (expected, not an error). Both surface as a SIGKILL in the exit handler,
+    // so the flag disambiguates them.
+    let timedOut = false
     const timer = setTimeout(() => {
+      timedOut = true
       proc.kill('SIGKILL')
       reject(new Error(`subtitle extraction timed out after ${EXTRACT_TIMEOUT_MS}ms`))
     }, EXTRACT_TIMEOUT_MS)
@@ -62,6 +67,7 @@ export async function extractSubtitles(
       clearTimeout(timer)
       if (session) session.subtitleProcess = undefined
       if (code === 0) resolve()
+      else if (timedOut) reject(new Error(`subtitle extraction timed out after ${EXTRACT_TIMEOUT_MS}ms`))
       else if (signal === 'SIGTERM' || signal === 'SIGKILL') resolve() // killed by destroy — not an error
       else reject(new Error(`ffmpeg subtitle extraction exited code=${code}; tail: ${stderrBuf}`))
     })
