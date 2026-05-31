@@ -120,6 +120,86 @@ describe('mediaRepo.softDeleteMissing', () => {
     repo.softDeleteMissing(new Set())
     expect(repo.getInternal('a')!.deletedAt).toBe(500)
   })
+
+  it('commits when all INSERTs succeed (b and c soft-deleted, temp table cleaned up)', () => {
+    const { db, repo } = freshRepo()
+    const a = repo.upsertMovie(movie({ id: 'a', filePath: '/a.mkv' }))
+    repo.upsertMovie(movie({ id: 'b', filePath: '/b.mkv' }))
+    repo.upsertMovie(movie({ id: 'c', filePath: '/c.mkv' }))
+    repo.softDeleteMissing(new Set([a.id]))
+    expect(repo.getInternal('b')!.deletedAt).not.toBeNull()
+    expect(repo.getInternal('c')!.deletedAt).not.toBeNull()
+    // temp table dropped
+    const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
+    expect(t).toBeUndefined()
+  })
+
+  it('rolls back all changes if the INSERT loop throws mid-way', () => {
+    const { db, repo } = freshRepo()
+    repo.upsertMovie(movie({ id: 'a', filePath: '/a.mkv' }))
+    repo.upsertMovie(movie({ id: 'b', filePath: '/b.mkv' }))
+    repo.upsertMovie(movie({ id: 'c', filePath: '/c.mkv' }))
+    // A Set-like whose iterator yields 'a' then throws, simulating a corrupt
+    // item mid-loop. The UPDATE must never run, so nothing is soft-deleted.
+    const exploding = {
+      [Symbol.iterator]() {
+        let step = 0
+        return {
+          next() {
+            step += 1
+            if (step === 1) return { value: 'a', done: false }
+            throw new Error('corrupt seen-id stream')
+          },
+        }
+      },
+    } as unknown as Set<string>
+    expect(() => repo.softDeleteMissing(exploding)).toThrow('corrupt seen-id stream')
+    expect(repo.getInternal('a')!.deletedAt).toBeNull()
+    expect(repo.getInternal('b')!.deletedAt).toBeNull()
+    expect(repo.getInternal('c')!.deletedAt).toBeNull()
+    const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
+    expect(t).toBeUndefined()
+  })
+})
+
+describe('mediaRepo.softDeleteMissingUnder', () => {
+  it('commits — only items under the prefix and missing from seenIds are deleted', () => {
+    const { db, repo } = freshRepo()
+    repo.upsertMovie(movie({ id: 'ma', filePath: '/movies/a.mkv' }))
+    repo.upsertMovie(movie({ id: 'mb', filePath: '/movies/b.mkv' }))
+    repo.upsertMovie(movie({ id: 'oc', filePath: '/other/c.mkv' }))
+    repo.softDeleteMissingUnder('/movies/', new Set(['ma']))
+    expect(repo.getInternal('ma')!.deletedAt).toBeNull()
+    expect(repo.getInternal('mb')!.deletedAt).not.toBeNull()
+    expect(repo.getInternal('oc')!.deletedAt).toBeNull() // outside prefix
+    const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
+    expect(t).toBeUndefined()
+  })
+
+  it('rolls back if the INSERT loop throws mid-way (nothing deleted)', () => {
+    const { db, repo } = freshRepo()
+    repo.upsertMovie(movie({ id: 'ma', filePath: '/movies/a.mkv' }))
+    repo.upsertMovie(movie({ id: 'mb', filePath: '/movies/b.mkv' }))
+    repo.upsertMovie(movie({ id: 'oc', filePath: '/other/c.mkv' }))
+    const exploding = {
+      [Symbol.iterator]() {
+        let step = 0
+        return {
+          next() {
+            step += 1
+            if (step === 1) return { value: 'ma', done: false }
+            throw new Error('boom')
+          },
+        }
+      },
+    } as unknown as Set<string>
+    expect(() => repo.softDeleteMissingUnder('/movies/', exploding)).toThrow('boom')
+    expect(repo.getInternal('ma')!.deletedAt).toBeNull()
+    expect(repo.getInternal('mb')!.deletedAt).toBeNull()
+    expect(repo.getInternal('oc')!.deletedAt).toBeNull()
+    const t = db.prepare("SELECT name FROM sqlite_temp_master WHERE name = 'seen'").get()
+    expect(t).toBeUndefined()
+  })
 })
 
 describe('mediaRepo.listMovies / listShows / getEpisodes', () => {

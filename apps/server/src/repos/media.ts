@@ -373,8 +373,12 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       // Match file_path begins-with prefix; trailing-slash sensitive so we
       // don't match `/movies/Foo (2010)` when scanning `/movies/Foo`.
       const like = pathPrefix.endsWith('/') ? `${pathPrefix}%` : `${pathPrefix}/%`
-      db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
+      // Wrap the whole populate-then-update sequence in a transaction so a
+      // failure partway through the INSERT loop (or the UPDATE) leaves the DB
+      // untouched — never soft-deleting items off an incomplete `seen` set.
       try {
+        db.exec('BEGIN')
+        db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
         db.exec('DELETE FROM seen')
         const ins = db.prepare('INSERT OR IGNORE INTO seen (id) VALUES (?)')
         for (const id of seenIds) ins.run(id)
@@ -385,7 +389,11 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
              AND file_path LIKE ?
              AND id NOT IN (SELECT id FROM seen)`,
         ).run(now, like)
+        db.exec('COMMIT')
         return res.changes
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
       } finally {
         db.exec('DROP TABLE IF EXISTS seen')
       }
@@ -394,11 +402,14 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
     /**
      * Soft-delete rows whose id is NOT in seenIds and are not already deleted.
      * Uses a temp table to avoid SQLite's parameter-count limits on huge libraries.
+     * Wrapped in an explicit transaction so a mid-loop failure rolls back
+     * atomically rather than soft-deleting against a partial `seen` set.
      */
     softDeleteMissing(seenIds) {
       const now = Date.now()
-      db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
       try {
+        db.exec('BEGIN')
+        db.exec('CREATE TEMP TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY)')
         db.exec('DELETE FROM seen')
         const ins = db.prepare('INSERT OR IGNORE INTO seen (id) VALUES (?)')
         for (const id of seenIds) ins.run(id)
@@ -408,7 +419,11 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
            WHERE deleted_at IS NULL
              AND id NOT IN (SELECT id FROM seen)`,
         ).run(now)
+        db.exec('COMMIT')
         return res.changes
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
       } finally {
         db.exec('DROP TABLE IF EXISTS seen')
       }
