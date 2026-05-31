@@ -79,7 +79,7 @@ describe('MetadataRefreshWorker', () => {
   function fakeTmdb(): TmdbProvider {
     let movieCalls = 0
     return {
-      async movieByTmdbId(id) {
+      async movieByTmdbId(id: number) {
         movieCalls++
         return { kind: 'movie', tmdbId: id, title: `Movie ${id}` } as any
       },
@@ -89,7 +89,7 @@ describe('MetadataRefreshWorker', () => {
       async showByTvdbId() { return null },
       async searchShow() { return null },
       async episode() { return null },
-      async changedMovieIds(start, end) {
+      async changedMovieIds(start: string, end: string) {
         if (start && end) return [42]
         return []
       },

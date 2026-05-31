@@ -5,6 +5,6 @@ type Props = ComponentPropsWithRef<"button">;
 
 export const Button = ({ className, ...rest }: Props) => {
   return (
-    <button className={'button' + className} {...rest} />
+    <button className={`button${className ? ` ${className}` : ''}`} {...rest} />
   );
 };
