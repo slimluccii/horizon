@@ -141,4 +141,56 @@ describe('MetadataRefreshWorker', () => {
     expect(r1.refreshed + r2.refreshed).toBeGreaterThanOrEqual(1)
     expect((tmdb as any)._movieCalls).toBe(1)                 // de-duplicated
   })
+
+  describe('changes-feed cursor advances only on successful fetch (#49)', () => {
+    it('does not advance movie cursor if movie fetch fails but tv succeeds', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const tmdb = {
+        ...fakeTmdb(),
+        async changedMovieIds() { throw new Error('network down') },
+        async changedShowIds() { return [42] },
+      } as any
+      const cursor = createChangesCursorRepo(db)
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb, changesCursor: cursor },
+      )
+      await worker.run({ useChangesFeed: true })
+      // Movie fetch threw → cursor must stay null (window re-queried next run).
+      expect(cursor.get('movie')).toBeNull()
+      // TV fetch succeeded → cursor advanced.
+      expect(cursor.get('tv')).not.toBeNull()
+      expect(cursor.get('tv')!.lastWindowEnd).toBeGreaterThan(0)
+    })
+
+    it('does not advance any cursor if both changes fetches fail', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const tmdb = {
+        ...fakeTmdb(),
+        async changedMovieIds() { throw new Error('movie down') },
+        async changedShowIds() { throw new Error('tv down') },
+      } as any
+      const cursor = createChangesCursorRepo(db)
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb, changesCursor: cursor },
+      )
+      await worker.run({ useChangesFeed: true })
+      expect(cursor.get('movie')).toBeNull()
+      expect(cursor.get('tv')).toBeNull()
+    })
+
+    it('advances both cursors when both fetches succeed', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const tmdb = fakeTmdb()
+      const cursor = createChangesCursorRepo(db)
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb, changesCursor: cursor },
+      )
+      await worker.run({ useChangesFeed: true })
+      expect(cursor.get('movie')).not.toBeNull()
+      expect(cursor.get('tv')).not.toBeNull()
+    })
+  })
 })

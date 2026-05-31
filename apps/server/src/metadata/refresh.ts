@@ -66,21 +66,37 @@ export function createMetadataRefreshWorker(
     return new Date(ts).toISOString().slice(0, 10)
   }
 
-  async function pullChanges(): Promise<{ ids: number[]; windowEnd: number }> {
+  async function pullChanges(): Promise<{
+    ids: number[]
+    windowEnd: number
+    succeeded: { movie: boolean; tv: boolean }
+  }> {
     const now = Date.now()
     const todayEnd = now
     const movieCursor = deps.changesCursor.get('movie')
     const tvCursor = deps.changesCursor.get('tv')
     const movieStartTs = movieCursor?.lastWindowEnd ?? (now - cfg.initialLookbackDays * 86_400_000)
     const tvStartTs = tvCursor?.lastWindowEnd ?? (now - cfg.initialLookbackDays * 86_400_000)
-    if (!tmdb) return { ids: [], windowEnd: todayEnd }
-    const movieIds = await tmdb.changedMovieIds(isoDate(movieStartTs), isoDate(todayEnd))
-      .catch(() => [])
-    const tvIds = await tmdb.changedShowIds(isoDate(tvStartTs), isoDate(todayEnd))
-      .catch(() => [])
-    deps.changesCursor.set({ kind: 'movie', lastWindowEnd: todayEnd, lastFetchedAt: now })
-    deps.changesCursor.set({ kind: 'tv', lastWindowEnd: todayEnd, lastFetchedAt: now })
-    return { ids: [...movieIds, ...tvIds], windowEnd: todayEnd }
+    if (!tmdb) return { ids: [], windowEnd: todayEnd, succeeded: { movie: false, tv: false } }
+    // Run both fetches independently. We only advance a kind's cursor when its
+    // fetch actually SUCCEEDED — a failure (or empty list from .catch) must not
+    // advance the window, or we'd silently skip the items that moved during a
+    // failed window. allSettled lets us distinguish success from failure (an
+    // empty array is a legitimate success and must not be confused with a
+    // failure, which the old `.catch(() => [])` could not tell apart).
+    const [movieRes, tvRes] = await Promise.allSettled([
+      tmdb.changedMovieIds(isoDate(movieStartTs), isoDate(todayEnd)),
+      tmdb.changedShowIds(isoDate(tvStartTs), isoDate(todayEnd)),
+    ])
+    const movieOk = movieRes.status === 'fulfilled'
+    const tvOk = tvRes.status === 'fulfilled'
+    const movieIds = movieOk ? movieRes.value : []
+    const tvIds = tvOk ? tvRes.value : []
+    return {
+      ids: [...movieIds, ...tvIds],
+      windowEnd: todayEnd,
+      succeeded: { movie: movieOk, tv: tvOk },
+    }
   }
 
   /** Convert a TMDB id list to local picks by joining on our tmdb_id column. */
@@ -244,7 +260,16 @@ export function createMetadataRefreshWorker(
         const work: StaleMetadataPick[] = []
 
         if (opts.useChangesFeed) {
-          const { ids } = await pullChanges()
+          const now = Date.now()
+          const { ids, windowEnd, succeeded } = await pullChanges()
+          // Only advance the cursor for kinds whose fetch succeeded; a failed
+          // kind keeps its old cursor so the next run re-queries that window.
+          if (succeeded.movie) {
+            deps.changesCursor.set({ kind: 'movie', lastWindowEnd: windowEnd, lastFetchedAt: now })
+          }
+          if (succeeded.tv) {
+            deps.changesCursor.set({ kind: 'tv', lastWindowEnd: windowEnd, lastFetchedAt: now })
+          }
           const picks = changesToPicks(ids)
           changesFeedHits = picks.length
           work.push(...picks.slice(0, cfg.changesFeedExtraCap))
