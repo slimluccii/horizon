@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo, type MediaRepo, type MovieUpsert, type ShowUpsert, type EpisodeUpsert } from '../src/repos/media.ts'
+import { createMediaRepo, type MediaRepo, type MediaItem, type MediaItemRow, type MovieUpsert, type ShowUpsert, type EpisodeUpsert } from '../src/repos/media.ts'
 
 function freshRepo(): { db: DatabaseSync; repo: MediaRepo } {
   const db = openDatabase(':memory:')
@@ -156,5 +156,82 @@ describe('mediaRepo.getById', () => {
     repo.upsertMovie(movie())
     const m = repo.getById('mv-1')
     expect(m!.hdr).toEqual({ dv: true, hdr10: true, hdr10plus: false })
+  })
+})
+
+describe('Type Safety: MediaItem vs MediaItemRow', () => {
+  // Compile-time assertions: no runtime effect, but the @ts-expect-error lines
+  // must trigger a type error or the build fails. They prove that the two
+  // shapes are NOT interchangeable — a route cannot mistake a server-internal
+  // row for the wire-safe projection.
+  //
+  // Plain assignment (`const item: MediaItem = row`) is allowed by structural
+  // subtyping (extra props are fine when widening a variable). To actually
+  // catch the leak we assert *exact* shape equivalence: a MediaItemRow has
+  // extra fields, so it is not the SAME shape as MediaItem.
+
+  // True iff A and B are exactly the same type (mutually assignable, no excess).
+  type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+
+  it('MediaItemRow is NOT shape-equivalent to MediaItem (carries server internals)', () => {
+    // Equal<MediaItem, MediaItem> is true; Equal<MediaItemRow, MediaItem> is false.
+    const sameAsItself: Exact<MediaItem, MediaItem> = true
+    // @ts-expect-error MediaItemRow has extra server-internal fields (filePath,
+    // bookkeeping) so it is NOT the same shape as the wire-safe MediaItem.
+    const rowEqualsItem: Exact<MediaItemRow, MediaItem> = true
+    expect(sameAsItself).toBe(true)
+    expect(rowEqualsItem).toBe(true)
+  })
+
+  it('a constructed MediaItemRow exposes server-internal fields the wire shape lacks', () => {
+    const row: MediaItemRow = {
+      id: 'mv-1',
+      kind: 'movie',
+      parentId: null,
+      title: 'Oppenheimer',
+      year: 2023,
+      season: null,
+      episode: null,
+      durationSec: 10822,
+      resolution: '3840x2160',
+      videoCodec: 'hevc',
+      container: 'matroska',
+      hdr: { dv: true, hdr10: true, hdr10plus: false },
+      audioTracks: [],
+      subtitleTracks: [],
+      externalIds: { tmdb: 872585 },
+      metadata: null,
+      filePath: '/x/Oppenheimer.mkv',
+      mtimeMs: 1000,
+      sizeBytes: 50_000_000,
+      firstSeenAt: 1,
+      lastSeenAt: 1,
+      deletedAt: null,
+      tmdbId: 872585,
+      metadataFetchedAt: null,
+      metadataFailedAt: null,
+      metadataFailedCount: 0,
+    }
+    expect(row.filePath).toBe('/x/Oppenheimer.mkv')
+    // A MediaItem object literal cannot carry filePath (excess-property check).
+    const item: MediaItem = {
+      id: 'mv-1',
+      kind: 'movie',
+      parentId: null,
+      title: 'Oppenheimer',
+      year: 2023,
+      season: null,
+      episode: null,
+      durationSec: 10822,
+      resolution: '3840x2160',
+      videoCodec: 'hevc',
+      container: 'matroska',
+      hdr: null,
+      audioTracks: null,
+      subtitleTracks: null,
+      externalIds: {},
+      metadata: null,
+    }
+    expect('filePath' in item).toBe(false)
   })
 })

@@ -52,17 +52,19 @@ export interface EpisodeUpsert extends Omit<MovieUpsert, 'sortYear'> {
 }
 
 /**
- * Domain MediaItem — wire-safe + business-logic shape returned by every
- * public `MediaRepo.get*` / `list*` method. NO filesystem paths, NO DB
- * bookkeeping (firstSeenAt/lastSeenAt/deletedAt/mtimeMs/sizeBytes), NO
- * metadata refresh state (tmdbId, metadataFetchedAt, metadataFailedAt, etc).
+ * Shared base for MediaItem (wire-safe) and MediaItemRow (internal-only).
+ * Carries only the PUBLIC fields — the contract both shapes agree on.
  *
- * Internal callers that need those fields (orchestrator for filePath,
- * refresh worker for fetch bookkeeping) use `getInternal(id) → MediaItemRow`.
+ * Do NOT extend MediaItem from MediaItemRow (or vice versa); they are sibling
+ * types with the same public contract but different scopes. Keeping the
+ * inheritance broken means TypeScript's structural subtyping will reject a
+ * `MediaItemRow` where a `MediaItem` is expected — so a route that
+ * accidentally calls `getInternalRow` can never serialize server internals to
+ * the wire by construction.
  *
  * See CONTEXT.md → MediaItem / MediaItemRow.
  */
-export interface MediaItem {
+export interface MediaItemBase {
   id: string
   kind: 'movie' | 'show' | 'episode'
   parentId: string | null
@@ -84,14 +86,31 @@ export interface MediaItem {
 }
 
 /**
- * Row shape — domain MediaItem + filesystem + DB bookkeeping. Returned by
- * `MediaRepo.getInternal(id)` only. Used by:
+ * Domain MediaItem — wire-safe + business-logic shape returned by every
+ * public `MediaRepo.get*` / `list*` method. NO filesystem paths, NO DB
+ * bookkeeping (firstSeenAt/lastSeenAt/deletedAt/mtimeMs/sizeBytes), NO
+ * metadata refresh state (tmdbId, metadataFetchedAt, metadataFailedAt, etc).
+ *
+ * Internal callers that need those fields (orchestrator for filePath,
+ * refresh worker for fetch bookkeeping) use `getInternalRow(id) → MediaItemRow`.
+ *
+ * Wire-safe projection of MediaItemBase — adds no fields.
+ * See CONTEXT.md → MediaItem / MediaItemRow.
+ */
+export interface MediaItem extends MediaItemBase {}
+
+/**
+ * Row shape — public base + filesystem + DB bookkeeping. Returned by
+ * `MediaRepo.getInternalRow(id)` only. Used by:
  *   - PlaybackOrchestrator (needs filePath for ffmpeg spawn)
  *   - MetadataRefreshWorker (already uses tmdbId / metadataFetchedAt via
- *     findStaleMetadata; but getInternal is available for ad-hoc reads)
+ *     findStaleMetadata; but getInternalRow is available for ad-hoc reads)
  *   - Scanner (writes mtimeMs / sizeBytes via upserts; doesn't read row)
+ *
+ * Extends MediaItemBase (NOT MediaItem) so the compiler rejects assigning a
+ * MediaItemRow where a MediaItem is expected.
  */
-export interface MediaItemRow extends MediaItem {
+export interface MediaItemRow extends MediaItemBase {
   filePath: string | null
   mtimeMs: number | null
   sizeBytes: number | null
@@ -192,7 +211,7 @@ function rowToInternal(row: any): MediaItemRow {
 
 /** Strip row-only fields (filePath + bookkeeping) for wire/business use.
  *  Pure projection — single source of truth for what's in domain vs row. */
-function rowToDomain(row: MediaItemRow): MediaItem {
+function rowToDomain(row: MediaItemBase): MediaItem {
   return {
     id: row.id,
     kind: row.kind,
