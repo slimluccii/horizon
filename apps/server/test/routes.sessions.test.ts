@@ -143,4 +143,20 @@ describe('POST /sessions auth', () => {
     expect(res.statusCode).toBe(200)
     expect(orch.calls[0].userId).toBe(member.id)
   })
+
+  it('maps audio-track-invalid from the orchestrator to HTTP 400', async () => {
+    const { users, serverSettings, member } = setup()
+    const orch: PlaybackOrchestrator = {
+      startPlayback() {
+        throw Object.assign(new Error('Audio track index out of bounds'), { code: 'audio-track-invalid' })
+      },
+    }
+    const app = await buildApp(users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body({ audioTrackIndex: 99 }),
+      headers: { 'x-horizon-user': member.id },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('audio-track-invalid')
+  })
 })

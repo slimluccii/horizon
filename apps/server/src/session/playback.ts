@@ -102,6 +102,7 @@ type PlaybackErrorCode =
   | typeof ErrorCodes.MEDIA_NOT_FOUND
   | typeof ErrorCodes.USER_NOT_FOUND
   | typeof ErrorCodes.MAX_SESSIONS
+  | typeof ErrorCodes.AUDIO_TRACK_INVALID
 
 class PlaybackError extends Error {
   constructor(public code: PlaybackErrorCode, message: string) {
@@ -126,6 +127,16 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         throw new PlaybackError(ErrorCodes.USER_NOT_FOUND, 'User not found')
       }
 
+      // Validate the requested audio track up-front so we fail fast at session
+      // creation rather than during ffmpeg spawn. A client that omits
+      // audioTrackIndex defaults to 0, so a file with zero audio tracks also
+      // rejects here (you cannot select an audio track that doesn't exist).
+      const requestedAudioTrack = input.audioTrackIndex ?? 0
+      const audioTrackCount = mediaItem.audioTracks?.length ?? 0
+      if (requestedAudioTrack < 0 || requestedAudioTrack >= audioTrackCount) {
+        throw new PlaybackError(ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track index out of bounds')
+      }
+
       // Read playback knobs live from serverSettings so changes take effect
       // on the next session create without a server restart.
       const liveSettings = serverSettings.get()
@@ -134,7 +145,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         throw new PlaybackError(ErrorCodes.MAX_SESSIONS, 'Server at session capacity')
       }
 
-      const audioTrackIndex = input.audioTrackIndex ?? 0
+      const audioTrackIndex = requestedAudioTrack
       const subtitleTrackIndex = input.subtitleTrackIndex ?? null
 
       const plan = buildPlan({

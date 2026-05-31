@@ -44,6 +44,7 @@ export function registerSessions(
       const code = (err as { code?: string }).code
       if (code === ErrorCodes.MEDIA_NOT_FOUND) return sendNotFound(reply, ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
       if (code === ErrorCodes.USER_NOT_FOUND) return badRequest(reply, ErrorCodes.NO_USER, 'User not found')
+      if (code === ErrorCodes.AUDIO_TRACK_INVALID) return badRequest(reply, ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track not available for this media')
       if (code === ErrorCodes.MAX_SESSIONS) return overCapacity(reply, ErrorCodes.MAX_SESSIONS, 'Server at capacity')
       throw err
     }

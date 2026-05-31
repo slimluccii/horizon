@@ -171,6 +171,58 @@ describe('PlaybackOrchestrator', () => {
     ).toThrow(expect.objectContaining({ code: 'max-sessions' }))
   })
 
+  it('throws audio-track-invalid when audioTrackIndex >= available tracks', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }), // sampleMovie has 1 audio track (index 0)
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, audioTrackIndex: 1 })
+    ).toThrow(expect.objectContaining({ code: 'audio-track-invalid' }))
+  })
+
+  it('throws audio-track-invalid when audioTrackIndex < 0', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, audioTrackIndex: -1 })
+    ).toThrow(expect.objectContaining({ code: 'audio-track-invalid' }))
+  })
+
+  it('throws audio-track-invalid for media with no audio tracks (default index 0)', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: { ...sampleMovie, audioTracks: [] } }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps })
+    ).toThrow(expect.objectContaining({ code: 'audio-track-invalid' }))
+  })
+
+  it('accepts a valid audioTrackIndex', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, audioTrackIndex: 0 })
+    ).not.toThrow()
+  })
+
   it('returns sessionInfo synchronously and resolves ready after spawn', async () => {
     const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({
