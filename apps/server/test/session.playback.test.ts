@@ -210,6 +210,47 @@ describe('PlaybackOrchestrator', () => {
     ).toThrow(expect.objectContaining({ code: 'audio-track-invalid' }))
   })
 
+  it('throws invalid-input when subtitleTrackIndex is out of bounds', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      // sampleMovie has subtitleTracks: []
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, subtitleTrackIndex: 0 })
+    ).toThrow(expect.objectContaining({ code: 'invalid-input' }))
+  })
+
+  it('accepts subtitleTrackIndex of -1 (no subtitles)', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, subtitleTrackIndex: -1 })
+    ).not.toThrow()
+  })
+
+  it('throws invalid-input when startPositionMs exceeds media duration', () => {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      // sampleMovie durationSec = 3600 → 3_600_000 ms
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+    })
+    expect(() =>
+      orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps, startPositionMs: 9_999_999 })
+    ).toThrow(expect.objectContaining({ code: 'invalid-input' }))
+  })
+
   it('accepts a valid audioTrackIndex', () => {
     const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
     const orch = createPlaybackOrchestrator({

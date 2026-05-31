@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { z } from 'zod'
 import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { MediaRepo } from '../repos/media.ts'
@@ -14,6 +15,31 @@ import { resolveCallerRole } from './authz.ts'
 
 const WS_PING_INTERVAL_MS = 15_000
 
+/**
+ * Syntactic validation for the POST /sessions body. Guarantees well-formed
+ * input (types + basic bounds) before it reaches the orchestrator. Semantic
+ * validation against the probed media (track-index bounds, startPositionMs vs
+ * duration) happens in PlaybackOrchestrator.startPlayback, which is the only
+ * layer that knows what the media actually contains. `.strict()` rejects
+ * unknown keys, matching the settings/progress route pattern.
+ */
+const ClientCapabilitiesSchema = z.object({
+  videoCodecs: z.array(z.string()),
+  audioCodecs: z.array(z.string()),
+  hdr: z.array(z.string()),
+  maxBitrate: z.number(),
+  container: z.array(z.string()),
+}).strict()
+
+const StartPlaybackBodySchema = z.object({
+  mediaId: z.string().min(1),
+  capabilities: ClientCapabilitiesSchema,
+  audioTrackIndex: z.number().int().min(0).optional(),
+  subtitleTrackIndex: z.number().int().min(-1).nullable().optional(),
+  userId: z.string().optional(),
+  startPositionMs: z.number().int().min(0).optional(),
+}).strict()
+
 export function registerSessions(
   app: FastifyInstance,
   cfg: Config,
@@ -25,6 +51,15 @@ export function registerSessions(
   users: UserRepo,
 ) {
   app.post<{ Body: StartPlaybackInput }>('/sessions', async (req, reply) => {
+    // Syntactic validation first — reject malformed bodies before any auth or
+    // domain work so the client gets a clear 400 rather than a deep ffmpeg
+    // failure.
+    const parsed = StartPlaybackBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return badRequest(reply, ErrorCodes.INVALID_INPUT, parsed.error.message)
+    }
+    const input = parsed.data
+
     // Authenticate the caller via X-Horizon-User. Playback is always tied to a
     // user (for watch-history + capacity accounting). owner/admin may delegate
     // playback on behalf of another household member; members may only play as
@@ -32,19 +67,20 @@ export function registerSessions(
     const caller = resolveCallerRole(users, req)
     if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
 
-    const requestedUserId = req.body?.userId
+    const requestedUserId = input.userId
     if (requestedUserId && requestedUserId !== caller.id && caller.role === 'member') {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner/admin can start playback for another user')
     }
 
     let started
     try {
-      started = orchestrator.startPlayback({ ...req.body, userId: requestedUserId || caller.id })
+      started = orchestrator.startPlayback({ ...input, userId: requestedUserId || caller.id })
     } catch (err) {
       const code = (err as { code?: string }).code
       if (code === ErrorCodes.MEDIA_NOT_FOUND) return sendNotFound(reply, ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
       if (code === ErrorCodes.USER_NOT_FOUND) return badRequest(reply, ErrorCodes.NO_USER, 'User not found')
       if (code === ErrorCodes.AUDIO_TRACK_INVALID) return badRequest(reply, ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track not available for this media')
+      if (code === ErrorCodes.INVALID_INPUT) return badRequest(reply, ErrorCodes.INVALID_INPUT, (err as Error).message)
       if (code === ErrorCodes.MAX_SESSIONS) return overCapacity(reply, ErrorCodes.MAX_SESSIONS, 'Server at capacity')
       throw err
     }

@@ -103,6 +103,7 @@ type PlaybackErrorCode =
   | typeof ErrorCodes.USER_NOT_FOUND
   | typeof ErrorCodes.MAX_SESSIONS
   | typeof ErrorCodes.AUDIO_TRACK_INVALID
+  | typeof ErrorCodes.INVALID_INPUT
 
 class PlaybackError extends Error {
   constructor(public code: PlaybackErrorCode, message: string) {
@@ -135,6 +136,24 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
       const audioTrackCount = mediaItem.audioTracks?.length ?? 0
       if (requestedAudioTrack < 0 || requestedAudioTrack >= audioTrackCount) {
         throw new PlaybackError(ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track index out of bounds')
+      }
+
+      // Subtitle track: -1 (or null) means "no subtitles". Any other value must
+      // index an existing track.
+      const requestedSubtitle = input.subtitleTrackIndex
+      if (
+        requestedSubtitle !== undefined && requestedSubtitle !== null && requestedSubtitle !== -1 &&
+        requestedSubtitle >= (mediaItem.subtitleTracks?.length ?? 0)
+      ) {
+        throw new PlaybackError(ErrorCodes.INVALID_INPUT, 'Subtitle track index out of bounds')
+      }
+
+      // Seek position cannot exceed the media duration.
+      if (
+        input.startPositionMs !== undefined &&
+        input.startPositionMs > (mediaItem.durationSec ?? 0) * 1000
+      ) {
+        throw new PlaybackError(ErrorCodes.INVALID_INPUT, 'Start position exceeds media duration')
       }
 
       // Read playback knobs live from serverSettings so changes take effect

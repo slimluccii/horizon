@@ -144,6 +144,59 @@ describe('POST /sessions auth', () => {
     expect(orch.calls[0].userId).toBe(member.id)
   })
 
+  it('returns 400 invalid-input for a negative audioTrackIndex (Zod)', async () => {
+    const { users, serverSettings, member } = setup()
+    const orch = fakeOrchestrator()
+    const app = await buildApp(users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body({ audioTrackIndex: -1 }),
+      headers: { 'x-horizon-user': member.id },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+    expect(orch.calls).toHaveLength(0)
+  })
+
+  it('returns 400 invalid-input for a non-integer startPositionMs (Zod)', async () => {
+    const { users, serverSettings, member } = setup()
+    const orch = fakeOrchestrator()
+    const app = await buildApp(users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body({ startPositionMs: 1.5 }),
+      headers: { 'x-horizon-user': member.id },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('returns 400 invalid-input for unknown keys (.strict)', async () => {
+    const { users, serverSettings, member } = setup()
+    const orch = fakeOrchestrator()
+    const app = await buildApp(users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body({ bogus: true }),
+      headers: { 'x-horizon-user': member.id },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
+  it('maps invalid-input from the orchestrator to HTTP 400', async () => {
+    const { users, serverSettings, member } = setup()
+    const orch: PlaybackOrchestrator = {
+      startPlayback() {
+        throw Object.assign(new Error('Start position exceeds media duration'), { code: 'invalid-input' })
+      },
+    }
+    const app = await buildApp(users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body({ startPositionMs: 999 }),
+      headers: { 'x-horizon-user': member.id },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-input')
+  })
+
   it('maps audio-track-invalid from the orchestrator to HTTP 400', async () => {
     const { users, serverSettings, member } = setup()
     const orch: PlaybackOrchestrator = {
