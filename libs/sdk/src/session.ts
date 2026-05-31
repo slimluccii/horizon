@@ -4,6 +4,7 @@ import type {
   HorizonError, HorizonWarning, SessionInfo,
 } from './types.ts'
 import { BandwidthSampler } from './bandwidth.ts'
+import { parseServerMessage } from './ws-messages.ts'
 
 export type SessionState = 'attaching' | 'active' | 'detached' | 'destroyed'
 
@@ -73,9 +74,13 @@ export class PlaybackSession {
 
     this._ws.onopen = () => {
       this._reconnectAttempts = 0
-      if (this._reconnectToken) {
-        this._send({ type: 'hello', reconnectToken: this._reconnectToken })
-      }
+      // Always send hello so the server can complete the handshake from this
+      // frame (it replies session-ready). reconnectToken is optional — included
+      // only on reconnect; the server guard tolerates its absence.
+      this._send({
+        type: 'hello',
+        ...(this._reconnectToken ? { reconnectToken: this._reconnectToken } : {}),
+      })
     }
 
     this._ws.onmessage = (ev) => {
@@ -111,7 +116,12 @@ export class PlaybackSession {
     this._reconnectTimer = setTimeout(() => this._connect(), delay)
   }
 
-  private _handleMessage(msg: any) {
+  private _handleMessage(raw: unknown) {
+    // Validate against the server-to-client schema before mutating any state or
+    // firing callbacks. Invalid / MITM-injected frames fail closed: silently
+    // dropped, no state change. (See ws-messages.ts.)
+    const msg = parseServerMessage(raw)
+    if (!msg) return
     switch (msg.type) {
       case 'session-ready':
         this._reconnectToken = msg.reconnectToken ?? null
@@ -130,7 +140,7 @@ export class PlaybackSession {
         this._opts.onWarning?.({ code: msg.code, message: msg.message })
         break
       case 'error':
-        this._opts.onError?.({ code: msg.code, message: msg.message, fatal: msg.fatal ?? true })
+        this._opts.onError?.({ code: msg.code as HorizonError['code'], message: msg.message, fatal: msg.fatal ?? true })
         if (msg.fatal) {
           // halt any pending reconnect — session is gone server-side
           if (this._reconnectTimer) clearTimeout(this._reconnectTimer)

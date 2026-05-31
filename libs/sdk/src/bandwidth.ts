@@ -11,7 +11,9 @@ export class BandwidthSampler {
   record(bytes: number, durationMs: number) {
     // skip uninformative samples — they would dilute the rolling estimate
     if (durationMs <= 0 || bytes <= 0) return
-    const kbps = Math.round((bytes * 8) / durationMs)  // bytes * 8 bits / ms = kbps
+    // kbps = kilobits per second. bits = bytes*8; rate = bits / (durationMs/1000) bits/s;
+    // kbps = rate/1000 = (bytes*8)/durationMs. (1 kbps == 1 bit/ms, so the /1000 and *1000 cancel.)
+    const kbps = Math.round((bytes * 8) / durationMs)
     this.samples.push({ kbps, segmentDownloadMs: durationMs, timestamp: Date.now() })
     if (this.samples.length > this.windowSize) this.samples.shift()
   }

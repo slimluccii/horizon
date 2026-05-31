@@ -1,5 +1,5 @@
 // sdk/src/index.ts
-export { HorizonClient, isRoleChangedError } from './client.ts'
+export { HorizonClient, isRoleChangedError, isProgressNotFoundError } from './client.ts'
 export { PlaybackSession } from './session.ts'
 export type { PlaybackSessionOptions, SessionState } from './session.ts'
 export { detectCapabilities } from './capabilities.ts'
