@@ -99,3 +99,58 @@ describe('PlaybackSession.reconnectToken getter (#78)', () => {
     expect(session.reconnectToken).toBe('seg-tok')
   })
 })
+
+describe('PlaybackSession token-bearing URLs for header-less transports (#41)', () => {
+  function readySession(info: SessionInfo) {
+    const session = new PlaybackSession({
+      sessionInfo: info,
+      baseUrl: 'http://x',
+      capabilities: { videoCodecs: [], audioCodecs: [], hdr: [], maxBitrate: 0, container: [] },
+    })
+    return { session }
+  }
+
+  it('leaves the transcode stream URL clean (hls.js sends the token via header)', async () => {
+    const { session } = readySession(sessionInfo)
+    await flush()
+    lastWs().onopen?.()
+    lastWs().onmessage?.({ data: JSON.stringify({ type: 'session-ready', profile: { videoBitrate: 8000, audioBitrate: 192 }, reconnectToken: 'tok' }) })
+    expect(session.streamUrl).toBe('http://x/sessions/s1/stream.m3u8')
+  })
+
+  it('appends the token query param to the direct-play stream URL (<video src> cannot set headers)', async () => {
+    const direct: SessionInfo = { ...sessionInfo, method: 'direct-play', streamUrl: '/sessions/s1/direct' }
+    const { session } = readySession(direct)
+    await flush()
+    lastWs().onopen?.()
+    lastWs().onmessage?.({ data: JSON.stringify({ type: 'session-ready', profile: { videoBitrate: 0, audioBitrate: 0 }, reconnectToken: 'direct-tok' }) })
+    expect(session.streamUrl).toBe('http://x/sessions/s1/direct?token=direct-tok')
+  })
+
+  it('appends the token query param to subtitle URLs (<track src> cannot set headers)', async () => {
+    const { session } = readySession(sessionInfo)
+    await flush()
+    lastWs().onopen?.()
+    lastWs().onmessage?.({ data: JSON.stringify({ type: 'session-ready', profile: { videoBitrate: 8000, audioBitrate: 192 }, reconnectToken: 'sub-tok' }) })
+    expect(session.subtitleUrl(2)).toBe('http://x/sessions/s1/subtitles/2.vtt?token=sub-tok')
+  })
+
+  it('returns header-less URLs unchanged before the token is assigned', async () => {
+    const { session } = readySession(sessionInfo)
+    await flush()
+    // No session-ready yet → no token.
+    expect(session.subtitleUrl(0)).toBe('http://x/sessions/s1/subtitles/0.vtt')
+  })
+
+  it('sends the reconnect token as a header on the teardown DELETE', async () => {
+    const session = newSession()
+    await flush()
+    lastWs().onopen?.()
+    lastWs().onmessage?.({ data: JSON.stringify({ type: 'session-ready', profile: { videoBitrate: 8000, audioBitrate: 192 }, reconnectToken: 'del-tok' }) })
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
+    session.disconnect()
+    const call = fetchMock.mock.calls.find(c => String(c[0]).endsWith('/sessions/s1'))
+    expect(call).toBeDefined()
+    expect(call![1]).toMatchObject({ method: 'DELETE', headers: { 'X-Reconnect-Token': 'del-tok' } })
+  })
+})

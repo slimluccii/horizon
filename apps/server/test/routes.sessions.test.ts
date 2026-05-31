@@ -66,6 +66,37 @@ async function buildApp(
   return app
 }
 
+/** Builds an app and exposes the live SessionManager so DELETE tests can seed a
+ *  real session (the fakeOrchestrator never registers one with the manager). */
+async function buildAppWithManager(
+  users: ReturnType<typeof setup>['users'],
+  serverSettings: ReturnType<typeof setup>['serverSettings'],
+  orchestrator: PlaybackOrchestrator,
+) {
+  const app = Fastify({ logger: false })
+  const sessions = createSessionManager(serverSettings)
+  const progressRepo = {} as ProgressRepo
+  const cfg = {} as Config
+  registerSessions(app, cfg, hwAccel, sessions, progressRepo, orchestrator, serverSettings, users)
+  await app.ready()
+  return { app, sessions }
+}
+
+function seedSession(sessions: ReturnType<typeof createSessionManager>) {
+  return sessions.create({
+    mediaId: 'm1',
+    filePath: '/tmp/x.mkv',
+    plan: { method: 'direct-play', renditions: [] },
+    selectedSubtitleTrack: null,
+    audioTrackCount: 1,
+    subtitleTrackCount: 0,
+    renditionCodecs: [],
+    sessionDir: '/tmp/sess-del',
+    sessionReady: true,
+    durationSec: 100,
+  } as unknown as Parameters<typeof sessions.create>[0])
+}
+
 const body = (extra: Record<string, unknown> = {}) => ({
   mediaId: 'm1',
   capabilities: { videoCodecs: ['h264'], audioCodecs: ['aac'], hdr: [], maxBitrate: 8000, container: ['mp4'] },
@@ -211,5 +242,53 @@ describe('POST /sessions auth', () => {
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('audio-track-invalid')
+  })
+})
+
+describe('DELETE /sessions/:id reconnect token (#41)', () => {
+  it('rejects a DELETE without the reconnect token with 400 and does NOT destroy', async () => {
+    const { users, serverSettings } = setup()
+    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const session = seedSession(sessions)
+    const res = await app.inject({ method: 'DELETE', url: `/sessions/${session.id}` })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-reconnect-token')
+    expect(sessions.get(session.id)).toBeDefined() // still alive
+    await app.close()
+  })
+
+  it('rejects a DELETE with a mismatched token with 400 and does NOT destroy', async () => {
+    const { users, serverSettings } = setup()
+    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const session = seedSession(sessions)
+    const res = await app.inject({
+      method: 'DELETE', url: `/sessions/${session.id}`,
+      headers: { 'x-reconnect-token': 'wrong-token' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-reconnect-token')
+    expect(sessions.get(session.id)).toBeDefined()
+    await app.close()
+  })
+
+  it('destroys the session with the correct token (204)', async () => {
+    const { users, serverSettings } = setup()
+    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const session = seedSession(sessions)
+    const res = await app.inject({
+      method: 'DELETE', url: `/sessions/${session.id}`,
+      headers: { 'x-reconnect-token': session.reconnectToken },
+    })
+    expect(res.statusCode).toBe(204)
+    expect(sessions.get(session.id)).toBeUndefined() // gone
+    await app.close()
+  })
+
+  it('is an idempotent 204 for an unknown session id (no token needed)', async () => {
+    const { users, serverSettings } = setup()
+    const { app } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const res = await app.inject({ method: 'DELETE', url: '/sessions/does-not-exist' })
+    expect(res.statusCode).toBe(204)
+    await app.close()
   })
 })

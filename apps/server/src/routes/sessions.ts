@@ -12,6 +12,7 @@ import { handleWsMessage, resetWsAuth } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
 import { sendNotFound, overCapacity, badRequest, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
+import { requireReconnectToken } from './segments.ts'
 
 const WS_PING_INTERVAL_MS = 15_000
 
@@ -114,7 +115,16 @@ export function registerSessions(
     }
   })
 
-  app.delete<{ Params: { id: string } }>('/sessions/:id', async (req, reply) => {
+  app.delete<{ Params: { id: string }; Querystring: { token?: string } }>('/sessions/:id', async (req, reply) => {
+    const session = sessions.get(req.params.id)
+    // Idempotent: a DELETE for an unknown/already-destroyed session is a no-op
+    // success, so a client that races its own teardown never sees an error.
+    if (!session) return reply.status(204).send()
+    // Proof-of-knowledge gate: destroying a session is a privileged op (it kills
+    // ffmpeg + frees a capacity slot). Only the client that created the session
+    // holds its reconnectToken, so require it here — otherwise anyone who guessed
+    // a sessionId could tear down another user's playback.
+    if (!requireReconnectToken(session, req, reply)) return
     await sessions.destroy(req.params.id)
     return reply.status(204).send()
   })

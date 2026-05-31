@@ -154,7 +154,11 @@ describe('GET /sessions/:id/subtitles/:trackIdx.vtt bounds (#89)', () => {
   it('rejects trackIdx >= subtitleTracks.length with 400 invalid-input (not 404)', async () => {
     const { sessions, media, session } = setup({ renditionCount: 2, subtitleTracks: 2 })
     app = await buildApp(sessions, media)
-    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/subtitles/999.vtt` })
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/subtitles/999.vtt`,
+      headers: tokenHeader(session.reconnectToken),
+    })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
@@ -162,7 +166,11 @@ describe('GET /sessions/:id/subtitles/:trackIdx.vtt bounds (#89)', () => {
   it('rejects all subtitle indices when the media has 0 subtitle tracks', async () => {
     const { sessions, media, session } = setup({ renditionCount: 2, subtitleTracks: 0 })
     app = await buildApp(sessions, media)
-    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/subtitles/0.vtt` })
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/subtitles/0.vtt`,
+      headers: tokenHeader(session.reconnectToken),
+    })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
@@ -171,8 +179,77 @@ describe('GET /sessions/:id/subtitles/:trackIdx.vtt bounds (#89)', () => {
     const { sessions, media, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
     writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
     app = await buildApp(sessions, media)
-    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/subtitles/0.vtt` })
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/subtitles/0.vtt`,
+      headers: tokenHeader(session.reconnectToken),
+    })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('text/vtt')
+  })
+})
+
+describe('GET /sessions/:id/subtitles/:trackIdx.vtt reconnect token (#41)', () => {
+  it('rejects a request without the reconnect token with 400 invalid-reconnect-token', async () => {
+    const { sessions, media, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
+    writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
+    app = await buildApp(sessions, media)
+    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/subtitles/0.vtt` })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-reconnect-token')
+  })
+
+  it('accepts the token via the `token` query param (header-less transport)', async () => {
+    const { sessions, media, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
+    writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
+    app = await buildApp(sessions, media)
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/subtitles/0.vtt?token=${session.reconnectToken}`,
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('text/vtt')
+  })
+})
+
+describe('GET /sessions/:id/direct reconnect token (#41)', () => {
+  function directSetup() {
+    // direct-play session backed by a real on-disk file so statSync succeeds.
+    const ctx = setup({ renditionCount: 0 })
+    const filePath = path.join(ctx.sessionDir, 'movie.mkv')
+    writeFileSync(filePath, 'fakebytes')
+    ctx.session.filePath = filePath
+    return ctx
+  }
+
+  it('rejects a request without the reconnect token with 400 invalid-reconnect-token', async () => {
+    const { sessions, media, session } = directSetup()
+    app = await buildApp(sessions, media)
+    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/direct` })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-reconnect-token')
+  })
+
+  it('rejects a mismatched token with 400 invalid-reconnect-token', async () => {
+    const { sessions, media, session } = directSetup()
+    app = await buildApp(sessions, media)
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/direct`,
+      headers: tokenHeader('wrong-token'),
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('invalid-reconnect-token')
+  })
+
+  it('serves bytes with the correct token via the `token` query param', async () => {
+    const { sessions, media, session } = directSetup()
+    app = await buildApp(sessions, media)
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/direct?token=${session.reconnectToken}`,
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toBe('video/x-matroska')
   })
 })

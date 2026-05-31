@@ -195,6 +195,21 @@ removed on destroy.
 Long random opaque token returned at session create. Lets a client reattach
 to a session after a WS drop without exposing the session ID in URLs.
 
+It is also the **proof-of-knowledge credential** for every session data route:
+the `sessionId` in a URL is *not* a capability on its own. Holding it does not
+grant access to media bytes or let you tear a session down. The caller must echo
+the `reconnectToken` back on `GET /sessions/:id/stream.m3u8`,
+`/renditions/:r.m3u8`, `/renditions/:r/:seg`, `/direct`,
+`/subtitles/:trackIdx.vtt`, and `DELETE /sessions/:id`, otherwise the route
+replies `400 invalid-reconnect-token`. (`DELETE` of an unknown/already-gone
+session is an idempotent `204` and needs no token.) The token is accepted via
+the `X-Reconnect-Token` header (hls.js playlist/segment loads + the teardown
+`fetch`) or a `token` query param for transports that cannot set headers — a
+browser `<video src>` (direct-play) or `<track src>` (subtitles). Treat the
+`sessionId` as opaque and the `reconnectToken` as the secret. See
+[apps/server/src/routes/segments.ts](apps/server/src/routes/segments.ts)
+(`requireReconnectToken`).
+
 ### WS attach handshake
 A freshly attached `/sessions/:id/ws` socket is **unauthenticated**: the server
 processes only the `hello` message and drops every other command (seek,
