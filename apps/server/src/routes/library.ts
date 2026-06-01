@@ -1,10 +1,14 @@
 import type { FastifyInstance } from 'fastify'
+import { readdirSync } from 'node:fs'
+import path from 'node:path'
+import type { Config } from '../config.ts'
 import type { MediaRepo } from '../repos/media.ts'
 import type { CollectionsRepo } from '../repos/collections.ts'
 import type { UserRepo } from '../repos/users.ts'
 import type { ScanWorkers } from '../server.ts'
 import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
+import { resolveUnderBases } from '../paths/confine.ts'
 
 export function registerLibrary(
   app: FastifyInstance,
@@ -12,7 +16,59 @@ export function registerLibrary(
   collections: CollectionsRepo,
   workers: ScanWorkers,
   users: UserRepo,
+  cfg: Config,
 ) {
+  /**
+   * Confined directory browser for picking library roots in the UI. Owner/admin
+   * only — members must not be able to enumerate the server filesystem.
+   *
+   *  - No (or empty) `path` → the configured bases (cfg.mediaBases) as the
+   *    top-level entries; `parent` is null (you can't go above the bases).
+   *  - With `path` → resolveUnderBases gates it (null → 400 INVALID_PATH), then
+   *    we list IMMEDIATE SUBDIRECTORIES only (never files). `parent` is the
+   *    path's parent iff it still resolves under a base, else null.
+   */
+  app.get<{ Querystring: { path?: string } }>('/library/browse', async (req, reply) => {
+    const caller = resolveCallerRole(users, req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    if (caller.role === 'member') {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can browse the filesystem')
+    }
+
+    const raw = req.query.path
+    if (!raw) {
+      // Top level: the operator-mounted bases. No parent — can't browse above.
+      return {
+        entries: cfg.mediaBases.map(b => ({ name: path.basename(b) || b, path: b })),
+        parent: null,
+      }
+    }
+
+    const resolved = resolveUnderBases(cfg.mediaBases, raw)
+    if (resolved === null) {
+      return badRequest(reply, ErrorCodes.INVALID_PATH, 'Path is outside the configured media bases')
+    }
+
+    let dirents: import('node:fs').Dirent[]
+    try {
+      dirents = readdirSync(resolved, { withFileTypes: true })
+    } catch {
+      return badRequest(reply, ErrorCodes.INVALID_PATH, 'Path is not a readable directory')
+    }
+
+    const entries = dirents
+      .filter(d => d.isDirectory())
+      .map(d => ({ name: d.name, path: path.join(resolved, d.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    // Offer a parent only while it still resolves under a base — never above.
+    const parentCandidate = path.dirname(resolved)
+    const parent = parentCandidate === resolved ? null : resolveUnderBases(cfg.mediaBases, parentCandidate)
+
+    return { entries, parent }
+  })
+
+
   app.get('/library/movies', async (req, reply) => {
     const caller = resolveCallerRole(users, req)
     if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')

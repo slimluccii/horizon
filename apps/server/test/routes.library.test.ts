@@ -7,6 +7,7 @@ import { createMediaRepo } from '../src/repos/media.ts'
 import { createCollectionsRepo } from '../src/repos/collections.ts'
 import { registerLibrary } from '../src/routes/library.ts'
 import type { ScanWorkers } from '../src/server.ts'
+import type { Config } from '../src/config.ts'
 
 /**
  * Authorization tests for the /library/* routes (issues #32, #39, #45, #46).
@@ -57,7 +58,8 @@ async function buildApp(
   workers: ScanWorkers = makeWorkers({ tmdbConfigured: true }),
 ) {
   const app = Fastify({ logger: false })
-  registerLibrary(app, s.media, s.collections, workers, s.users)
+  const cfg = { mediaBases: [] } as unknown as Config
+  registerLibrary(app, s.media, s.collections, workers, s.users, cfg)
   await app.ready()
   return app
 }

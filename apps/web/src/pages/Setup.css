@@ -144,3 +144,91 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
+
+/* Multi-step wizard ------------------------------------------------------ */
+.setup__steps {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.setup__step-dot {
+  width: 28px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-hi);
+  transition: background var(--dur-fast);
+}
+.setup__step-dot.is-done { background: var(--accent-dim); }
+.setup__step-dot.is-active { background: var(--accent); }
+
+.setup__skip {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  background: transparent;
+  border: none;
+  color: var(--muted-hi);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+.setup__skip:hover:not(:disabled) { color: #fff; background: var(--surface); }
+.setup__skip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.setup__roots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setup__root {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.setup__root-kind {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.setup__root-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--muted-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup__root-remove {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-hi);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.setup__root-remove:hover { color: var(--danger); border-color: var(--danger); }

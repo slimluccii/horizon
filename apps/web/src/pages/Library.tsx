@@ -25,7 +25,8 @@ function pickHero(movies: MediaItem[]): MediaItem | null {
 export default function Library() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const { userId } = useActiveUser()
+  const { user, userId } = useActiveUser()
+  const canManage = user?.role === 'owner' || user?.role === 'admin'
 
   const tabFromUrl = (params.get('tab') as Tab | null) ?? 'movies'
   const [tab, setTab] = useState<Tab>(tabFromUrl)
@@ -35,6 +36,7 @@ export default function Library() {
   const [shows, setShows] = useState<ShowSummary[]>([])
   const [collections, setCollections] = useState<{ id: string; name: string; movies: MediaItem[] }[]>([])
   const [loading, setLoading] = useState(true)
+  const [noRoots, setNoRoots] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -43,6 +45,16 @@ export default function Library() {
       horizon.library.listCollections().then(setCollections),
     ]).finally(() => setLoading(false))
   }, [])
+
+  // Surface the "add folders" banner only to owner/admin, who can act on it.
+  useEffect(() => {
+    if (!canManage) { setNoRoots(false); return }
+    let cancelled = false
+    horizon.settings.getServer()
+      .then(s => { if (!cancelled) setNoRoots(s.moviesRoots.length === 0 && s.showsRoots.length === 0) })
+      .catch(() => { if (!cancelled) setNoRoots(false) })
+    return () => { cancelled = true }
+  }, [canManage])
 
   const hero = useMemo(() => pickHero(movies), [movies])
   const heroMeta = hero?.metadata?.kind === 'movie' ? (hero.metadata as MovieMetadata) : null
@@ -86,6 +98,14 @@ export default function Library() {
       )}
 
       <div className={`lib__body ${heroBackdrop ? 'lib__body--with-hero' : ''}`}>
+        {noRoots && (
+          <div className="lib__banner" role="status">
+            <span className="lib__banner-text">No library folders configured yet.</span>
+            <button className="lib__banner-cta" onClick={() => navigate('/settings')}>
+              Add library folders → Settings
+            </button>
+          </div>
+        )}
         {userId && <ContinueWatchingRail userId={userId} padX={48} />}
 
         <div className="lib__section">
@@ -116,14 +136,14 @@ export default function Library() {
           {!loading && tab === 'movies' && (
             <div className="lib__grid">
               {movies.map(m => <LargePoster key={m.id} item={m} width={180} showMeta onClick={() => navigate(`/play/${m.id}`)} />)}
-              {movies.length === 0 && <div className="lib__empty">No movies found. Check HORIZON_MOVIES_ROOT.</div>}
+              {movies.length === 0 && <div className="lib__empty">No movies found.</div>}
             </div>
           )}
 
           {!loading && tab === 'shows' && (
             <div className="lib__grid">
               {shows.map(s => <LargePoster key={s.id} item={s} width={180} showMeta onClick={() => navigate(`/show/${s.id}`)} />)}
-              {shows.length === 0 && <div className="lib__empty">No shows found. Check HORIZON_SHOWS_ROOT.</div>}
+              {shows.length === 0 && <div className="lib__empty">No shows found.</div>}
             </div>
           )}
 

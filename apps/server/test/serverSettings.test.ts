@@ -21,8 +21,7 @@ function readRow(db: ReturnType<typeof openDatabase>) {
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     port: 7777,
-    moviesRoots: [],
-    showsRoots: [],
+    mediaBases: ['/media'],
     corsOrigins: ['*'],
     cacheDir: '/tmp',
     dbPath: ':memory:',
@@ -44,6 +43,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     metadataMaxAgeEpisodeMs: 60 * 86_400_000,
     devSeedEnabled: false,
     nodeEnv: 'development',
+    webDir: undefined,
+    serveWeb: false,
     ...overrides,
   }
 }

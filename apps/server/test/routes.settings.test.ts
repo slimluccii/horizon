@@ -28,7 +28,10 @@ function setup() {
 
 async function buildApp(users: ReturnType<typeof setup>['users'], serverSettings: ServerSettings) {
   const app = Fastify({ logger: false })
-  registerSettings(app, users, serverSettings)
+  // registerSettings only reads cfg.mediaBases (root confinement); none of the
+  // tests in this file patch roots, so a placeholder base is sufficient.
+  const cfg = { mediaBases: ['/media'] } as unknown as import('../src/config.ts').Config
+  registerSettings(app, users, serverSettings, cfg)
   await app.ready()
   return app
 }
@@ -274,13 +277,14 @@ describe('serverSettings — bootstrapFromEnv', () => {
       forceEncoder: 'libx264',
       // Other Config fields not used by bootstrap:
       port: 7777,
-      moviesRoots: [],
-      showsRoots: [],
+      mediaBases: ['/media'],
       corsOrigins: ['*'],
       cacheDir: '/tmp',
       dbPath: ':memory:',
       devSeedEnabled: false,
       nodeEnv: 'development',
+      webDir: undefined,
+      serveWeb: false,
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
     } as import('../src/config.ts').Config)
 
@@ -313,13 +317,14 @@ describe('serverSettings — bootstrapFromEnv', () => {
       wsAttachMs: 10000,
       forceEncoder: undefined,
       port: 7777,
-      moviesRoots: [],
-      showsRoots: [],
+      mediaBases: ['/media'],
       corsOrigins: ['*'],
       cacheDir: '/tmp',
       dbPath: ':memory:',
       devSeedEnabled: false,
       nodeEnv: 'development',
+      webDir: undefined,
+      serveWeb: false,
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
     } as import('../src/config.ts').Config
 

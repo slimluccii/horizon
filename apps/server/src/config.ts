@@ -1,10 +1,13 @@
 import os from 'node:os'
+import path from 'node:path'
 import { isToneMapOperator, type ToneMapOperator, type ToneMapConfig } from './transcode/tonemap.ts'
 
 export interface Config {
   port: number
-  moviesRoots: string[]
-  showsRoots: string[]
+  /** Allowlisted base directories (HORIZON_MEDIA_BASE, colon-separated). A
+   *  library root is valid only if it resolves under one of these. Defaults to
+   *  ['/media']. Each entry is resolved to an absolute path. */
+  mediaBases: string[]
   corsOrigins: string[]
   cacheDir: string
   dbPath: string
@@ -47,6 +50,13 @@ export interface Config {
    *  to boot with HORIZON_DEV_SEED=1, so the dev seed routes can never be
    *  exposed in production. */
   nodeEnv: string
+  /** Directory holding the built web UI (apps/web/dist). When set + present the
+   *  server serves the SPA same-origin (Plex/Jellyfin style). Unset in dev,
+   *  where Vite serves the UI and proxies the API. */
+  webDir: string | undefined
+  /** Whether to serve the bundled web UI. True by default when webDir is set;
+   *  set HORIZON_SERVE_WEB=0 to run the server headless even with a dist on disk. */
+  serveWeb: boolean
 }
 
 /** Parse env var as positive integer, falling back to default on missing/NaN. */
@@ -67,13 +77,25 @@ function envList(name: string, sep: string, fallback: string[] = []): string[] {
   return raw.split(sep).filter(Boolean)
 }
 
+/** Allowlisted media base dirs (HORIZON_MEDIA_BASE, colon-separated). Each entry
+ *  is resolved to an absolute path. Defaults to ['/media'] when unset/empty. */
+function loadMediaBases(): string[] {
+  const entries = envList('HORIZON_MEDIA_BASE', ':')
+  const bases = entries.map(e => path.resolve(e))
+  return bases.length > 0 ? bases : ['/media']
+}
+
 export function loadConfig(): Config {
   const cacheDir = process.env.HORIZON_CACHE_DIR ?? `${os.tmpdir()}/horizon-cache`
+  const webDir = process.env.HORIZON_WEB_DIR || undefined
   return {
     port: envInt('HORIZON_PORT', 7777),
-    moviesRoots: envList('HORIZON_MOVIES_ROOT', ':'),
-    showsRoots: envList('HORIZON_SHOWS_ROOT', ':'),
-    corsOrigins: envList('HORIZON_CORS_ORIGINS', ',', ['*']),
+    mediaBases: loadMediaBases(),
+    // Default: same-origin only (no CORS). The bundled web UI is served from
+    // this same server, and the dev setup proxies through Vite, so cross-origin
+    // is never needed by default. Set HORIZON_CORS_ORIGINS only to allow a
+    // separately-hosted client.
+    corsOrigins: envList('HORIZON_CORS_ORIGINS', ',', []),
     cacheDir,
     dbPath: process.env.HORIZON_DB_PATH ?? `${cacheDir}/horizon.db`,
     watchedThresholdPct: envInt('HORIZON_WATCHED_THRESHOLD_PCT', 90),
@@ -94,6 +116,8 @@ export function loadConfig(): Config {
     metadataMaxAgeEpisodeMs: envInt('HORIZON_METADATA_MAX_AGE_EPISODE_DAYS', 60) * 86_400_000,
     devSeedEnabled: envBool('HORIZON_DEV_SEED', false),
     nodeEnv: process.env.NODE_ENV || 'development',
+    webDir,
+    serveWeb: webDir ? envBool('HORIZON_SERVE_WEB', true) : false,
   }
 }
 

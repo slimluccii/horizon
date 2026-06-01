@@ -142,6 +142,42 @@ describe('PlaybackSession token-bearing URLs for header-less transports (#41)', 
     expect(session.subtitleUrl(0)).toBe('http://x/sessions/s1/subtitles/0.vtt')
   })
 
+  // The server's ownership gate needs the caller id on the header-less browser
+  // transports (WebSocket upgrade, <video src>, <track src>). The browser cannot
+  // set X-Horizon-User on these, so it rides as a `user` query param. Regression
+  // for the playback hang where the WS closed 4001 and looped forever.
+  it('carries the user query param on the WS URL when a userId is set', async () => {
+    const session = new PlaybackSession({
+      sessionInfo,
+      baseUrl: 'http://x',
+      capabilities: { videoCodecs: [], audioCodecs: [], hdr: [], maxBitrate: 0, container: [] },
+      userId: 'u-42',
+    })
+    await flush()
+    expect(session.wsUrl).toBe('ws://x/sessions/s1/ws?user=u-42')
+  })
+
+  it('appends both token and user to the direct-play stream URL and subtitle URLs', async () => {
+    const direct: SessionInfo = { ...sessionInfo, method: 'direct-play', streamUrl: '/sessions/s1/direct' }
+    const session = new PlaybackSession({
+      sessionInfo: direct,
+      baseUrl: 'http://x',
+      capabilities: { videoCodecs: [], audioCodecs: [], hdr: [], maxBitrate: 0, container: [] },
+      userId: 'u-42',
+    })
+    await flush()
+    lastWs().onopen?.()
+    lastWs().onmessage?.({ data: JSON.stringify({ type: 'session-ready', profile: { videoBitrate: 0, audioBitrate: 0 }, reconnectToken: 'direct-tok' }) })
+    expect(session.streamUrl).toBe('http://x/sessions/s1/direct?token=direct-tok&user=u-42')
+    expect(session.subtitleUrl(2)).toBe('http://x/sessions/s1/subtitles/2.vtt?token=direct-tok&user=u-42')
+  })
+
+  it('omits the user query param for headless sessions (no userId)', async () => {
+    const { session } = readySession(sessionInfo)
+    await flush()
+    expect(session.wsUrl).toBe('ws://x/sessions/s1/ws')
+  })
+
   it('sends the reconnect token as a header on the teardown DELETE', async () => {
     const session = newSession()
     await flush()

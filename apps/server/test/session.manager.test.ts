@@ -57,3 +57,37 @@ describe('SessionManager.create — wsAttachMs is read live (#65)', () => {
     void sessions.destroy(s2.id)
   })
 })
+
+describe('SessionManager.destroyAll — shutdown kills every ffmpeg', () => {
+  // Minimal stand-in for a spawned ffmpeg ChildProcess: killFfmpeg reads
+  // killed/exitCode, calls kill(), and registers an `exit` listener.
+  function fakeFfmpeg() {
+    return {
+      killed: false,
+      exitCode: null as number | null,
+      signalCode: null as string | null,
+      kill: vi.fn(function (this: { killed: boolean }) { this.killed = true; return true }),
+      once: vi.fn(),
+    }
+  }
+
+  it('destroys all live sessions and SIGTERMs each ffmpeg child', async () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const serverSettings = createServerSettings(db)
+    const sessions = createSessionManager(serverSettings)
+
+    const a = sessions.create(partial())
+    const b = sessions.create(partial())
+    const procA = fakeFfmpeg()
+    const procB = fakeFfmpeg()
+    sessions.get(a.id)!.ffmpegProcess = procA as any
+    sessions.get(b.id)!.ffmpegProcess = procB as any
+
+    await sessions.destroyAll()
+
+    expect(procA.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(procB.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(sessions.size()).toBe(0)
+  })
+})

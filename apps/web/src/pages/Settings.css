@@ -368,3 +368,72 @@
 .settings__token-cancel:hover {
   color: var(--text);
 }
+
+/* Library folders (roots) */
+.settings__roots-empty {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.settings__roots-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings__roots-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  padding: 0 16px;
+}
+
+.settings__roots-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings__roots-remove {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  color: var(--danger);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--dur-fast);
+}
+
+.settings__roots-remove:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.settings__roots-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.settings__roots-browser-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}

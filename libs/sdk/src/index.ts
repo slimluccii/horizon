@@ -15,6 +15,7 @@ export type {
   ExternalIds, MovieMetadata, ShowMetadataInfo, EpisodeMetadata, Person,
   User, WatchProgress, ContinueWatchingItem,
   ServerSettings, ServerSettingsPatch,
+  BrowseEntry, BrowseResult,
 } from './types.ts'
 export { tmdbImageUrl } from './metadata.ts'
 export { PreferencesSchema, SUPPORTED_LANGUAGES } from './preferences.ts'

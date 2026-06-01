@@ -249,6 +249,8 @@ export interface ServerSettings {
   scanConcurrency: number
   watchFs: boolean
   watchDebounceMs: number
+  moviesRoots: string[]
+  showsRoots: string[]
   // Metadata
   tmdbToken: 'set' | 'unset'
   metadataBatchSize: number
@@ -268,3 +270,19 @@ export interface ServerSettings {
 }
 
 export type ServerSettingsPatch = Partial<Omit<ServerSettings, 'tmdbToken' | 'updatedAt'> & { tmdbToken?: string | null }>
+
+/** A single directory entry returned by the confined folder browser. */
+export interface BrowseEntry {
+  name: string
+  path: string
+}
+
+/**
+ * Wire shape returned by GET /library/browse. `entries` are the immediate
+ * subdirectories (or the configured bases at the top level); `parent` is the
+ * parent path while it still resolves under a base, else null.
+ */
+export interface BrowseResult {
+  entries: BrowseEntry[]
+  parent: string | null
+}

@@ -162,11 +162,20 @@ CREATE TABLE server_settings (
 INSERT INTO server_settings (id) VALUES (1);
 `
 
+const V5_SQL = `
+-- Library roots move from env (HORIZON_MOVIES_ROOT/HORIZON_SHOWS_ROOT) into
+-- runtime server_settings. Stored as JSON arrays of absolute paths; default to
+-- empty so existing installs come up with no roots until re-added in the UI.
+ALTER TABLE server_settings ADD COLUMN movies_roots TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE server_settings ADD COLUMN shows_roots  TEXT NOT NULL DEFAULT '[]';
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
   { version: 3, sql: V3_SQL },
   { version: 4, sql: V4_SQL },
+  { version: 5, sql: V5_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

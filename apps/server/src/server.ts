@@ -23,6 +23,8 @@ import { registerUsers } from './routes/users.ts'
 import { registerProgress } from './routes/progress.ts'
 import { registerSettings } from './routes/settings.ts'
 import { registerDev } from './routes/dev.ts'
+import { registerWeb } from './routes/web.ts'
+import { existsSync } from 'node:fs'
 import type { DatabaseSync } from './db/index.ts'
 
 export interface Repos {
@@ -51,23 +53,35 @@ export async function buildServer(
   const app = Fastify({ logger: true })
 
   await app.register(fastifyCors, {
-    origin: cfg.corsOrigins.includes('*') ? true : cfg.corsOrigins,
+    // '*' → reflect any origin; a non-empty list → allow exactly those;
+    // empty (the default) → disable CORS entirely (same-origin only), which is
+    // correct when the web UI is served from this server or via the dev proxy.
+    origin: cfg.corsOrigins.includes('*') ? true : (cfg.corsOrigins.length ? cfg.corsOrigins : false),
   })
   await app.register(fastifyWebSocket)
 
   registerHealth(app, hwAccel)
-  registerLibrary(app, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo)
+  registerLibrary(app, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
   registerSessions(app, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
   registerPlaylists(app, sessions, repos.userRepo)
   registerSegments(app, hwAccel, sessions, repos.mediaRepo, repos.userRepo)
   registerMetadata(app, cfg)
   registerUsers(app, repos.userRepo)
   registerProgress(app, repos.userRepo, repos.progressRepo)
-  registerSettings(app, repos.userRepo, repos.serverSettings)
+  registerSettings(app, repos.userRepo, repos.serverSettings, cfg)
 
   if (cfg.devSeedEnabled && db) {
     app.log.warn('HORIZON_DEV_SEED=1 — exposing POST /dev/seed/:scenario. DO NOT enable in production.')
     registerDev(app, { media: repos.mediaRepo, collections: repos.collectionsRepo, db })
+  }
+
+  // Web UI last: its catch-all SPA fallback must not shadow any API route.
+  if (cfg.serveWeb && cfg.webDir) {
+    if (existsSync(cfg.webDir)) {
+      await registerWeb(app, cfg.webDir)
+    } else {
+      app.log.warn(`HORIZON_WEB_DIR=${cfg.webDir} does not exist — web UI not served`)
+    }
   }
 
   return app

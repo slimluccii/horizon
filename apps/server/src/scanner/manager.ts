@@ -7,6 +7,10 @@ export interface ScanManagerDeps extends ScanDeps {
   scanHistory: ScanHistoryRepo
   /** Optional metadata-refresh trigger run after each scan finishes. */
   onScanFinished?: (result: ScanResult) => void | Promise<void>
+  /** Live library roots, read fresh on every scan so runtime root changes
+   *  (PATCH /settings/server) take effect with no restart. Replaces the static
+   *  cfg.moviesRoots/cfg.showsRoots. */
+  getRoots: () => { movies: string[]; shows: string[] }
 }
 
 export interface ScanStatus {
@@ -56,6 +60,15 @@ const SCAN_HISTORY_KEEP = 100
 export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanManager {
   type Pending = { trigger: ScanTrigger; full: boolean; paths: Set<string> }
 
+  // Overlay the live library roots (from serverSettings via deps.getRoots) onto
+  // the static cfg, read fresh on each scan. cfg no longer carries roots —
+  // they're runtime-settable, so fullScope/classifyPath/bookkeeping all read
+  // through this rather than cfg.moviesRoots/cfg.showsRoots directly.
+  function liveCfg(): ScanConfig {
+    const { movies, shows } = deps.getRoots()
+    return { ...cfg, moviesRoots: movies, showsRoots: shows }
+  }
+
   let running: { trigger: ScanTrigger; scope: 'full' | string; startedAt: number } | null = null
   let runningPromise: Promise<ScanResult> | null = null
   let pending: Pending | null = null
@@ -102,11 +115,12 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
   }
 
   function pendingToScope(p: Pending): ScanScope {
-    if (p.full) return fullScope(cfg)
+    const live = liveCfg()
+    if (p.full) return fullScope(live)
     const moviesPaths: string[] = []
     const showsPaths: string[] = []
     for (const sub of p.paths) {
-      const k = classifyPath(sub, cfg)
+      const k = classifyPath(sub, live)
       if (k === 'movies') moviesPaths.push(sub)
       else if (k === 'shows') showsPaths.push(sub)
       // Unmatched paths are silently dropped — likely watcher event for a
@@ -145,8 +159,9 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     deps.scanHistory.prune(SCAN_HISTORY_KEEP)
 
     // Update per-root bookkeeping for everything we scanned.
+    const { movies, shows } = deps.getRoots()
     const rootsTouched = p.full
-      ? [...cfg.moviesRoots, ...cfg.showsRoots]
+      ? [...movies, ...shows]
       : [...p.paths]
     for (const r of rootsTouched) {
       // Approximate per-root counts — we don't break out per root inside runScan.

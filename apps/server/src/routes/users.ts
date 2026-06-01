@@ -104,6 +104,16 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
   })
 
   app.delete<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
+    // Deleting a profile is a household-management action, mirroring user
+    // creation: only an authenticated owner/admin may do it. Without this gate
+    // any client could delete any non-owner profile (the repo only protects the
+    // owner) — an authz hole, since every other user mutation already checks
+    // the caller's role.
+    const caller = resolveCallerRole(users, req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    if (caller.role === 'member') {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can delete users')
+    }
     try {
       users.delete(req.params.id)
     } catch (err) {

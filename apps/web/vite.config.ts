@@ -11,6 +11,9 @@ export default defineConfig({
       '/health': 'http://localhost:7777',
       '/metadata': 'http://localhost:7777',
       '/users': 'http://localhost:7777',
+      // Only the API subpath — '/settings' itself is a client-side route, so
+      // proxying the whole prefix would break a hard reload of the settings page.
+      '/settings/server': 'http://localhost:7777',
       '/dev': 'http://localhost:7777',
     },
   },

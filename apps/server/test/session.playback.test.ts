@@ -35,7 +35,7 @@ function fakeUsers(known: Set<string>): UserRepo {
 function baseCfg(overrides: Partial<Config> = {}): Config {
   return {
     port: 7777,
-    moviesRoots: [], showsRoots: [], corsOrigins: ['*'],
+    mediaBases: ['/media'], corsOrigins: ['*'],
     cacheDir: '/tmp/horizon-test',
     dbPath: ':memory:',
     watchedThresholdPct: 90,
@@ -48,6 +48,8 @@ function baseCfg(overrides: Partial<Config> = {}): Config {
     metadataMaxAgeMovieMs: 0, metadataMaxAgeShowMs: 0, metadataMaxAgeEpisodeMs: 0,
     devSeedEnabled: false,
     nodeEnv: 'development',
+    webDir: undefined,
+    serveWeb: false,
     ...overrides,
   }
 }
@@ -59,6 +61,8 @@ function fakeServerSettings(overrides: Partial<ServerSettingsRow> = {}): ServerS
     scanConcurrency: 4,
     watchFs: false,
     watchDebounceMs: 5000,
+    moviesRoots: [],
+    showsRoots: [],
     tmdbToken: null,
     metadataBatchSize: 50,
     metadataMaxAgeMovieDays: 30,

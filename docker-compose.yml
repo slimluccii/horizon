@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
 
     # Run as the user that owns /data on the host (TrueNAS apps user is 568:568).
-    # Override via .env. Movies/shows mounts are read-only so their ownership doesn't matter.
+    # Override via .env. The media base mount is read-only so its ownership doesn't matter.
     user: "${PUID:-568}:${PGID:-568}"
 
     ports:
@@ -30,13 +30,20 @@ services:
     environment:
       # Required
       HORIZON_PORT: "7777"
-      HORIZON_MOVIES_ROOT: "/media/movies"
-      HORIZON_SHOWS_ROOT: "/media/shows"
+      # Allowlisted base dir(s) the server may index. Library folders are picked
+      # at runtime in the web UI and must live under one of these. Colon-separated
+      # for multiple bases — keep these in sync with the volume mounts below
+      # (e.g. "/media:/media2" when you add a second mount).
+      HORIZON_MEDIA_BASE: "${HORIZON_MEDIA_BASE:-/media}"
       HORIZON_CACHE_DIR: "/data/cache"
       HORIZON_DB_PATH: "/data/horizon.db"
       # Optional — set in .env
       HORIZON_TMDB_TOKEN: "${HORIZON_TMDB_TOKEN:-}"
-      HORIZON_CORS_ORIGINS: "${HORIZON_CORS_ORIGINS:-*}"
+      # Web UI is served same-origin by the server, so CORS defaults to OFF
+      # (same-origin only). Set only to allow a separately-hosted client.
+      HORIZON_CORS_ORIGINS: "${HORIZON_CORS_ORIGINS:-}"
+      # Set to 0 to run headless (no bundled web UI).
+      HORIZON_SERVE_WEB: "${HORIZON_SERVE_WEB:-1}"
       HORIZON_MAX_SESSIONS: "${HORIZON_MAX_SESSIONS:-4}"
       HORIZON_MAX_RENDITIONS: "${HORIZON_MAX_RENDITIONS:-3}"
       HORIZON_FORCE_ENCODER: "${HORIZON_FORCE_ENCODER:-}"
@@ -55,9 +62,12 @@ services:
       TZ: "${TZ:-Europe/Amsterdam}"
 
     volumes:
-      # Movies & shows libraries — host paths set in .env (TrueNAS: /mnt/<pool>/...)
-      - "${HORIZON_MOVIES_HOST}:/media/movies:ro"
-      - "${HORIZON_SHOWS_HOST}:/media/shows:ro"
+      # Media base — the host tree holding your movies/shows, mounted read-only.
+      # Pick the actual library folders under it at runtime in the web UI.
+      # Host path set in .env (TrueNAS: /mnt/<pool>/...).
+      - "${HORIZON_MEDIA_HOST}:/media:ro"
+      # For multiple bases, add another mount and extend HORIZON_MEDIA_BASE above:
+      #   - "${HORIZON_MEDIA_HOST2}:/media2:ro"   # then HORIZON_MEDIA_BASE=/media:/media2
       # Persistent state (SQLite DB + HLS transcode cache)
       - "${HORIZON_DATA_HOST}:/data"
 

@@ -19,6 +19,9 @@ export interface ServerSettingsRow {
   scanConcurrency: number
   watchFs: boolean
   watchDebounceMs: number
+  /** Library roots (absolute paths), runtime-settable. JSON arrays in the DB. */
+  moviesRoots: string[]
+  showsRoots: string[]
   // Metadata
   tmdbToken: string | null
   metadataBatchSize: number
@@ -51,6 +54,8 @@ type DbRow = {
   scan_concurrency: number
   watch_fs: number
   watch_debounce_ms: number
+  movies_roots: string
+  shows_roots: string
   tmdb_token: string | null
   metadata_batch_size: number
   metadata_max_age_movie_days: number
@@ -68,6 +73,17 @@ type DbRow = {
   updated_at: number
 }
 
+/** Parse a JSON string-array column, tolerating null/garbage by returning []. */
+function parseRoots(value: unknown): string[] {
+  if (typeof value !== 'string') return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed as string[] : []
+  } catch {
+    return []
+  }
+}
+
 function rowToSettings(row: DbRow): ServerSettingsRow {
   return {
     watchedThresholdPct: row.watched_threshold_pct,
@@ -75,6 +91,8 @@ function rowToSettings(row: DbRow): ServerSettingsRow {
     scanConcurrency: row.scan_concurrency,
     watchFs: row.watch_fs !== 0,
     watchDebounceMs: row.watch_debounce_ms,
+    moviesRoots: parseRoots(row.movies_roots),
+    showsRoots: parseRoots(row.shows_roots),
     tmdbToken: row.tmdb_token,
     metadataBatchSize: row.metadata_batch_size,
     metadataMaxAgeMovieDays: row.metadata_max_age_movie_days,
@@ -126,6 +144,8 @@ export function createServerSettings(db: DatabaseSync): ServerSettings {
       if (patch.scanConcurrency !== undefined) { sets.push('scan_concurrency = ?'); vals.push(patch.scanConcurrency) }
       if (patch.watchFs !== undefined) { sets.push('watch_fs = ?'); vals.push(patch.watchFs ? 1 : 0) }
       if (patch.watchDebounceMs !== undefined) { sets.push('watch_debounce_ms = ?'); vals.push(patch.watchDebounceMs) }
+      if (patch.moviesRoots !== undefined) { sets.push('movies_roots = ?'); vals.push(JSON.stringify(patch.moviesRoots)) }
+      if (patch.showsRoots !== undefined) { sets.push('shows_roots = ?'); vals.push(JSON.stringify(patch.showsRoots)) }
       if (patch.tmdbToken !== undefined) { sets.push('tmdb_token = ?'); vals.push(patch.tmdbToken) }
       if (patch.metadataBatchSize !== undefined) { sets.push('metadata_batch_size = ?'); vals.push(patch.metadataBatchSize) }
       if (patch.metadataMaxAgeMovieDays !== undefined) { sets.push('metadata_max_age_movie_days = ?'); vals.push(patch.metadataMaxAgeMovieDays) }
