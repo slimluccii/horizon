@@ -115,10 +115,15 @@ function connectWs(
   port: number,
   sessionId: string,
   userId?: string,
+  // Browser WebSocket upgrades cannot set request headers, so real clients pass
+  // the caller id as a `user` query param instead. `via` selects which path to
+  // exercise: 'header' (the Node-client default) or 'query' (the browser path).
+  via: 'header' | 'query' = 'header',
 ): Promise<{ rejected: boolean; code?: number; gotServerFrame: boolean }> {
   return new Promise((resolve) => {
-    const headers = userId ? { 'x-horizon-user': userId } : undefined
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/sessions/${sessionId}/ws`, { headers })
+    const headers = userId && via === 'header' ? { 'x-horizon-user': userId } : undefined
+    const query = userId && via === 'query' ? `?user=${encodeURIComponent(userId)}` : ''
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/sessions/${sessionId}/ws${query}`, { headers })
     let gotServerFrame = false
     // For the allowed path the handler keeps the socket open; close it from the
     // client after a tick so the promise resolves with a non-4001 code.
@@ -461,6 +466,30 @@ describe('GET /sessions/:id/ws userId ownership (#41)', () => {
     const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
     const result = await connectWs(port, session.id)
+    expect(result.rejected).toBe(true)
+    expect(result.code).toBe(4001)
+    await app.close()
+  })
+
+  // Regression for the browser-playback path: a real browser WebSocket cannot
+  // set the X-Horizon-User header, so the owner's identity arrives as a `user`
+  // query param. Before resolveCallerRole grew its query fallback this closed
+  // with 4001 and the SDK reconnect-looped forever on "STARTING PLAYBACK…".
+  it('connects (no 4001) when the owner id is supplied via the user query param (browser path)', async () => {
+    const { users, serverSettings, member } = setup()
+    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+    const session = seedSession(sessions, member.id)
+    const result = await connectWs(port, session.id, member.id, 'query')
+    expect(result.rejected).toBe(false)
+    expect(result.gotServerFrame).toBe(true) // session-ready sent on attach
+    await app.close()
+  })
+
+  it('rejects via the user query param when the member does not own the session (close 4001)', async () => {
+    const { users, serverSettings, member, owner } = setup()
+    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+    const session = seedSession(sessions, owner.id)
+    const result = await connectWs(port, session.id, member.id, 'query')
     expect(result.rejected).toBe(true)
     expect(result.code).toBe(4001)
     await app.close()

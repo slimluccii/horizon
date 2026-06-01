@@ -69,12 +69,24 @@ async function main() {
     { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo },
   )
 
+  // Library roots live in serverSettings now (runtime-settable), so the scanner
+  // + watcher read them fresh via these thunks rather than from static cfg.
+  const getRoots = (): { movies: string[]; shows: string[] } => {
+    const s = serverSettings.get()
+    return { movies: s.moviesRoots, shows: s.showsRoots }
+  }
+  const currentWatchRoots = (): string[] => {
+    const { movies, shows } = getRoots()
+    return [...movies, ...shows]
+  }
+
   const scanManager = createScanManager(cfg, {
     media: mediaRepo,
     collections: collectionsRepo,
     scanRoots: scanRootsRepo,
     scanHistory: scanHistoryRepo,
     onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false }) },  // newly indexed items get metadata fast
+    getRoots,
   })
 
   const sessions = createSessionManager(serverSettings)
@@ -106,7 +118,7 @@ async function main() {
     const s = serverSettings.get()
     if (s.watchFs) {
       watcherHandle = startWatcher(
-        { roots: [...cfg.moviesRoots, ...cfg.showsRoots], debounceMs: s.watchDebounceMs },
+        { roots: currentWatchRoots(), debounceMs: s.watchDebounceMs },
         scanManager,
       )
     }
@@ -128,6 +140,9 @@ async function main() {
       await refreshWorker.run({ useChangesFeed: true })
     },
   })
+
+  // Snapshot the current root set so each change event can diff added/removed.
+  let previousRoots = currentWatchRoots()
 
   // Subscribe to settings changes to react to active knobs.
   serverSettings.on('change', ({ patch }) => {
@@ -157,6 +172,42 @@ async function main() {
       console.log(`Scheduler: rescheduled nightly scan to ${patch.scanCronHour}:00 local time`)
     }
 
+    // moviesRoots / showsRoots change → diff added/removed roots. Added roots
+    // get a subtree scan; removed roots are pruned immediately (soft-delete
+    // everything under the prefix) and their orphaned watch-progress is cleaned.
+    // The watcher is then restarted below so it tracks the new root set.
+    if (patch.moviesRoots !== undefined || patch.showsRoots !== undefined) {
+      const nextRoots = currentWatchRoots()
+      const prevSet = new Set(previousRoots)
+      const nextSet = new Set(nextRoots)
+      const added = nextRoots.filter(r => !prevSet.has(r))
+      const removed = previousRoots.filter(r => !nextSet.has(r))
+      previousRoots = nextRoots
+
+      if (added.length > 0) {
+        void scanManager.request({ trigger: 'manual', paths: added })
+      }
+      for (const root of removed) {
+        const pruned = mediaRepo.softDeleteMissingUnder(root, new Set())
+        const orphaned = progressRepo.deleteOrphaned()
+        console.log(`Library root removed: ${root} (pruned ${pruned} items, cleaned ${orphaned} progress rows)`)
+      }
+
+      // Restart the watcher with the new root set.
+      if (watcherHandle) {
+        watcherHandle.stop()
+        watcherHandle = null
+      }
+      const s = serverSettings.get()
+      if (s.watchFs) {
+        watcherHandle = startWatcher(
+          { roots: currentWatchRoots(), debounceMs: s.watchDebounceMs },
+          scanManager,
+        )
+        console.log('Watcher: restarted after library roots change')
+      }
+    }
+
     // watchFs / watchDebounceMs change → restart watcher.
     if (patch.watchFs !== undefined || patch.watchDebounceMs !== undefined) {
       if (watcherHandle) {
@@ -166,7 +217,7 @@ async function main() {
       const s = serverSettings.get()
       if (s.watchFs) {
         watcherHandle = startWatcher(
-          { roots: [...cfg.moviesRoots, ...cfg.showsRoots], debounceMs: s.watchDebounceMs },
+          { roots: currentWatchRoots(), debounceMs: s.watchDebounceMs },
           scanManager,
         )
         console.log('Watcher: restarted after settings change')

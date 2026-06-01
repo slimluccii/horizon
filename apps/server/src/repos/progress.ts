@@ -38,6 +38,9 @@ export interface ProgressRepo {
   markWatched(userId: string, mediaId: string, watched: boolean): WatchProgress | null
   clear(userId: string, mediaId: string): boolean
   continueWatching(userId: string): ContinueWatchingItem[]
+  /** Delete progress rows whose media is gone or soft-deleted (e.g. after a
+   *  library root is removed and its items are swept). Returns rows deleted. */
+  deleteOrphaned(): number
 }
 
 function computeWatched(positionMs: number, durationMs: number, thresholdPct: number): boolean {
@@ -115,6 +118,14 @@ export function createProgressRepo(
         'DELETE FROM watch_progress WHERE user_id = ? AND media_id = ?',
       ).run(userId, mediaId)
       return (res as any).changes > 0
+    },
+
+    deleteOrphaned() {
+      const res = db.prepare(
+        `DELETE FROM watch_progress
+          WHERE media_id NOT IN (SELECT id FROM media_items WHERE deleted_at IS NULL)`,
+      ).run()
+      return (res as any).changes as number
     },
 
     continueWatching(userId) {

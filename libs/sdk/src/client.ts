@@ -1,5 +1,5 @@
 // sdk/src/client.ts
-import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch } from './types.ts'
+import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult } from './types.ts'
 import type { Preferences } from './preferences.ts'
 import { ErrorCodes } from './types.ts'
 import { detectCapabilities } from './capabilities.ts'
@@ -110,6 +110,15 @@ export class HorizonClient {
   }
 
   readonly library = {
+    /**
+     * Confined directory browser for picking library roots (owner/admin only).
+     * No `path` → the configured bases as top-level entries. With `path` → the
+     * immediate subdirectories under it. `parent` is null at/above a base.
+     */
+    browse: (path?: string) =>
+      this.fetch<BrowseResult>(
+        path === undefined ? '/library/browse' : `/library/browse?path=${encodeURIComponent(path)}`,
+      ),
     listMovies: () => this.fetch<MediaItem[]>('/library/movies'),
     listCollections: () => this.fetch<{ id: string; name: string; movies: MediaItem[] }[]>('/library/movies/collections'),
     listShows: () => this.fetch<ShowSummary[]>('/library/shows'),
@@ -168,6 +177,7 @@ export class HorizonClient {
       sessionInfo,
       baseUrl: this.baseUrl,
       capabilities: caps,
+      userId: this.activeUserId ?? undefined,
       onReady: opts.onReady,
       onQualityChange: opts.onQualityChange,
       onTrackChange: opts.onTrackChange,

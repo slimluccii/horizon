@@ -7,6 +7,13 @@ import { createScanRootsRepo, createScanHistoryRepo } from '../src/repos/scanSta
 import { createScanManager } from '../src/scanner/manager.ts'
 import type { ScanScope } from '../src/scanner/scanner.ts'
 
+const baseCfg = {
+  moviesRoots: ['/nonexistent/movies'],
+  showsRoots: ['/nonexistent/shows'],
+  cacheDir: '/tmp/horizon-test-cache',
+  scanConcurrency: 1,
+}
+
 function setup() {
   const db = openDatabase(':memory:')
   migrate(db)
@@ -15,14 +22,10 @@ function setup() {
     collections: createCollectionsRepo(db),
     scanRoots: createScanRootsRepo(db),
     scanHistory: createScanHistoryRepo(db),
+    // Live roots thunk — returns the static baseCfg roots so the manager scans
+    // the same paths the old static-cfg version did.
+    getRoots: () => ({ movies: baseCfg.moviesRoots, shows: baseCfg.showsRoots }),
   }
-}
-
-const baseCfg = {
-  moviesRoots: ['/nonexistent/movies'],
-  showsRoots: ['/nonexistent/shows'],
-  cacheDir: '/tmp/horizon-test-cache',
-  scanConcurrency: 1,
 }
 
 describe('ScanManager', () => {

@@ -398,6 +398,19 @@ describe('segment routes userId ownership (#41)', () => {
       })
       expect(res.statusCode).toBe(200)
     })
+
+    // Browser path: a `<video src>` cannot set headers, so both the token and
+    // the owner id ride as query params. Regression for the playback hang where
+    // resolveCallerRole only read the header and 403'd every browser direct-play.
+    it('allows the owner via token + user query params (no headers, browser path)', async () => {
+      const owned = directSetup()
+      app = await buildApp(owned.sessions, owned.media, owned.users)
+      const res = await app.inject({
+        method: 'GET',
+        url: `/sessions/${owned.session.id}/direct?token=${owned.session.reconnectToken}&user=${owned.member.id}`,
+      })
+      expect(res.statusCode).toBe(200)
+    })
   })
 
   describe('GET /sessions/:id/subtitles/:trackIdx.vtt', () => {

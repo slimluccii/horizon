@@ -200,21 +200,46 @@ describe('PATCH + DELETE /users/:id', () => {
   it('deletes + subsequent 404', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    users.create({ name: 'A' }) // owner
+    const owner = users.create({ name: 'A' }) // owner
     const b = users.create({ name: 'B' }) // member
     const app = await buildApp(users)
-    const del = await app.inject({ method: 'DELETE', url: `/users/${b.id}` })
+    const del = await app.inject({ method: 'DELETE', url: `/users/${b.id}`, headers: { 'x-horizon-user': owner.id } })
     expect(del.statusCode).toBe(204)
     const get = await app.inject({ method: 'GET', url: `/users/${b.id}` })
     expect(get.statusCode).toBe(404)
   })
 
-  it('DELETE owner returns 403 owner-protected', async () => {
+  it('DELETE without caller header returns 400 no-user', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'A' }) // owner
+    const b = users.create({ name: 'B' }) // member
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${b.id}` })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('no-user')
+  })
+
+  it('member cannot DELETE another user (403 caller-forbidden)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'A' }) // owner
+    const member = users.create({ name: 'B' }) // member
+    const victim = users.create({ name: 'C' }) // member
+    const app = await buildApp(users)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${victim.id}`, headers: { 'x-horizon-user': member.id } })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+    // Victim must still exist.
+    expect(users.get(victim.id)).not.toBeNull()
+  })
+
+  it('DELETE owner (by owner) returns 403 owner-protected', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
     const app = await buildApp(users)
-    const res = await app.inject({ method: 'DELETE', url: `/users/${owner.id}` })
+    const res = await app.inject({ method: 'DELETE', url: `/users/${owner.id}`, headers: { 'x-horizon-user': owner.id } })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('owner-protected')
   })

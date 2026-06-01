@@ -9,8 +9,8 @@
 .DS_Store
 *.log
 
-# Clients & native projects (server image only)
-apps/web
+# Native client projects — never part of the server image.
+# (apps/web IS needed: the image builds the web UI and serves it.)
 apps/macos
 apps/android-tv
 

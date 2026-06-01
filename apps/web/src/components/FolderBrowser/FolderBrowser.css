@@ -1,0 +1,120 @@
+.hz-folder-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: var(--hz-surface, #1c2029);
+  border: 1px solid var(--hz-border, #3a4150);
+  border-radius: 8px;
+  padding: 0.75rem;
+  color: var(--hz-text, #e8eaed);
+}
+
+.hz-folder-browser__breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem;
+  font-size: 0.8125rem;
+}
+
+.hz-folder-browser__crumb-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.hz-folder-browser__crumb {
+  background: transparent;
+  border: none;
+  color: var(--hz-accent, #4f8cff);
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0.125rem 0.25rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.hz-folder-browser__crumb:hover:not(:disabled) {
+  background: var(--hz-surface-2, #2a2f3a);
+}
+
+.hz-folder-browser__crumb:disabled {
+  color: var(--hz-text, #e8eaed);
+  cursor: default;
+}
+
+.hz-folder-browser__crumb-sep {
+  color: var(--hz-text-muted, #8b93a1);
+}
+
+.hz-folder-browser__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.hz-folder-browser__entry {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--hz-text, #e8eaed);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  text-align: left;
+  padding: 0.4375rem 0.5rem;
+  cursor: pointer;
+}
+
+.hz-folder-browser__entry:hover {
+  background: var(--hz-surface-2, #2a2f3a);
+}
+
+.hz-folder-browser__entry-icon {
+  flex: none;
+}
+
+.hz-folder-browser__entry-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hz-folder-browser__message {
+  color: var(--hz-text-muted, #8b93a1);
+  font-size: 0.875rem;
+  padding: 0.75rem 0.5rem;
+}
+
+.hz-folder-browser__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-top: 1px solid var(--hz-border, #3a4150);
+  padding-top: 0.75rem;
+}
+
+.hz-folder-browser__current {
+  font-size: 0.8125rem;
+  color: var(--hz-text-muted, #8b93a1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.hz-folder-browser__assign {
+  display: flex;
+  gap: 0.5rem;
+  flex: none;
+}

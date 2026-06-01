@@ -1,13 +1,15 @@
 import type { FastifyInstance } from 'fastify'
+import { statSync } from 'node:fs'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
 import type { ServerSettings } from '../repos/serverSettings.ts'
+import type { Config } from '../config.ts'
 import { badRequest, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
+import { resolveUnderBases } from '../paths/confine.ts'
 
 /**
  * Zod schema for the writable subset of ServerSettingsRow.
- * Only Library knobs for this slice — extend in subsequent slices.
  */
 const PatchBody = z.object({
   // Library
@@ -34,6 +36,11 @@ const PatchBody = z.object({
         (v.length >= 48 && /^[A-Za-z0-9\-_.]+\.[A-Za-z0-9\-_.]+\.[A-Za-z0-9\-_.]+$/.test(v)),
       { message: 'TMDB token must be in JWT format (3 base64url segments separated by dots, ≥48 chars)' },
     ),
+  // Library roots — absolute paths inside the container. Each entry must resolve
+  // under a configured media base (HORIZON_MEDIA_BASE); validated below against
+  // cfg.mediaBases before persisting, since Zod can't see the filesystem.
+  moviesRoots: z.array(z.string()).optional(),
+  showsRoots: z.array(z.string()).optional(),
   metadataBatchSize: z.number().int().min(1).max(500).optional(),
   metadataMaxAgeMovieDays: z.number().int().min(1).optional(),
   metadataMaxAgeShowDays: z.number().int().min(1).optional(),
@@ -53,9 +60,10 @@ export function registerSettings(
   app: FastifyInstance,
   users: UserRepo,
   serverSettings: ServerSettings,
+  cfg: Config,
 ): void {
   /**
-   * GET /settings/server — open to any authenticated User.
+   * GET /settings/server — open to any authenticated user.
    * Sensitive fields are masked: tmdbToken returns "set"/"unset", never the value.
    */
   app.get('/settings/server', async (req, reply) => {
@@ -74,7 +82,8 @@ export function registerSettings(
 
   /**
    * PATCH /settings/server — owner + admin only.
-   * Accepts a partial body, validates against schema, persists, emits change events.
+   * Validates the partial body, confines any library roots to the media base(s),
+   * persists, and emits change events.
    */
   app.patch('/settings/server', async (req, reply) => {
     const caller = resolveCallerRole(users, req)
@@ -89,6 +98,27 @@ export function registerSettings(
     const patch = { ...parse.data }
     // Normalise empty string → null (clears the token).
     if (patch.tmdbToken === '') patch.tmdbToken = null
+
+    // Confine library roots to the operator-mounted media base(s). Validate EVERY
+    // entry before any write so one bad path rejects the whole patch (no partial
+    // update). resolveUnderBases permits not-yet-existing paths (lexical fallback)
+    // for traversal safety, so additionally require an existing directory here.
+    // Store the symlink-resolved absolute paths.
+    for (const key of ['moviesRoots', 'showsRoots'] as const) {
+      const roots = patch[key]
+      if (roots === undefined) continue
+      const resolved: string[] = []
+      for (const r of roots) {
+        const real = resolveUnderBases(cfg.mediaBases, r)
+        let isDir = false
+        if (real) { try { isDir = statSync(real).isDirectory() } catch { isDir = false } }
+        if (!real || !isDir) {
+          return badRequest(reply, ErrorCodes.INVALID_PATH, `Path "${r}" is not an existing directory under an allowed media base`)
+        }
+        resolved.push(real)
+      }
+      patch[key] = resolved
+    }
 
     const updated = serverSettings.update(patch)
     return {

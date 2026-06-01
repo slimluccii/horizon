@@ -7,7 +7,7 @@ describe('migrate', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(4)
+    expect(ver).toBe(5)
   })
 
   it('is idempotent — applying twice leaves version at the latest', () => {
@@ -15,9 +15,9 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(4)
+    expect(ver).toBe(5)
     const rows = db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]
-    expect(rows.map(r => r.version)).toEqual([1, 2, 3, 4])
+    expect(rows.map(r => r.version)).toEqual([1, 2, 3, 4, 5])
   })
 
   it('creates all tables', () => {
@@ -104,7 +104,7 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(4)
+    expect(ver).toBe(5)
     const owners = db.prepare("SELECT id FROM users WHERE role = 'owner'").all() as { id: string }[]
     expect(owners).toHaveLength(1)
     expect(owners[0].id).toBe('u1')
@@ -121,11 +121,24 @@ describe('migrate', () => {
     }).toThrow(/UNIQUE constraint failed: users\.role/)
   })
 
-  it('v4: user_version is 4 after fresh migrate', () => {
+  it('v5: user_version is 5 after fresh migrate', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(4)
+    expect(ver).toBe(5)
+  })
+
+  it('v5: server_settings has movies_roots/shows_roots defaulting to []', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const cols = db.prepare('PRAGMA table_info(server_settings)').all() as { name: string; dflt_value: string | null }[]
+    const movies = cols.find(c => c.name === 'movies_roots')
+    const shows = cols.find(c => c.name === 'shows_roots')
+    expect(movies).toBeDefined()
+    expect(shows).toBeDefined()
+    const row = db.prepare('SELECT movies_roots, shows_roots FROM server_settings WHERE id = 1').get() as { movies_roots: string; shows_roots: string }
+    expect(row.movies_roots).toBe('[]')
+    expect(row.shows_roots).toBe('[]')
   })
 
   it('v4: server_settings table exists after migrate', () => {

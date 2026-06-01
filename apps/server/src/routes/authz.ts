@@ -3,17 +3,25 @@ import type { UserRepo } from '../repos/users.ts'
 import { badRequest, ErrorCodes } from './errors.ts'
 
 /**
- * Resolve the calling user from the X-Horizon-User header.
- * Returns the user's id + role, or null if the header is absent, not a
- * string, or does not resolve to an existing user. Callers decide how to
- * handle null (e.g. reply 400 / 403).
+ * Resolve the calling user from the X-Horizon-User header, falling back to a
+ * `user` query param. Returns the user's id + role, or null if neither is
+ * present, not a string, or does not resolve to an existing user. Callers
+ * decide how to handle null (e.g. reply 400 / 403).
+ *
+ * The query-param fallback exists because browser playback transports cannot
+ * set request headers: a `WebSocket` upgrade, a `<video src>` (direct-play),
+ * and a `<track src>` (subtitles) all issue header-less GETs. The identity is
+ * not a secret (it is the same user id used in the X-Horizon-User header), so
+ * carrying it in the query is no weaker than the header; the per-session
+ * reconnectToken remains the proof-of-knowledge gate alongside this check.
  */
 export function resolveCallerRole(
   users: UserRepo,
   req: FastifyRequest,
 ): { id: string; role: 'owner' | 'admin' | 'member' } | null {
   const hdr = req.headers['x-horizon-user']
-  const id = typeof hdr === 'string' ? hdr : null
+  const queryUser = (req.query as { user?: string } | undefined)?.user
+  const id = typeof hdr === 'string' ? hdr : (typeof queryUser === 'string' ? queryUser : null)
   if (!id) return null
   const u = users.get(id)
   return u ? { id: u.id, role: u.role } : null

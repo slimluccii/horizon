@@ -10,6 +10,10 @@ export interface SessionManager {
   get(id: string): Session | undefined
   getByReconnectToken(token: string): Session | undefined
   destroy(id: string): Promise<void>
+  /** Destroy every live session. Used on process shutdown so child ffmpeg
+   *  processes are killed instead of being orphaned (reparented to init) when
+   *  the server exits. */
+  destroyAll(): Promise<void>
   size(): number
   /** Attach a SessionRuntime to a Session right after create. Only the
    *  PlaybackOrchestrator should call this. */
@@ -108,8 +112,13 @@ export function createSessionManager(serverSettings: ServerSettings): SessionMan
     session.state = 'destroyed'
   }
 
+  async function destroyAll() {
+    // Snapshot ids first — destroy() mutates the sessions map as it deletes.
+    await Promise.all([...sessions.keys()].map(id => destroy(id)))
+  }
+
   return {
-    create, get, getByReconnectToken, destroy,
+    create, get, getByReconnectToken, destroy, destroyAll,
     size: () => sessions.size,
     attachRuntime: (id, runtime) => { runtimes.set(id, runtime) },
     getRuntime: (id) => runtimes.get(id),

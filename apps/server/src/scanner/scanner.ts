@@ -10,8 +10,12 @@ import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../repos/media.ts'
 import type { CollectionsRepo, Collection } from '../repos/collections.ts'
 
 export interface ScanConfig {
-  moviesRoots: string[]
-  showsRoots: string[]
+  /** Library roots. Optional on the base config because they're now runtime-
+   *  settable (serverSettings) rather than from env Config — the ScanManager
+   *  overlays the live values via deps.getRoots before calling fullScope /
+   *  classifyPath. Default to [] when absent. */
+  moviesRoots?: string[]
+  showsRoots?: string[]
   cacheDir: string
   scanConcurrency: number
 }
@@ -72,8 +76,8 @@ export interface ScanScope {
 /** Build a scope for a "full" scan covering every configured root. */
 export function fullScope(cfg: ScanConfig): ScanScope {
   return {
-    moviesPaths: [...cfg.moviesRoots],
-    showsPaths: [...cfg.showsRoots],
+    moviesPaths: [...(cfg.moviesRoots ?? [])],
+    showsPaths: [...(cfg.showsRoots ?? [])],
     fullScope: true,
   }
 }
@@ -81,8 +85,8 @@ export function fullScope(cfg: ScanConfig): ScanScope {
 /** Decide whether a subtree path is under a movies root or a shows root.
  *  Returns null if the path doesn't match any configured root. */
 export function classifyPath(p: string, cfg: ScanConfig): 'movies' | 'shows' | null {
-  for (const r of cfg.moviesRoots) if (p === r || p.startsWith(`${r}/`)) return 'movies'
-  for (const r of cfg.showsRoots) if (p === r || p.startsWith(`${r}/`)) return 'shows'
+  for (const r of cfg.moviesRoots ?? []) if (p === r || p.startsWith(`${r}/`)) return 'movies'
+  for (const r of cfg.showsRoots ?? []) if (p === r || p.startsWith(`${r}/`)) return 'shows'
   return null
 }
 
@@ -145,7 +149,7 @@ async function scanShowsPath(
 
   // A show subtree is either a *root* (containing many show dirs) or a single
   // show directory. Detect by checking if the path itself is one of cfg.showsRoots.
-  const isRoot = cfg.showsRoots.includes(pathToScan)
+  const isRoot = (cfg.showsRoots ?? []).includes(pathToScan)
   const showDirs = isRoot
     ? (await readdir(pathToScan, { withFileTypes: true }).catch(() => []))
         .filter(e => e.isDirectory())

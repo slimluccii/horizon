@@ -3,6 +3,7 @@ import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
 import type { Preferences, User, ServerSettings } from '@horizon/sdk'
+import { FolderBrowser, type LibraryTag } from '../components/FolderBrowser/FolderBrowser.tsx'
 import LargeTopNav from '../components/chrome/LargeTopNav.tsx'
 import './Settings.css'
 
@@ -122,6 +123,134 @@ type PlaybackForm = {
 const TONEMAP_OPERATORS = [
   'hable', 'mobius', 'reinhard', 'gamma', 'clip', 'linear', 'none',
 ] as const
+
+/**
+ * Library folders subsection of the Server tab. Lists the configured movies /
+ * shows roots, lets an owner/admin add folders via the confined FolderBrowser
+ * (tagging each Movies or Shows) and remove existing ones. Roots persist via
+ * PATCH /settings/server; the server confines every path to HORIZON_MEDIA_BASE.
+ */
+function LibraryFoldersPanel({ onSave }: { onSave: (msg: string) => void }) {
+  const [moviesRoots, setMoviesRoots] = useState<string[] | null>(null)
+  const [showsRoots, setShowsRoots] = useState<string[] | null>(null)
+  const [showBrowser, setShowBrowser] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    horizon.settings.getServer().then(s => {
+      setMoviesRoots(s.moviesRoots)
+      setShowsRoots(s.showsRoots)
+    }).catch(() => setError('Failed to load library folders.'))
+  }, [])
+
+  async function persist(nextMovies: string[], nextShows: string[]) {
+    setBusy(true)
+    setError(null)
+    try {
+      await horizon.settings.patchServer({ moviesRoots: nextMovies, showsRoots: nextShows })
+      setMoviesRoots(nextMovies)
+      setShowsRoots(nextShows)
+      onSave('Library folders updated.')
+    } catch (e) {
+      // Surface the server's reason (e.g. path outside the media base) when present.
+      const msg = (e as { message?: string })?.message
+      setError(msg && msg !== 'undefined' ? `Failed to save: ${msg}` : 'Failed to save library folders.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function handlePick(path: string, tag: LibraryTag) {
+    const movies = moviesRoots ?? []
+    const shows = showsRoots ?? []
+    const addMovie = tag === 'movies' && !movies.includes(path)
+    const addShow = tag === 'shows' && !shows.includes(path)
+    const nextMovies = addMovie ? [...movies, path] : movies
+    const nextShows = addShow ? [...shows, path] : shows
+    if (addMovie || addShow) void persist(nextMovies, nextShows)
+    setShowBrowser(false)
+  }
+
+  function handleRemove(path: string, tag: LibraryTag) {
+    const ok = window.confirm(
+      `Remove this ${tag === 'movies' ? 'movies' : 'shows'} folder?\n\n${path}\n\nItems under it will be removed from your library on the next rescan.`,
+    )
+    if (!ok) return
+    const movies = moviesRoots ?? []
+    const shows = showsRoots ?? []
+    void persist(
+      tag === 'movies' ? movies.filter(p => p !== path) : movies,
+      tag === 'shows' ? shows.filter(p => p !== path) : shows,
+    )
+  }
+
+  function renderList(roots: string[], tag: LibraryTag) {
+    return (
+      <div className="settings__field">
+        <label className="settings__label">{tag === 'movies' ? 'Movies folders' : 'Shows folders'}</label>
+        {roots.length === 0 ? (
+          <p className="settings__roots-empty">No folders added.</p>
+        ) : (
+          <ul className="settings__roots-list">
+            {roots.map(path => (
+              <li key={path} className="settings__roots-row">
+                <span className="settings__roots-path" title={path}>{path}</span>
+                <button
+                  type="button"
+                  className="settings__roots-remove"
+                  disabled={busy}
+                  onClick={() => handleRemove(path, tag)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )
+  }
+
+  if (moviesRoots === null || showsRoots === null) {
+    return error
+      ? <p style={{ color: 'var(--danger)', fontSize: '13px' }}>{error}</p>
+      : <p className="settings__section-title">Loading…</p>
+  }
+
+  return (
+    <>
+      <p className="settings__section-title">Library folders</p>
+
+      {renderList(moviesRoots, 'movies')}
+      {renderList(showsRoots, 'shows')}
+
+      {showBrowser ? (
+        <div className="settings__field">
+          <FolderBrowser browse={path => horizon.library.browse(path)} onPick={handlePick} />
+          <div className="settings__roots-browser-actions">
+            <button type="button" className="settings__token-cancel" onClick={() => setShowBrowser(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="settings__field">
+          <button
+            type="button"
+            className="settings__token-replace"
+            disabled={busy}
+            onClick={() => setShowBrowser(true)}
+          >
+            Add folder
+          </button>
+        </div>
+      )}
+
+      {error && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{error}</p>}
+    </>
+  )
+}
 
 function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
   const [initialLib, setInitialLib] = useState<LibraryForm | null>(null)
@@ -703,7 +832,10 @@ export default function Settings() {
         </div>
 
         {activeTab === 'Server' && (
-          <ServerPanel onSave={showToast} />
+          <>
+            <LibraryFoldersPanel onSave={showToast} />
+            <ServerPanel onSave={showToast} />
+          </>
         )}
 
         {activeTab === 'Profiles' && user && (
