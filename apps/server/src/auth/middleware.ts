@@ -89,13 +89,19 @@ export const AUTH_ALLOWLIST_BY_METHOD: Readonly<Record<string, ReadonlyArray<str
 }
 
 /** Is `path` exempt from auth? Compares against the route path (no query). When
- *  `method` is given, also honours the per-method allowlist (e.g. GET /users). */
+ *  `method` is given, also honours the per-method allowlist (e.g. GET /users).
+ *
+ *  The guard runs inside the `/api` plugin, so route paths arrive prefixed
+ *  (`/api/auth/login`); the allowlist entries are written unprefixed, so we
+ *  strip a leading `/api` first. This also lets the server unit tests register
+ *  routes WITHOUT the prefix and still exercise the same allowlist. */
 export function isAllowlisted(path: string, method?: string): boolean {
-  if (AUTH_ALLOWLIST.includes(path)) return true
-  if (AUTH_ALLOWLIST_PREFIXES.some(prefix => path.startsWith(prefix))) return true
+  const p = path === '/api' ? '/' : path.startsWith('/api/') ? path.slice(4) : path
+  if (AUTH_ALLOWLIST.includes(p)) return true
+  if (AUTH_ALLOWLIST_PREFIXES.some(prefix => p.startsWith(prefix))) return true
   if (method) {
     const forMethod = AUTH_ALLOWLIST_BY_METHOD[method.toUpperCase()]
-    if (forMethod?.includes(path)) return true
+    if (forMethod?.includes(p)) return true
   }
   return false
 }

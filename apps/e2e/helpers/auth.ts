@@ -1,7 +1,7 @@
 import { type APIRequestContext, type BrowserContext, type Page, expect } from '@playwright/test'
 
 export const APP = 'http://localhost:5173'
-export const API = 'http://localhost:7777'
+export const API = 'http://localhost:7777/api'
 
 /**
  * E2E auth helpers for the post-auth world: there is no X-Horizon-User header

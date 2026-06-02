@@ -55,7 +55,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'node --import tsx apps/server/src/index.ts',
-      url: 'http://localhost:7777/health',
+      url: 'http://localhost:7777/api/health',
       reuseExistingServer: false,
       timeout: 60_000,
       env: {

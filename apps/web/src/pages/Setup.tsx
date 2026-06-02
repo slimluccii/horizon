@@ -137,7 +137,7 @@ export default function Setup() {
       // endpoint is owner/admin-gated; the owner's session cookie (set when the
       // password was created in step 1) rides the request via credentials.
       if (moviesRoots.length > 0 || showsRoots.length > 0) {
-        await fetch('/library/rescan', {
+        await fetch('/api/library/rescan', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },

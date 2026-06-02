@@ -14,5 +14,5 @@ export function tmdbImageUrl(
   // TMDB paths arrive with a leading slash; strip it so the URL doesn't
   // double-slash and so the proxy's `*` segment matches as expected.
   const tail = path.replace(/^\//, '')
-  return `${baseUrl}/metadata/image/${size}/${tail}`
+  return `${baseUrl}/api/metadata/image/${size}/${tail}`
 }

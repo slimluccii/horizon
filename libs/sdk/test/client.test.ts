@@ -198,7 +198,7 @@ describe('HorizonClient.auth', () => {
     const fn = spyFetch({ token: 'sess-tok', user })
     const client = new HorizonClient({ baseUrl: 'http://x' })
     const res = await client.auth.login('Ada', 'pw')
-    expect(fn.mock.calls[0][0]).toBe('http://x/auth/login')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/login')
     const init = fn.mock.calls[0][1] as RequestInit
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ name: 'Ada', password: 'pw' })
@@ -211,7 +211,7 @@ describe('HorizonClient.auth', () => {
     const client = new HorizonClient({ baseUrl: 'http://x' })
     client.setToken('sess-tok')
     await client.auth.logout()
-    expect(fn.mock.calls[0][0]).toBe('http://x/auth/logout')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/logout')
     expect(client.getToken()).toBeNull()
   })
 
@@ -220,7 +220,7 @@ describe('HorizonClient.auth', () => {
     const client = new HorizonClient({ baseUrl: 'http://x' })
     client.setToken('sess-tok')
     const res = await client.auth.logoutAll()
-    expect(fn.mock.calls[0][0]).toBe('http://x/auth/logout-all')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/logout-all')
     expect(res).toEqual({ revoked: 3 })
     expect(client.getToken()).toBeNull()
   })
@@ -229,7 +229,7 @@ describe('HorizonClient.auth', () => {
     const fn = spyFetch(user)
     const client = new HorizonClient({ baseUrl: 'http://x' })
     const res = await client.auth.me()
-    expect(fn.mock.calls[0][0]).toBe('http://x/auth/me')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/me')
     expect(res).toEqual(user)
   })
 
@@ -237,7 +237,7 @@ describe('HorizonClient.auth', () => {
     const fn = spyFetch({ token: 'new-tok', user })
     const client = new HorizonClient({ baseUrl: 'http://x' })
     const res = await client.auth.setPassword({ oldPassword: 'old', newPassword: 'newlongpw' })
-    expect(fn.mock.calls[0][0]).toBe('http://x/auth/set-password')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/set-password')
     expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ oldPassword: 'old', newPassword: 'newlongpw' })
     expect(client.getToken()).toBe('new-tok')
     expect(res).toEqual({ token: 'new-tok', user })
@@ -255,7 +255,7 @@ describe('HorizonClient.auth', () => {
     const fn = spyFetch({ code: 'ABCD-2345', expiresAt: 123 })
     const client = new HorizonClient({ baseUrl: 'http://x' })
     const res = await client.auth.pairStart()
-    expect(fn.mock.calls[0][0]).toBe('http://x/auth/pair/start')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/pair/start')
     expect(res).toEqual({ code: 'ABCD-2345', expiresAt: 123 })
   })
 
@@ -263,7 +263,7 @@ describe('HorizonClient.auth', () => {
     const fn = spyFetch({ ok: true })
     const client = new HorizonClient({ baseUrl: 'http://x' })
     await client.auth.pairApprove('ABCD-2345')
-    expect(fn.mock.calls[0][0]).toBe('http://x/auth/pair/approve')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/pair/approve')
     expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ code: 'ABCD-2345' })
   })
 

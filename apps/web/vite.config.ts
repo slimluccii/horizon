@@ -5,17 +5,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Every backend endpoint lives under /api, so one proxy rule covers them all
+    // (ws:true for the session WebSocket upgrade). Everything else is the SPA,
+    // served by Vite — no more per-prefix rules that clashed with client routes
+    // like /settings.
     proxy: {
-      '/library': 'http://localhost:7777',
-      '/sessions': { target: 'http://localhost:7777', ws: true },
-      '/health': 'http://localhost:7777',
-      '/metadata': 'http://localhost:7777',
-      '/auth': 'http://localhost:7777',
-      '/users': 'http://localhost:7777',
-      // Only the API subpath — '/settings' itself is a client-side route, so
-      // proxying the whole prefix would break a hard reload of the settings page.
-      '/settings/server': 'http://localhost:7777',
-      '/dev': 'http://localhost:7777',
+      '/api': { target: 'http://localhost:7777', ws: true },
     },
   },
 })

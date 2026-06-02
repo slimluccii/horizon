@@ -60,7 +60,7 @@ test.describe('first-boot setup', () => {
   test('re-creating a profile now requires auth (household not empty)', async ({ request }) => {
     // The first create consumed the first-boot allowlist; a second unauthenticated
     // create is rejected by the auth guard (401), not silently accepted.
-    const res = await request.post('http://localhost:5173/users', {
+    const res = await request.post('http://localhost:5173/api/users', {
       data: { name: 'Stranger' },
       failOnStatusCode: false,
     })

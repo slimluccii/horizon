@@ -108,7 +108,7 @@ test.describe('mock scenarios', () => {
   test('image proxy: mock poster returns a real image', async ({ request }) => {
     await seed(request, 'tiny')
     // Image proxy is unauthenticated (cacheable static-ish asset).
-    const res = await request.get(`${APP}/metadata/image/w342/mock/poster/neon-horizon.jpg`)
+    const res = await request.get(`${APP}/api/metadata/image/w342/mock/poster/neon-horizon.jpg`)
     expect(res.status()).toBe(200)
     expect(res.headers()['content-type']).toMatch(/^image\//)
     expect((await res.body()).byteLength).toBeGreaterThan(1000)

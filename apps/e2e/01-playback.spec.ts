@@ -39,7 +39,7 @@ interface ReadyMsg {
  *  (carries the reconnectToken). Rejects on timeout / socket error. */
 function awaitSessionReady(owner: SessionUser, sessionId: string, timeoutMs = 60_000): Promise<ReadyMsg> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://localhost:7777/sessions/${sessionId}/ws`, {
+    const ws = new WebSocket(`ws://localhost:7777/api/sessions/${sessionId}/ws`, {
       headers: { authorization: `Bearer ${owner.token}` },
     })
     const timer = setTimeout(() => { ws.close(); reject(new Error('session-ready timeout')) }, timeoutMs)

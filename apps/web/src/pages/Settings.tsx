@@ -495,7 +495,7 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
       setPlaybackForm(pf)
     }).catch(() => setError('Failed to load server settings.'))
 
-    fetch('/health').then(r => r.json()).then((h: { hwAccel?: string }) => {
+    fetch('/api/health').then(r => r.json()).then((h: { hwAccel?: string }) => {
       if (h.hwAccel) setDetectedEncoder(h.hwAccel)
     }).catch(() => {/* non-critical */})
   }, [])

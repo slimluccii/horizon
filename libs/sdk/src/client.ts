@@ -109,7 +109,10 @@ export class HorizonClient {
     // makes Fastify try to parse an empty body and 400 — so set the header only
     // when there's a body.
     const hasBody = init?.body != null
-    const res = await fetch(`${this.baseUrl}${path}`, {
+    // All backend endpoints live under `/api` (server-side API/web split). Call
+    // sites keep clean resource paths ('/library/movies'); the prefix is applied
+    // here in one place.
+    const res = await fetch(`${this.baseUrl}/api${path}`, {
       // Always send credentials so the web's httpOnly hz_session cookie rides
       // every request (including cross-origin dev via the Vite proxy). Native
       // clients have no cookie and lean on the Authorization header instead.

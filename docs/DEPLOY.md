@@ -136,7 +136,7 @@ In the Dockge web UI:
 ### 5. Verify the server is up
 
 ```bash
-curl http://<truenas-ip>:7777/health
+curl http://<truenas-ip>:7777/api/health
 # → {"status":"ok", ...}
 ```
 
@@ -171,9 +171,9 @@ Alternatives, if you want them:
   `HORIZON_SERVE_WEB=0` in `.env`.
 - **Host the UI separately** (CDN / its own container): build it with
   `npm -w @horizon/web run build` (→ `apps/web/dist/`) and serve it from your own
-  host, reverse-proxying `/library`, `/sessions` (with WebSocket upgrade),
-  `/health`, `/metadata`, and `/users` to the server. If that host is a different
-  origin, set `HORIZON_CORS_ORIGINS` to it.
+  host, reverse-proxying everything under `/api` (one prefix; include the
+  WebSocket upgrade for `/api/sessions/*/ws`) to the server. If that host is a
+  different origin, set `HORIZON_CORS_ORIGINS` to it.
 - **Local dev against the NAS**: point the Vite dev proxy targets in
   `apps/web/vite.config.ts` at `http://<truenas-ip>:7777`, then `npm -w @horizon/web run dev`.
 - **Native clients**: the macOS app (`apps/macos`) and Android TV app (Part 2)
@@ -380,7 +380,7 @@ adb -s <shield-ip>:5555 uninstall network.luuk.horizontv
 |---------|-----|
 | `adb: failed to connect to <ip>:5555` | Network debugging toggled off, or Shield rebooted. Re-enable in Developer options. |
 | `INSTALL_FAILED_VERSION_DOWNGRADE` | Already installed at higher versionCode. Uninstall first (above). |
-| App opens but library is empty | `BuildConfig.SERVER_URL` is wrong, or server unreachable. Re-check `local.properties`, then `adb shell curl http://<truenas-ip>:7777/health` from the Shield. |
+| App opens but library is empty | `BuildConfig.SERVER_URL` is wrong, or server unreachable. Re-check `local.properties`, then `adb shell curl http://<truenas-ip>:7777/api/health` from the Shield. |
 | Playback fails with codec error | The default render path uses Media3 software fallback for unsupported tracks — check logcat (`-s ExoPlayer`) for the codec MIME type and confirm the server is producing an HLS rendition the Shield can decode. Force a lower max rendition: `HORIZON_MAX_RENDITIONS=2` on the server. |
 | Gradle download stalls behind a proxy | Set `gradle.properties` proxy settings or run with `--offline` after a successful first build. |
 
@@ -393,7 +393,7 @@ adb -s <shield-ip>:5555 uninstall network.luuk.horizontv
 | Server image | `docker build -f apps/server/Dockerfile -t horizon:latest .` (from repo root) |
 | Server compose | [`docker-compose.yml`](../docker-compose.yml) |
 | Server env template | [`.env.example`](../.env.example) |
-| Server health | `GET http://<host>:7777/health` |
+| Server health | `GET http://<host>:7777/api/health` |
 | Server data dir | `HORIZON_DATA_HOST` on host → `/data` in container |
 | TV deploy | `tv/bin/deploy-shield <ip>` |
 | TV server URL config | `tv/local.properties` → `HORIZON_SERVER_URL` |

@@ -59,13 +59,23 @@ describe('web UI serving', () => {
     expect(settings.json()).toEqual({ ok: true })
   })
 
-  it('returns JSON 404 (not the SPA) for unknown API paths', async () => {
+  it('returns JSON 404 (not the SPA) for unknown /api paths', async () => {
     const app = await buildApp()
-    for (const url of ['/library/nope', '/users/ghost', '/metadata/x/y', '/settings/server/bogus']) {
+    for (const url of ['/api/library/nope', '/api/users/ghost', '/api/metadata/x/y', '/api/settings/server/bogus']) {
       const res = await app.inject({ method: 'GET', url })
       expect(res.statusCode, url).toBe(404)
       expect(res.headers['content-type'], url).toContain('application/json')
       expect(res.json().code, url).toBe('not-found')
+    }
+  })
+
+  it('serves the SPA shell (not JSON 404) for unknown non-/api GET routes', async () => {
+    const app = await buildApp()
+    // Anything outside /api is a client-side route → index.html.
+    for (const url of ['/library', '/anything/deep']) {
+      const res = await app.inject({ method: 'GET', url })
+      expect(res.statusCode, url).toBe(200)
+      expect(res.headers['content-type'], url).toContain('text/html')
     }
   })
 

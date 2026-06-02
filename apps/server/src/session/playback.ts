@@ -197,9 +197,9 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         sessionId: session.id,
         method: plan.method,
         streamUrl: plan.method === 'direct-play'
-          ? `/sessions/${session.id}/direct`
-          : `/sessions/${session.id}/stream.m3u8`,
-        wsUrl: `/sessions/${session.id}/ws`,
+          ? `/api/sessions/${session.id}/direct`
+          : `/api/sessions/${session.id}/stream.m3u8`,
+        wsUrl: `/api/sessions/${session.id}/ws`,
         profiles: profiles.length > 0 ? profiles : [initialProfile],
         selectedAudioTrack: audioTrackIndex,
         selectedSubtitleTrack: subtitleTrackIndex,
