@@ -104,12 +104,21 @@ export class HorizonClient {
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+    // Only advertise a JSON body when one is actually sent. A bodyless POST
+    // (logout, logout-all, pair/start) with `Content-Type: application/json`
+    // makes Fastify try to parse an empty body and 400 — so set the header only
+    // when there's a body.
+    const hasBody = init?.body != null
     const res = await fetch(`${this.baseUrl}${path}`, {
       // Always send credentials so the web's httpOnly hz_session cookie rides
       // every request (including cross-origin dev via the Vite proxy). Native
       // clients have no cookie and lean on the Authorization header instead.
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...this.authHeaders(), ...(init?.headers ?? {}) },
+      headers: {
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+        ...this.authHeaders(),
+        ...(init?.headers ?? {}),
+      },
       ...init,
     })
     if (!res.ok) {

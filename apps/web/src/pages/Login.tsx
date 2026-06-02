@@ -8,8 +8,8 @@ import type { User } from '@horizon/sdk'
 import './Login.css'
 
 /** Deterministic per-user colour so picker tiles are visually distinct.
- *  Mirrors ProfilePicker / ProfileBadgeButton so the same name always maps to
- *  the same accent across the app. */
+ *  Mirrors ProfileBadgeButton so the same name always maps to the same accent
+ *  across the app. */
 function userColor(name: string): string {
   const palette = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
   let hash = 0

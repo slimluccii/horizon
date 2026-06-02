@@ -70,4 +70,22 @@ test.describe('profiles & roles', () => {
     await expect(page.getByRole('button', { name: 'Personal' })).toHaveClass(/is-active/)
     await expect(page.getByRole('status')).toHaveText(/role changed/i)
   })
+
+  test('profile badge → Sign out returns to /login and ends the session', async ({ context, page, request }) => {
+    const owner = await ensureOwner(request)
+    await authBrowser(context, owner)
+
+    await page.goto(`${APP}/`)
+    await expect(page).not.toHaveURL(/\/login$/)
+
+    // Open the badge dropdown (its accessible name is the owner's name) → Sign out.
+    await page.getByRole('button', { name: owner.name }).click()
+    await page.getByRole('button', { name: /sign out/i }).click()
+
+    // Lands on the login profile picker, and the session is gone — revisiting a
+    // guarded route bounces back to /login.
+    await expect(page).toHaveURL(/\/login$/)
+    await page.goto(`${APP}/settings`)
+    await expect(page).toHaveURL(/\/login$/)
+  })
 })
