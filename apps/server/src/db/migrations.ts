@@ -2,6 +2,9 @@ import type { DatabaseSync } from './index.ts'
 
 interface Migration { version: number; sql: string }
 
+// Single baseline schema. This version of Horizon is unreleased, so there are no
+// deployed databases to migrate — v1 IS the final schema. The migrate() runner
+// below is kept so future, post-release schema changes can be added as v2+.
 const V1_SQL = `
 CREATE TABLE schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -9,13 +12,23 @@ CREATE TABLE schema_migrations (
 );
 
 CREATE TABLE users (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  avatar      TEXT,
-  preferences TEXT NOT NULL DEFAULT '{}',
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  avatar          TEXT,
+  preferences     TEXT NOT NULL DEFAULT '{}',
+  role            TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','admin','member')),
+  -- Built-in auth (Argon2id/scrypt). password_hash nullable until set;
+  -- password_set_at null = never set (forces the set-password flow).
+  password_hash   TEXT,
+  password_set_at INTEGER,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until    INTEGER,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
 );
+
+-- At most one owner.
+CREATE UNIQUE INDEX idx_users_one_owner ON users(role) WHERE role='owner';
 
 CREATE TABLE media_items (
   id              TEXT PRIMARY KEY,
@@ -41,14 +54,22 @@ CREATE TABLE media_items (
   external_ids    TEXT NOT NULL DEFAULT '{}',
   metadata        TEXT,
 
+  -- Metadata freshness tracking.
+  tmdb_id               INTEGER,
+  metadata_fetched_at   INTEGER,
+  metadata_failed_at    INTEGER,
+  metadata_failed_count INTEGER NOT NULL DEFAULT 0,
+
   first_seen_at   INTEGER NOT NULL,
   last_seen_at    INTEGER NOT NULL,
   deleted_at      INTEGER
 );
 
-CREATE INDEX idx_media_kind   ON media_items(kind)                       WHERE deleted_at IS NULL;
-CREATE INDEX idx_media_parent ON media_items(parent_id, season, episode) WHERE deleted_at IS NULL;
-CREATE INDEX idx_media_title  ON media_items(title)                      WHERE deleted_at IS NULL;
+CREATE INDEX idx_media_kind     ON media_items(kind)                       WHERE deleted_at IS NULL;
+CREATE INDEX idx_media_parent   ON media_items(parent_id, season, episode) WHERE deleted_at IS NULL;
+CREATE INDEX idx_media_title    ON media_items(title)                      WHERE deleted_at IS NULL;
+CREATE INDEX idx_media_tmdb_id  ON media_items(tmdb_id)                    WHERE tmdb_id IS NOT NULL;
+CREATE INDEX idx_media_meta_age ON media_items(metadata_fetched_at)        WHERE deleted_at IS NULL;
 
 CREATE TABLE collections (
   id         TEXT PRIMARY KEY,
@@ -72,20 +93,8 @@ CREATE TABLE watch_progress (
   PRIMARY KEY (user_id, media_id)
 );
 CREATE INDEX idx_progress_user_updated ON watch_progress(user_id, updated_at DESC);
-`
 
-const V2_SQL = `
--- Metadata freshness tracking on media_items.
-ALTER TABLE media_items ADD COLUMN tmdb_id              INTEGER;
-ALTER TABLE media_items ADD COLUMN metadata_fetched_at  INTEGER;
-ALTER TABLE media_items ADD COLUMN metadata_failed_at   INTEGER;
-ALTER TABLE media_items ADD COLUMN metadata_failed_count INTEGER NOT NULL DEFAULT 0;
-
-CREATE INDEX idx_media_tmdb_id   ON media_items(tmdb_id)             WHERE tmdb_id IS NOT NULL;
-CREATE INDEX idx_media_meta_age  ON media_items(metadata_fetched_at) WHERE deleted_at IS NULL;
-
--- Per-root scan bookkeeping. Lets the dir-mtime gate skip unchanged subtrees
--- across runs.
+-- Per-root scan bookkeeping. Feeds the dir-mtime gate across runs.
 CREATE TABLE scan_roots (
   root_path        TEXT PRIMARY KEY,
   last_scanned_at  INTEGER NOT NULL DEFAULT 0,
@@ -93,38 +102,28 @@ CREATE TABLE scan_roots (
   last_seen_count  INTEGER NOT NULL DEFAULT 0
 );
 
--- TMDB /changes feed cursor. One row per kind ('movie' | 'tv') keeping the
--- last successful end_date so the next run resumes the next day.
+-- TMDB /changes feed cursor. One row per kind keeping the last successful window.
 CREATE TABLE tmdb_changes_cursor (
   kind              TEXT PRIMARY KEY CHECK(kind IN ('movie','tv')),
   last_window_end   INTEGER NOT NULL,
   last_fetched_at   INTEGER NOT NULL
 );
 
--- Scan history (rolling, capped by the worker). Surfaced via /library/scan-status.
+-- Scan history (rolling, capped by the worker). Surfaced via /api/library/scan-status.
 CREATE TABLE scan_history (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  trigger         TEXT NOT NULL CHECK(trigger IN ('boot','cron','manual','watcher','metadata')),
-  scope           TEXT NOT NULL,                 -- 'full' or a subtree path
-  started_at      INTEGER NOT NULL,
-  finished_at     INTEGER,
-  items_seen      INTEGER NOT NULL DEFAULT 0,
-  items_added     INTEGER NOT NULL DEFAULT 0,
-  items_removed   INTEGER NOT NULL DEFAULT 0,
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  trigger            TEXT NOT NULL CHECK(trigger IN ('boot','cron','manual','watcher','metadata')),
+  scope              TEXT NOT NULL,                 -- 'full' or a subtree path
+  started_at         INTEGER NOT NULL,
+  finished_at        INTEGER,
+  items_seen         INTEGER NOT NULL DEFAULT 0,
+  items_added        INTEGER NOT NULL DEFAULT 0,
+  items_removed      INTEGER NOT NULL DEFAULT 0,
   metadata_refreshed INTEGER NOT NULL DEFAULT 0,
-  errors          TEXT                            -- JSON array of strings
+  errors             TEXT                            -- JSON array of strings
 );
 CREATE INDEX idx_scan_history_started ON scan_history(started_at DESC);
-`
 
-const V3_SQL = `
--- Add role column; tie-break by id when created_at matches.
-ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner','admin','member'));
-UPDATE users SET role='owner' WHERE id = (SELECT id FROM users ORDER BY created_at ASC, id ASC LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE role='owner');
-CREATE UNIQUE INDEX idx_users_one_owner ON users(role) WHERE role='owner';
-`
-
-const V4_SQL = `
 -- ServerSettings singleton row. Exactly one row with id=1 (enforced by CHECK).
 CREATE TABLE server_settings (
   id                          INTEGER PRIMARY KEY CHECK(id = 1),
@@ -135,6 +134,9 @@ CREATE TABLE server_settings (
   scan_concurrency            INTEGER NOT NULL DEFAULT 4,
   watch_fs                    INTEGER NOT NULL DEFAULT 0,   -- boolean: 0/1
   watch_debounce_ms           INTEGER NOT NULL DEFAULT 5000,
+  -- Library roots (JSON arrays of absolute paths), runtime-settable in the UI.
+  movies_roots                TEXT NOT NULL DEFAULT '[]',
+  shows_roots                 TEXT NOT NULL DEFAULT '[]',
 
   -- Metadata knobs
   tmdb_token                  TEXT,
@@ -157,29 +159,10 @@ CREATE TABLE server_settings (
   seeded_from_env             INTEGER NOT NULL DEFAULT 0,
   updated_at                  INTEGER NOT NULL DEFAULT 0
 );
-
--- Insert the singleton row with hardcoded defaults.
 INSERT INTO server_settings (id) VALUES (1);
-`
-
-const V5_SQL = `
--- Library roots move from env (HORIZON_MOVIES_ROOT/HORIZON_SHOWS_ROOT) into
--- runtime server_settings. Stored as JSON arrays of absolute paths; default to
--- empty so existing installs come up with no roots until re-added in the UI.
-ALTER TABLE server_settings ADD COLUMN movies_roots TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE server_settings ADD COLUMN shows_roots  TEXT NOT NULL DEFAULT '[]';
-`
-
-const V6_SQL = `
--- Built-in authentication. Passwords (Argon2id/scrypt) live on the user row;
--- opaque session tokens and TV pairing codes get their own tables.
-ALTER TABLE users ADD COLUMN password_hash   TEXT;             -- nullable until set
-ALTER TABLE users ADD COLUMN password_set_at INTEGER;          -- null = never set (forced set-password)
-ALTER TABLE users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE users ADD COLUMN locked_until    INTEGER;          -- progressive lockout deadline (ms epoch)
 
 -- Opaque server-side sessions. Only the SHA-256 of the token is stored; the raw
--- token is shown once at issue. Sliding ~90-day expiry bumped on resolve.
+-- token is shown once at issue. Sliding expiry bumped on resolve.
 CREATE TABLE sessions (
   id           TEXT PRIMARY KEY,
   token_hash   TEXT NOT NULL UNIQUE,
@@ -206,11 +189,6 @@ CREATE TABLE pairing_codes (
 
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
-  { version: 2, sql: V2_SQL },
-  { version: 3, sql: V3_SQL },
-  { version: 4, sql: V4_SQL },
-  { version: 5, sql: V5_SQL },
-  { version: 6, sql: V6_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.
