@@ -5,7 +5,9 @@ describe('UserRowSchema', () => {
   it('parses a valid row', () => {
     const row = UserRowSchema.parse({
       id: 'u1', name: 'Luuk', avatar: '🐼', preferences: '{}',
-      role: 'member', created_at: 1, updated_at: 2,
+      role: 'member',
+      password_hash: null, password_set_at: null, failed_attempts: 0, locked_until: null,
+      created_at: 1, updated_at: 2,
     })
     expect(row.name).toBe('Luuk')
     expect(row.avatar).toBe('🐼')
@@ -14,9 +16,23 @@ describe('UserRowSchema', () => {
   it('accepts null avatar', () => {
     const row = UserRowSchema.parse({
       id: 'u1', name: 'x', avatar: null, preferences: '{}',
-      role: 'owner', created_at: 1, updated_at: 1,
+      role: 'owner',
+      password_hash: null, password_set_at: null, failed_attempts: 0, locked_until: null,
+      created_at: 1, updated_at: 1,
     })
     expect(row.avatar).toBeNull()
+  })
+
+  it('parses the auth columns (set password + lockout state)', () => {
+    const row = UserRowSchema.parse({
+      id: 'u1', name: 'x', avatar: null, preferences: '{}',
+      role: 'owner',
+      password_hash: '$argon2id$abc', password_set_at: 123, failed_attempts: 3, locked_until: 999,
+      created_at: 1, updated_at: 1,
+    })
+    expect(row.password_hash).toBe('$argon2id$abc')
+    expect(row.failed_attempts).toBe(3)
+    expect(row.locked_until).toBe(999)
   })
 })
 

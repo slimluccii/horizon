@@ -170,12 +170,47 @@ ALTER TABLE server_settings ADD COLUMN movies_roots TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE server_settings ADD COLUMN shows_roots  TEXT NOT NULL DEFAULT '[]';
 `
 
+const V6_SQL = `
+-- Built-in authentication. Passwords (Argon2id/scrypt) live on the user row;
+-- opaque session tokens and TV pairing codes get their own tables.
+ALTER TABLE users ADD COLUMN password_hash   TEXT;             -- nullable until set
+ALTER TABLE users ADD COLUMN password_set_at INTEGER;          -- null = never set (forced set-password)
+ALTER TABLE users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN locked_until    INTEGER;          -- progressive lockout deadline (ms epoch)
+
+-- Opaque server-side sessions. Only the SHA-256 of the token is stored; the raw
+-- token is shown once at issue. Sliding ~90-day expiry bumped on resolve.
+CREATE TABLE sessions (
+  id           TEXT PRIMARY KEY,
+  token_hash   TEXT NOT NULL UNIQUE,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at   INTEGER NOT NULL,
+  expires_at   INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  user_agent   TEXT
+);
+CREATE INDEX idx_sessions_user       ON sessions(user_id);
+CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
+
+-- TV device-pairing codes. Short-lived, single-use; approval binds an authed
+-- user, poll then issues a session and marks the code consumed.
+CREATE TABLE pairing_codes (
+  code             TEXT PRIMARY KEY,
+  created_at       INTEGER NOT NULL,
+  expires_at       INTEGER NOT NULL,
+  approved_user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  consumed         INTEGER NOT NULL DEFAULT 0,
+  session_id       TEXT REFERENCES sessions(id) ON DELETE SET NULL
+);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
   { version: 3, sql: V3_SQL },
   { version: 4, sql: V4_SQL },
   { version: 5, sql: V5_SQL },
+  { version: 6, sql: V6_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

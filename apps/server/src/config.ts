@@ -1,13 +1,8 @@
 import os from 'node:os'
-import path from 'node:path'
 import { isToneMapOperator, type ToneMapOperator, type ToneMapConfig } from './transcode/tonemap.ts'
 
 export interface Config {
   port: number
-  /** Allowlisted base directories (HORIZON_MEDIA_BASE, colon-separated). A
-   *  library root is valid only if it resolves under one of these. Defaults to
-   *  ['/media']. Each entry is resolved to an absolute path. */
-  mediaBases: string[]
   corsOrigins: string[]
   cacheDir: string
   dbPath: string
@@ -77,20 +72,11 @@ function envList(name: string, sep: string, fallback: string[] = []): string[] {
   return raw.split(sep).filter(Boolean)
 }
 
-/** Allowlisted media base dirs (HORIZON_MEDIA_BASE, colon-separated). Each entry
- *  is resolved to an absolute path. Defaults to ['/media'] when unset/empty. */
-function loadMediaBases(): string[] {
-  const entries = envList('HORIZON_MEDIA_BASE', ':')
-  const bases = entries.map(e => path.resolve(e))
-  return bases.length > 0 ? bases : ['/media']
-}
-
 export function loadConfig(): Config {
   const cacheDir = process.env.HORIZON_CACHE_DIR ?? `${os.tmpdir()}/horizon-cache`
   const webDir = process.env.HORIZON_WEB_DIR || undefined
   return {
     port: envInt('HORIZON_PORT', 7777),
-    mediaBases: loadMediaBases(),
     // Default: same-origin only (no CORS). The bundled web UI is served from
     // this same server, and the dev setup proxies through Vite, so cross-origin
     // is never needed by default. Set HORIZON_CORS_ORIGINS only to allow a

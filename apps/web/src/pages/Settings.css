@@ -217,13 +217,26 @@
 .settings__profile-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
-  height: 56px;
+  min-height: 56px;
   background: var(--surface);
   border: 1px solid var(--border-hi);
   border-radius: 10px;
-  padding: 0 16px;
+  padding: 10px 16px;
   margin-bottom: 10px;
+}
+
+/* Inline reset-password control for a member row (owner/admin only). */
+.settings__profile-reset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 100%;
+}
+.settings__profile-reset .settings__input {
+  flex: 1;
+  min-width: 0;
 }
 
 .settings__profile-row--owner {

@@ -20,17 +20,14 @@ describe('config', () => {
     expect(cfg.wsGraceMs).toBe(10000)
     expect(cfg.wsAttachMs).toBe(10000)
     expect(cfg.maxRenditions).toBe(3)
-    expect(cfg.mediaBases).toEqual(['/media'])
   })
 
   it('parses env vars', async () => {
     process.env.HORIZON_PORT = '8888'
-    process.env.HORIZON_MEDIA_BASE = '/media1:/media2'
     process.env.HORIZON_MAX_SESSIONS = '2'
     const { loadConfig } = await import('../src/config.ts')
     const cfg = loadConfig()
     expect(cfg.port).toBe(8888)
-    expect(cfg.mediaBases).toEqual(['/media1', '/media2'])
     expect(cfg.maxSessions).toBe(2)
   })
 })

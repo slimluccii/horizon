@@ -12,6 +12,11 @@ export const UserRowSchema = z.object({
   avatar: z.string().nullable(),
   preferences: z.string(),      // JSON blob, left as string at row layer
   role: z.enum(['owner', 'admin', 'member']),
+  // Built-in auth (migration v6). Nullable until the user sets a password.
+  password_hash: z.string().nullable(),
+  password_set_at: z.number().int().nullable(),
+  failed_attempts: z.number().int(),
+  locked_until: z.number().int().nullable(),
   created_at: z.number().int(),
   updated_at: z.number().int(),
 })

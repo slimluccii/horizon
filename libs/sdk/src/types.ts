@@ -17,11 +17,13 @@ export type PlaybackMethod = 'direct-play' | 'direct-stream' | 'partial-transcod
  * Values are stable kebab-case strings — they are part of the API contract.
  */
 export const ErrorCodes = {
+  ACCOUNT_LOCKED: 'account-locked',
   AUDIO_TRACK_INVALID: 'audio-track-invalid',
   CALLER_FORBIDDEN: 'caller-forbidden',
   FETCH_FAILED: 'fetch-failed',
   FFMPEG_SPAWN_FAILED: 'ffmpeg-spawn-failed',
   IMAGE_NOT_FOUND: 'image-not-found',
+  INVALID_CREDENTIALS: 'invalid-credentials',
   INVALID_INPUT: 'invalid-input',
   INVALID_PATH: 'invalid-path',
   INVALID_RECONNECT_TOKEN: 'invalid-reconnect-token',
@@ -34,6 +36,9 @@ export const ErrorCodes = {
   NOT_READY: 'not-ready',
   OWNER_EXISTS: 'owner-exists',
   OWNER_PROTECTED: 'owner-protected',
+  PAIRING_EXPIRED: 'pairing-expired',
+  PAIRING_NOT_FOUND: 'pairing-not-found',
+  PASSWORD_REQUIRED: 'password-required',
   PROGRESS_NOT_FOUND: 'progress-not-found',
   RATE_LIMITED: 'rate-limited',
   ROLE_IMMUTABLE: 'role-immutable',
@@ -41,9 +46,11 @@ export const ErrorCodes = {
   SESSION_NOT_FOUND: 'session-not-found',
   TMDB_DISABLED: 'tmdb-disabled',
   TRANSCODE_FAILED: 'transcode-failed',
+  UNAUTHORIZED: 'unauthorized',
   UNKNOWN_SCENARIO: 'unknown-scenario',
   USER_MISMATCH: 'user-mismatch',
   USER_NOT_FOUND: 'user-not-found',
+  WEAK_PASSWORD: 'weak-password',
 } as const
 
 /** Every server-emitted error code, derived from {@link ErrorCodes}. */
@@ -215,9 +222,38 @@ export interface User {
   avatar: string | null
   preferences: Preferences
   role: 'owner' | 'admin' | 'member'
+  /** Whether this user has a password set. False until first-set (e.g. the
+   *  migrated owner before completing the forced set-password step). */
+  hasPassword: boolean
   createdAt: number
   updatedAt: number
 }
+
+/**
+ * Result of a successful `auth.login` (and the self-service branch of
+ * `auth.setPassword` / `auth.pairPoll`). The server sets the httpOnly
+ * `hz_session` cookie for the web AND returns the raw token once for native
+ * clients to persist and send as `Authorization: Bearer`.
+ */
+export interface AuthSession {
+  token: string
+  user: User
+}
+
+/** Result of `auth.setPassword`: a self-change re-issues a session (token +
+ *  user), while an owner/admin reset of another user returns neither. */
+export type SetPasswordResult = AuthSession | Record<string, never>
+
+/** Result of `auth.pairStart`: the short-lived code the TV displays + its
+ *  absolute expiry (epoch ms). */
+export interface PairStartResult {
+  code: string
+  expiresAt: number
+}
+
+/** Result of `auth.pairPoll`: `pending` until the code is approved, then the
+ *  issued session exactly once. */
+export type PairPollResult = { status: 'pending' } | AuthSession
 
 export interface WatchProgress {
   mediaId: string
@@ -279,8 +315,8 @@ export interface BrowseEntry {
 
 /**
  * Wire shape returned by GET /library/browse. `entries` are the immediate
- * subdirectories (or the configured bases at the top level); `parent` is the
- * parent path while it still resolves under a base, else null.
+ * subdirectories of the browsed path (the filesystem root when no path is given);
+ * `parent` is the parent directory, or null at the filesystem root.
  */
 export interface BrowseResult {
   entries: BrowseEntry[]

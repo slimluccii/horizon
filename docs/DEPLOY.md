@@ -11,15 +11,36 @@ End-to-end instructions for two things:
 
 > ### ⚠️ Security model — read this first
 >
-> Horizon uses a **household identity model, like Plex/Jellyfin home mode: there
-> are no passwords.** A client identifies itself with an `X-Horizon-User` header
-> naming a profile; the server trusts it. This means **anyone who can reach the
-> port is whoever they claim to be**, including the household owner.
+> Horizon has **built-in authentication**: every profile has a **username +
+> password**, and the server issues **revocable, server-side sessions** (an
+> httpOnly cookie for the web UI, a bearer token for native clients). There is no
+> more `X-Horizon-User` trust-the-header model — **anyone reaching the port still
+> has to log in**. Brute-force is bounded by per-IP and per-account rate limits
+> plus progressive account lockout, and login errors are deliberately generic (no
+> "user not found" vs "wrong password" enumeration).
 >
-> That is fine — and intended — on a **trusted home LAN**. It is **not** safe to
-> expose directly to the internet. If you want remote access, put it behind a
-> reverse proxy / VPN (Tailscale, WireGuard, or an authenticating proxy such as
-> Authelia/Authentik). Do **not** port-forward 7777 to the internet as-is.
+> This makes Horizon **defensible to port-forward** to the internet, the way you
+> would expose Plex/Jellyfin. **You should still front it with TLS**, though —
+> either a reverse proxy (Caddy/nginx/Traefik) or a **Cloudflare Tunnel**. TLS
+> does two things that matter: it lets the session cookie be sent with the
+> `Secure` flag (the server sets `Secure` when it sees `X-Forwarded-Proto=https`),
+> and it encrypts traffic so credentials and media bytes aren't sent in the clear.
+> Plain `http://` port-forwarding works but ships the session cookie and your
+> media over an unencrypted link — fine on a LAN, not great across the internet.
+>
+> **First boot:** the owner is forced to set a password before anything else is
+> usable; the owner then sets (or resets) passwords for the other household
+> members in-app. No profile works without a password.
+>
+> **TVs and other 10-foot devices** don't type passwords well, so they use a
+> **device-pairing flow** instead: the TV shows a short code, you open `/link` on
+> a phone or laptop that's already logged in, enter the code, and approve it. The
+> TV then receives its own session token. See [Owner & member passwords, sessions,
+> and TV pairing](#owner--member-passwords-sessions-and-tv-pairing) below.
+>
+> **Locked out as the owner?** There's an escape hatch — boot the server once with
+> `HORIZON_RESET_OWNER_PASSWORD=1` to clear the owner's password and lockout. See
+> [Owner lockout escape hatch](#owner-lockout-escape-hatch).
 >
 > Keep `HORIZON_DEV_SEED` unset in production — the server refuses to boot if it
 > is set together with `NODE_ENV=production` (which the image sets), because the
@@ -99,9 +120,11 @@ In the Dockge web UI:
    `HORIZON_MEDIA_HOST` is the **parent** directory that contains your movies and
    shows folders; it's mounted read-only at `/media` inside the container. You
    pick which subfolders are libraries (and tag each Movies or Shows) in the web
-   UI on first run — no per-library env vars. To expose more than one media tree,
-   add a second volume (e.g. `…:/media2:ro`) in the compose file and set
-   `HORIZON_MEDIA_BASE=/media:/media2`.
+   UI on first run — no per-library env vars. The folder browser can reach
+   anything the container can read, which in Docker is exactly the volumes you
+   mount, so the mount is the boundary. To expose more than one media tree, add
+   another read-only volume (e.g. `…:/media2:ro`) in the compose file — it'll show
+   up in the browser automatically, no extra config.
 
    The TMDB token is optional here — you can also enter it in the web UI during
    first-run setup or later under Settings.
@@ -122,10 +145,10 @@ into the image and served by the server itself (Plex/Jellyfin style). No separat
 web container needed.
 
 On first run a setup wizard walks you through creating the owner profile, then
-**picking your library folders**: browse the mounted media tree (confined to the
-base, `/media`), and tag each folder as Movies or Shows. You can also paste a
-TMDB token here. Every step is skippable — skip the folders and you'll land in an
-empty library with a banner pointing you to Settings to add them later.
+**picking your library folders**: browse the mounted media (under `/media`) and
+tag each folder as Movies or Shows. You can also paste a TMDB token here. Every
+step is skippable — skip the folders and you'll land in an empty library with a
+banner pointing you to Settings to add them later.
 
 Once you've added folders, an initial scan kicks off. Watch it finish in
 Dockge → stack → logs. You should see lines like:
@@ -156,16 +179,70 @@ Alternatives, if you want them:
 - **Native clients**: the macOS app (`apps/macos`) and Android TV app (Part 2)
   talk to the server directly over the LAN.
 
-### 7. Routine ops
+### 7. Owner & member passwords, sessions, and TV pairing
+
+Horizon authenticates every request. Here's the day-to-day of it.
+
+**First-boot owner password.** The setup wizard's first step sets the owner's
+password. Until that's done no profile is usable. (On an existing install
+upgraded into this version, the owner is forced through the same set-password
+screen on first login — every existing profile needs a password before it can be
+used again.)
+
+**Owner resets member passwords.** Members don't recover their own passwords
+(there's no email/SMTP in Horizon). Instead the owner (or an admin) resets a
+member's password in the web UI — no old password needed for a reset. The member
+logs in with the temporary password and changes it. Sessions are server-side and
+revocable: a "log out everywhere" action invalidates every session for a user, so
+resetting a password and logging the user out everywhere cleanly kicks out a lost
+or compromised device.
+
+**TV pairing via `/link`.** TVs and set-top boxes use a device-pairing code flow
+instead of typing a password:
+
+1. Open the Horizon app on the TV. It displays a short pairing code (e.g.
+   `ABCD-1234`) and the `…/link` URL.
+2. On a phone or laptop that's **already logged in**, open
+   `http://<host>:7777/link` (or just tap the **Link a TV** entry in the web UI).
+3. Enter the code and approve. The TV is polling in the background; once you
+   approve, it receives its own session token and drops into the library.
+
+Pairing codes are short-lived (~10 minutes) and single-use, and approval requires
+an already-authenticated user — a stranger who reaches the pairing endpoint can't
+approve their own code.
+
+#### Owner lockout escape hatch
+
+If the owner forgets their password (or trips the lockout and can't wait it out),
+boot the server **once** with `HORIZON_RESET_OWNER_PASSWORD=1`. On startup this
+clears the owner's password hash **and** resets the failed-attempt count /
+lockout, then the owner is forced through the set-password screen again — exactly
+like first boot. Remove the variable (or set it back to `0`) and restart normally
+afterwards; leaving it set wipes the owner's password on every boot.
+
+With Docker, set it on the stack, restart once, watch the logs, then unset it:
+
+```env
+# add to .env, restart the stack ONCE, then remove this line and restart again
+HORIZON_RESET_OWNER_PASSWORD=1
+```
+
+> ℹ️ **Implementation note:** this escape hatch is wired into the server's boot
+> path (`apps/server/src/index.ts`) — on startup, when
+> `HORIZON_RESET_OWNER_PASSWORD=1`, it clears the owner's `password_hash`,
+> `password_set_at`, `failed_attempts`, and `locked_until`, and logs which owner
+> was reset. The reset itself lives in `userRepo.resetOwnerPassword()`.
+
+### 8. Routine ops
 
 | Task | How |
 |------|-----|
 | **Update server** | `cd /mnt/<pool>/apps/horizon-src && git pull && docker build -f apps/server/Dockerfile -t horizon:latest . && (in Dockge) restart stack` |
 | **View logs** | Dockge → `horizon` stack → Logs tab |
-| **Re-scan library** | `curl -XPOST http://<truenas-ip>:7777/library/rescan -H "x-horizon-user: <owner-id>"` (owner/admin only). Also runs at boot and nightly at `HORIZON_SCAN_CRON_HOUR`. |
+| **Re-scan library** | `curl -XPOST http://<truenas-ip>:7777/library/rescan -H "Authorization: Bearer <session-token>"` (owner/admin only). Get a token via `POST /auth/login`. Also runs at boot and nightly at `HORIZON_SCAN_CRON_HOUR`. |
 | **Reset state** | Stop stack → `rm -rf /mnt/<pool>/apps/horizon/data/*` → start stack |
 
-### 8. Troubleshooting
+### 9. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
@@ -174,8 +251,10 @@ Alternatives, if you want them:
 | `ffmpeg not found in PATH` | Image built without ffmpeg layer | Re-build; ensure no override of the runtime stage. |
 | Playback stutters on Shield | Software transcode on a slow CPU | See **GPU passthrough** below, or transcode fewer renditions: `HORIZON_MAX_RENDITIONS=2`. |
 | `EADDRINUSE: 7777` | Another app on the host owns 7777 | Change `HORIZON_PORT` in `.env` (host side only — internal port stays 7777). |
+| Owner locked out / forgot password | Too many failed logins, or password lost | Boot once with `HORIZON_RESET_OWNER_PASSWORD=1`, then unset it. See [Owner lockout escape hatch](#owner-lockout-escape-hatch). |
+| Session cookie not sticking over HTTPS | Server doesn't see `X-Forwarded-Proto=https` from the proxy | Make the reverse proxy / tunnel forward `X-Forwarded-Proto`; the server only marks the cookie `Secure` when it sees `https` there. |
 
-### 9. (Optional) GPU passthrough for hardware transcode
+### 10. (Optional) GPU passthrough for hardware transcode
 
 By default the server **auto-detects** the encoder: it test-encodes a frame with
 each hardware encoder ffmpeg advertises and only uses one that actually works,

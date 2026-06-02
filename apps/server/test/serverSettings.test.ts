@@ -21,7 +21,6 @@ function readRow(db: ReturnType<typeof openDatabase>) {
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
     port: 7777,
-    mediaBases: ['/media'],
     corsOrigins: ['*'],
     cacheDir: '/tmp',
     dbPath: ':memory:',

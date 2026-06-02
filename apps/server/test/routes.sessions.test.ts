@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
 import fastifyWebSocket from '@fastify/websocket'
 import { WebSocket } from 'ws'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo } from '../src/repos/users.ts'
+import { createSessionRepo } from '../src/auth/session.ts'
+import { makeRequireAuth } from '../src/auth/middleware.ts'
 import { createServerSettings } from '../src/repos/serverSettings.ts'
 import { createSessionManager } from '../src/session/manager.ts'
 import { registerSessions } from '../src/routes/sessions.ts'
@@ -55,11 +57,13 @@ function fakeOrchestrator() {
 }
 
 async function buildApp(
+  db: DatabaseSync,
   users: ReturnType<typeof setup>['users'],
   serverSettings: ReturnType<typeof setup>['serverSettings'],
   orchestrator: PlaybackOrchestrator,
 ) {
   const app = Fastify({ logger: false })
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   const sessions = createSessionManager(serverSettings)
   const progressRepo = {} as ProgressRepo
   const cfg = {} as Config
@@ -71,11 +75,13 @@ async function buildApp(
 /** Builds an app and exposes the live SessionManager so DELETE tests can seed a
  *  real session (the fakeOrchestrator never registers one with the manager). */
 async function buildAppWithManager(
+  db: DatabaseSync,
   users: ReturnType<typeof setup>['users'],
   serverSettings: ReturnType<typeof setup>['serverSettings'],
   orchestrator: PlaybackOrchestrator,
 ) {
   const app = Fastify({ logger: false })
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   const sessions = createSessionManager(serverSettings)
   const progressRepo = {} as ProgressRepo
   const cfg = {} as Config
@@ -87,12 +93,14 @@ async function buildAppWithManager(
 /** Builds a *listening* app with the WS plugin so a real WebSocket client can
  *  exercise the upgrade-handler authz (inject() cannot perform WS upgrades). */
 async function buildListeningApp(
+  db: DatabaseSync,
   users: ReturnType<typeof setup>['users'],
   serverSettings: ReturnType<typeof setup>['serverSettings'],
   orchestrator: PlaybackOrchestrator,
 ) {
   const app = Fastify({ logger: false })
   await app.register(fastifyWebSocket)
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   const sessions = createSessionManager(serverSettings)
   const progressRepo = { flush() {}, get() { return undefined } } as unknown as ProgressRepo
   const cfg = {} as Config
@@ -101,6 +109,11 @@ async function buildListeningApp(
   const addr = app.server.address()
   const port = typeof addr === 'object' && addr ? addr.port : 0
   return { app, sessions, port }
+}
+
+/** Session bearer header for a user id. */
+function hdr(db: DatabaseSync, userId: string): { authorization: string } {
+  return { authorization: `Bearer ${createSessionRepo(db).issue(userId).token}` }
 }
 
 /**
@@ -114,23 +127,30 @@ async function buildListeningApp(
 function connectWs(
   port: number,
   sessionId: string,
-  userId?: string,
-  // Browser WebSocket upgrades cannot set request headers, so real clients pass
-  // the caller id as a `user` query param instead. `via` selects which path to
-  // exercise: 'header' (the Node-client default) or 'query' (the browser path).
-  via: 'header' | 'query' = 'header',
-): Promise<{ rejected: boolean; code?: number; gotServerFrame: boolean }> {
+  // A session bearer token to authenticate the upgrade. Post-cutover the WS
+  // upgrade carries identity via the `hz_session` cookie (browser) or
+  // `Authorization: Bearer` (native) — there is no `?user=` query hack anymore.
+  // We send the token as a cookie to mirror the browser path. Omit it to
+  // exercise the unauthenticated case (the auth hook rejects the upgrade).
+  token?: string,
+  via: 'cookie' | 'bearer' = 'cookie',
+): Promise<{ rejected: boolean; code?: number; gotServerFrame: boolean; authFailed: boolean }> {
   return new Promise((resolve) => {
-    const headers = userId && via === 'header' ? { 'x-horizon-user': userId } : undefined
-    const query = userId && via === 'query' ? `?user=${encodeURIComponent(userId)}` : ''
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/sessions/${sessionId}/ws${query}`, { headers })
+    const headers: Record<string, string> = {}
+    if (token && via === 'cookie') headers.cookie = `hz_session=${token}`
+    if (token && via === 'bearer') headers.authorization = `Bearer ${token}`
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/sessions/${sessionId}/ws`, { headers })
     let gotServerFrame = false
+    let authFailed = false
     // For the allowed path the handler keeps the socket open; close it from the
     // client after a tick so the promise resolves with a non-4001 code.
     ws.on('open', () => setTimeout(() => ws.close(), 50))
     ws.on('message', () => { gotServerFrame = true })
-    ws.on('close', (code) => resolve({ rejected: code === 4001, code, gotServerFrame }))
-    ws.on('error', () => { /* a close event with the code follows */ })
+    // The auth-hook 401 aborts the HTTP upgrade — ws surfaces it as
+    // 'unexpected-response' (no 'close' follows), so resolve from here.
+    ws.on('unexpected-response', () => { authFailed = true; resolve({ rejected: true, gotServerFrame, authFailed }) })
+    ws.on('close', (code) => resolve({ rejected: code === 4001, code, gotServerFrame, authFailed }))
+    ws.on('error', () => { /* a close/unexpected-response event follows */ })
   })
 }
 
@@ -162,59 +182,59 @@ const body = (extra: Record<string, unknown> = {}) => ({
 })
 
 describe('POST /sessions auth', () => {
-  it('returns 400 no-user when X-Horizon-User header is absent', async () => {
-    const { users, serverSettings } = setup()
+  it('returns 401 unauthorized when no session is present', async () => {
+    const { db, users, serverSettings } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({ method: 'POST', url: '/sessions', payload: body() })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
     expect(orch.calls).toHaveLength(0)
   })
 
-  it('returns 400 no-user when header is an unknown user', async () => {
-    const { users, serverSettings } = setup()
+  it('returns 401 unauthorized for an invalid session token', async () => {
+    const { db, users, serverSettings } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body(),
-      headers: { 'x-horizon-user': 'ghost' },
+      headers: { authorization: 'Bearer not-a-real-token' },
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('succeeds with valid header and no userId in body, defaulting userId to caller', async () => {
-    const { users, serverSettings, member } = setup()
+    const { db, users, serverSettings, member } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body(),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(200)
     expect(orch.calls[0].userId).toBe(member.id)
   })
 
   it('succeeds when userId matches the caller', async () => {
-    const { users, serverSettings, member } = setup()
+    const { db, users, serverSettings, member } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ userId: member.id }),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(200)
     expect(orch.calls[0].userId).toBe(member.id)
   })
 
   it('returns 403 caller-forbidden when a member delegates to another user', async () => {
-    const { users, serverSettings, member, owner } = setup()
+    const { db, users, serverSettings, member, owner } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ userId: owner.id }),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
@@ -222,24 +242,24 @@ describe('POST /sessions auth', () => {
   })
 
   it('allows owner/admin to delegate playback for another user', async () => {
-    const { users, serverSettings, admin, member } = setup()
+    const { db, users, serverSettings, admin, member } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ userId: member.id }),
-      headers: { 'x-horizon-user': admin.id },
+      headers: hdr(db, admin.id),
     })
     expect(res.statusCode).toBe(200)
     expect(orch.calls[0].userId).toBe(member.id)
   })
 
   it('returns 400 invalid-input for a negative audioTrackIndex (Zod)', async () => {
-    const { users, serverSettings, member } = setup()
+    const { db, users, serverSettings, member } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ audioTrackIndex: -1 }),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
@@ -247,56 +267,56 @@ describe('POST /sessions auth', () => {
   })
 
   it('returns 400 invalid-input for a non-integer startPositionMs (Zod)', async () => {
-    const { users, serverSettings, member } = setup()
+    const { db, users, serverSettings, member } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ startPositionMs: 1.5 }),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
 
   it('returns 400 invalid-input for unknown keys (.strict)', async () => {
-    const { users, serverSettings, member } = setup()
+    const { db, users, serverSettings, member } = setup()
     const orch = fakeOrchestrator()
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ bogus: true }),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
 
   it('maps invalid-input from the orchestrator to HTTP 400', async () => {
-    const { users, serverSettings, member } = setup()
+    const { db, users, serverSettings, member } = setup()
     const orch: PlaybackOrchestrator = {
       startPlayback() {
         throw Object.assign(new Error('Start position exceeds media duration'), { code: 'invalid-input' })
       },
     }
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ startPositionMs: 999 }),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
 
   it('maps audio-track-invalid from the orchestrator to HTTP 400', async () => {
-    const { users, serverSettings, member } = setup()
+    const { db, users, serverSettings, member } = setup()
     const orch: PlaybackOrchestrator = {
       startPlayback() {
         throw Object.assign(new Error('Audio track index out of bounds'), { code: 'audio-track-invalid' })
       },
     }
-    const app = await buildApp(users, serverSettings, orch)
+    const app = await buildApp(db, users, serverSettings, orch)
     const res = await app.inject({
       method: 'POST', url: '/sessions', payload: body({ audioTrackIndex: 99 }),
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('audio-track-invalid')
@@ -305,10 +325,10 @@ describe('POST /sessions auth', () => {
 
 describe('DELETE /sessions/:id reconnect token (#41)', () => {
   it('rejects a DELETE without the reconnect token with 400 and does NOT destroy', async () => {
-    const { users, serverSettings } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, owner } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions)
-    const res = await app.inject({ method: 'DELETE', url: `/sessions/${session.id}` })
+    const res = await app.inject({ method: 'DELETE', url: `/sessions/${session.id}`, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-reconnect-token')
     expect(sessions.get(session.id)).toBeDefined() // still alive
@@ -316,12 +336,12 @@ describe('DELETE /sessions/:id reconnect token (#41)', () => {
   })
 
   it('rejects a DELETE with a mismatched token with 400 and does NOT destroy', async () => {
-    const { users, serverSettings } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, owner } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions)
     const res = await app.inject({
       method: 'DELETE', url: `/sessions/${session.id}`,
-      headers: { 'x-reconnect-token': 'wrong-token' },
+      headers: { 'x-reconnect-token': 'wrong-token', ...hdr(db, owner.id) },
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-reconnect-token')
@@ -330,22 +350,22 @@ describe('DELETE /sessions/:id reconnect token (#41)', () => {
   })
 
   it('destroys the session with the correct token (204)', async () => {
-    const { users, serverSettings } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, owner } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions)
     const res = await app.inject({
       method: 'DELETE', url: `/sessions/${session.id}`,
-      headers: { 'x-reconnect-token': session.reconnectToken },
+      headers: { 'x-reconnect-token': session.reconnectToken, ...hdr(db, owner.id) },
     })
     expect(res.statusCode).toBe(204)
     expect(sessions.get(session.id)).toBeUndefined() // gone
     await app.close()
   })
 
-  it('is an idempotent 204 for an unknown session id (no token needed)', async () => {
-    const { users, serverSettings } = setup()
-    const { app } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
-    const res = await app.inject({ method: 'DELETE', url: '/sessions/does-not-exist' })
+  it('is an idempotent 204 for an unknown session id (no reconnect token needed)', async () => {
+    const { db, users, serverSettings, owner } = setup()
+    const { app } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
+    const res = await app.inject({ method: 'DELETE', url: '/sessions/does-not-exist', headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(204)
     await app.close()
   })
@@ -353,12 +373,12 @@ describe('DELETE /sessions/:id reconnect token (#41)', () => {
 
 describe('DELETE /sessions/:id userId ownership (#41)', () => {
   it('rejects a member who does not own the session with 403 and does NOT destroy', async () => {
-    const { users, serverSettings, member, owner } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, member, owner } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, owner.id) // owned by someone else
     const res = await app.inject({
       method: 'DELETE', url: `/sessions/${session.id}`,
-      headers: { 'x-reconnect-token': session.reconnectToken, 'x-horizon-user': member.id },
+      headers: { 'x-reconnect-token': session.reconnectToken, ...hdr(db, member.id) },
     })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
@@ -367,12 +387,12 @@ describe('DELETE /sessions/:id userId ownership (#41)', () => {
   })
 
   it('allows the session owner to delete (204)', async () => {
-    const { users, serverSettings, member } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, member } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
     const res = await app.inject({
       method: 'DELETE', url: `/sessions/${session.id}`,
-      headers: { 'x-reconnect-token': session.reconnectToken, 'x-horizon-user': member.id },
+      headers: { 'x-reconnect-token': session.reconnectToken, ...hdr(db, member.id) },
     })
     expect(res.statusCode).toBe(204)
     expect(sessions.get(session.id)).toBeUndefined()
@@ -380,38 +400,38 @@ describe('DELETE /sessions/:id userId ownership (#41)', () => {
   })
 
   it('allows an admin to delete a session owned by someone else (204)', async () => {
-    const { users, serverSettings, member, admin } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, member, admin } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
     const res = await app.inject({
       method: 'DELETE', url: `/sessions/${session.id}`,
-      headers: { 'x-reconnect-token': session.reconnectToken, 'x-horizon-user': admin.id },
+      headers: { 'x-reconnect-token': session.reconnectToken, ...hdr(db, admin.id) },
     })
     expect(res.statusCode).toBe(204)
     expect(sessions.get(session.id)).toBeUndefined()
     await app.close()
   })
 
-  it('rejects an owned session when no user header is present (403)', async () => {
-    const { users, serverSettings, member } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+  it('rejects an owned session when unauthenticated (401)', async () => {
+    const { db, users, serverSettings, member } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
     const res = await app.inject({
       method: 'DELETE', url: `/sessions/${session.id}`,
       headers: { 'x-reconnect-token': session.reconnectToken },
     })
-    expect(res.statusCode).toBe(403)
+    expect(res.statusCode).toBe(401)
     expect(sessions.get(session.id)).toBeDefined()
     await app.close()
   })
 
-  it('allows deleting a headless session (userId unset) with just the token', async () => {
-    const { users, serverSettings } = setup()
-    const { app, sessions } = await buildAppWithManager(users, serverSettings, fakeOrchestrator())
+  it('allows any authenticated user to delete a headless session (userId unset) with the token', async () => {
+    const { db, users, serverSettings, member } = setup()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions) // no userId
     const res = await app.inject({
       method: 'DELETE', url: `/sessions/${session.id}`,
-      headers: { 'x-reconnect-token': session.reconnectToken },
+      headers: { 'x-reconnect-token': session.reconnectToken, ...hdr(db, member.id) },
     })
     expect(res.statusCode).toBe(204)
     expect(sessions.get(session.id)).toBeUndefined()
@@ -420,21 +440,25 @@ describe('DELETE /sessions/:id userId ownership (#41)', () => {
 })
 
 describe('GET /sessions/:id/ws userId ownership (#41)', () => {
+  /** Mint a session bearer token for a user id (the WS upgrade carries it via
+   *  the hz_session cookie). */
+  const tokenFor = (db: DatabaseSync, userId: string) => createSessionRepo(db).issue(userId).token
+
   it('connects (no 4001) and gets a server frame when the user owns the session', async () => {
-    const { users, serverSettings, member } = setup()
-    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, member } = setup()
+    const { app, sessions, port } = await buildListeningApp(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
-    const result = await connectWs(port, session.id, member.id)
+    const result = await connectWs(port, session.id, tokenFor(db, member.id))
     expect(result.rejected).toBe(false)
     expect(result.gotServerFrame).toBe(true) // session-ready sent on attach
     await app.close()
   })
 
   it('rejects with close 4001 when a member does not own the session', async () => {
-    const { users, serverSettings, member, owner } = setup()
-    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, member, owner } = setup()
+    const { app, sessions, port } = await buildListeningApp(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, owner.id)
-    const result = await connectWs(port, session.id, member.id)
+    const result = await connectWs(port, session.id, tokenFor(db, member.id))
     expect(result.rejected).toBe(true)
     expect(result.code).toBe(4001)
     expect(result.gotServerFrame).toBe(false) // handler never ran the happy path
@@ -442,54 +466,53 @@ describe('GET /sessions/:id/ws userId ownership (#41)', () => {
   })
 
   it('allows an admin to attach to any session (no 4001)', async () => {
-    const { users, serverSettings, member, admin } = setup()
-    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+    const { db, users, serverSettings, member, admin } = setup()
+    const { app, sessions, port } = await buildListeningApp(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
-    const result = await connectWs(port, session.id, admin.id)
+    const result = await connectWs(port, session.id, tokenFor(db, admin.id))
     expect(result.rejected).toBe(false)
     expect(result.gotServerFrame).toBe(true)
     await app.close()
   })
 
-  it('allows attaching to a headless (userId unset) session with no user header', async () => {
-    const { users, serverSettings } = setup()
-    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+  it('allows any authenticated user to attach to a headless (userId unset) session', async () => {
+    const { db, users, serverSettings, member } = setup()
+    const { app, sessions, port } = await buildListeningApp(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions)
-    const result = await connectWs(port, session.id)
+    const result = await connectWs(port, session.id, tokenFor(db, member.id))
     expect(result.rejected).toBe(false)
     expect(result.gotServerFrame).toBe(true)
     await app.close()
   })
 
-  it('rejects an owned session when no user header is present (close 4001)', async () => {
-    const { users, serverSettings, member } = setup()
-    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+  it('rejects the WS upgrade entirely when unauthenticated (auth hook 401)', async () => {
+    const { db, users, serverSettings, member } = setup()
+    const { app, sessions, port } = await buildListeningApp(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
-    const result = await connectWs(port, session.id)
+    const result = await connectWs(port, session.id) // no token
     expect(result.rejected).toBe(true)
-    expect(result.code).toBe(4001)
+    expect(result.authFailed).toBe(true) // upgrade aborted before the route ran
+    expect(result.gotServerFrame).toBe(false)
     await app.close()
   })
 
-  // Regression for the browser-playback path: a real browser WebSocket cannot
-  // set the X-Horizon-User header, so the owner's identity arrives as a `user`
-  // query param. Before resolveCallerRole grew its query fallback this closed
-  // with 4001 and the SDK reconnect-looped forever on "STARTING PLAYBACK…".
-  it('connects (no 4001) when the owner id is supplied via the user query param (browser path)', async () => {
-    const { users, serverSettings, member } = setup()
-    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+  // Browser-playback path: the httpOnly hz_session cookie auto-rides the WS
+  // upgrade (the `?user=` query hack is gone). A matching owner cookie connects.
+  it('connects (no 4001) when the owner session cookie rides the upgrade (browser path)', async () => {
+    const { db, users, serverSettings, member } = setup()
+    const { app, sessions, port } = await buildListeningApp(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, member.id)
-    const result = await connectWs(port, session.id, member.id, 'query')
+    const result = await connectWs(port, session.id, tokenFor(db, member.id), 'cookie')
     expect(result.rejected).toBe(false)
     expect(result.gotServerFrame).toBe(true) // session-ready sent on attach
     await app.close()
   })
 
-  it('rejects via the user query param when the member does not own the session (close 4001)', async () => {
-    const { users, serverSettings, member, owner } = setup()
-    const { app, sessions, port } = await buildListeningApp(users, serverSettings, fakeOrchestrator())
+  it('rejects via the cookie path when the member does not own the session (close 4001)', async () => {
+    const { db, users, serverSettings, member, owner } = setup()
+    const { app, sessions, port } = await buildListeningApp(db, users, serverSettings, fakeOrchestrator())
     const session = seedSession(sessions, owner.id)
-    const result = await connectWs(port, session.id, member.id, 'query')
+    const result = await connectWs(port, session.id, tokenFor(db, member.id), 'cookie')
     expect(result.rejected).toBe(true)
     expect(result.code).toBe(4001)
     await app.close()

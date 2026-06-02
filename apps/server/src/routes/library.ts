@@ -8,7 +8,6 @@ import type { UserRepo } from '../repos/users.ts'
 import type { ScanWorkers } from '../server.ts'
 import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
-import { resolveUnderBases } from '../paths/confine.ts'
 
 export function registerLibrary(
   app: FastifyInstance,
@@ -19,34 +18,32 @@ export function registerLibrary(
   cfg: Config,
 ) {
   /**
-   * Confined directory browser for picking library roots in the UI. Owner/admin
+   * Filesystem directory browser for picking library roots in the UI. Owner/admin
    * only — members must not be able to enumerate the server filesystem.
    *
-   *  - No (or empty) `path` → the configured bases (cfg.mediaBases) as the
-   *    top-level entries; `parent` is null (you can't go above the bases).
-   *  - With `path` → resolveUnderBases gates it (null → 400 INVALID_PATH), then
-   *    we list IMMEDIATE SUBDIRECTORIES only (never files). `parent` is the
-   *    path's parent iff it still resolves under a base, else null.
+   * There is no path confinement: an authenticated owner/admin may browse
+   * anywhere the server process can read (the Plex/Jellyfin model). In Docker the
+   * container only sees its mounted volumes, so this is naturally scoped to what
+   * was mounted; on bare metal it is the whole host filesystem.
+   *
+   *  - No (or empty) `path` → the filesystem root (`/`); `parent` is null.
+   *  - With `path` → must be an absolute, existing, readable directory. We list
+   *    IMMEDIATE SUBDIRECTORIES only (never files). `parent` is the path's parent,
+   *    or null at the root.
    */
   app.get<{ Querystring: { path?: string } }>('/library/browse', async (req, reply) => {
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     if (caller.role === 'member') {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can browse the filesystem')
     }
 
-    const raw = req.query.path
-    if (!raw) {
-      // Top level: the operator-mounted bases. No parent — can't browse above.
-      return {
-        entries: cfg.mediaBases.map(b => ({ name: path.basename(b) || b, path: b })),
-        parent: null,
-      }
-    }
-
-    const resolved = resolveUnderBases(cfg.mediaBases, raw)
-    if (resolved === null) {
-      return badRequest(reply, ErrorCodes.INVALID_PATH, 'Path is outside the configured media bases')
+    // Default to the filesystem root; resolve to collapse any `.`/`..` segments
+    // into a canonical absolute path. Reject anything that isn't absolute.
+    const raw = req.query.path && req.query.path.trim() !== '' ? req.query.path : '/'
+    const resolved = path.resolve(raw)
+    if (!path.isAbsolute(resolved)) {
+      return badRequest(reply, ErrorCodes.INVALID_PATH, 'Path must be absolute')
     }
 
     let dirents: import('node:fs').Dirent[]
@@ -61,23 +58,23 @@ export function registerLibrary(
       .map(d => ({ name: d.name, path: path.join(resolved, d.name) }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
-    // Offer a parent only while it still resolves under a base — never above.
+    // Parent is null only at the filesystem root (dirname('/') === '/').
     const parentCandidate = path.dirname(resolved)
-    const parent = parentCandidate === resolved ? null : resolveUnderBases(cfg.mediaBases, parentCandidate)
+    const parent = parentCandidate === resolved ? null : parentCandidate
 
     return { entries, parent }
   })
 
 
   app.get('/library/movies', async (req, reply) => {
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     return media.listMovies()
   })
 
   app.get('/library/movies/collections', async (req, reply) => {
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     const cols = collections.list()
     return cols.map(c => ({
       id: c.id,
@@ -89,8 +86,8 @@ export function registerLibrary(
   app.get<{ Params: { collection: string } }>(
     '/library/movies/collections/:collection',
     async (req, reply) => {
-      const caller = resolveCallerRole(users, req)
-      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+      const caller = resolveCallerRole(req)
+      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
       const col = collections.list().find(c => c.id === req.params.collection)
       if (!col) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Collection not found')
       return {
@@ -102,8 +99,8 @@ export function registerLibrary(
   )
 
   app.get('/library/shows', async (req, reply) => {
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     const shows = media.listShows()
     return shows.map(s => ({ ...s, seasons: media.getSeasons(s.id) }))
   })
@@ -111,8 +108,8 @@ export function registerLibrary(
   app.get<{ Params: { show: string } }>(
     '/library/shows/:show',
     async (req, reply) => {
-      const caller = resolveCallerRole(users, req)
-      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+      const caller = resolveCallerRole(req)
+      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
       const show = media.getById(req.params.show)
       if (!show || show.kind !== 'show') {
         return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Show not found')
@@ -124,8 +121,8 @@ export function registerLibrary(
   app.get<{ Params: { show: string } }>(
     '/library/shows/:show/seasons',
     async (req, reply) => {
-      const caller = resolveCallerRole(users, req)
-      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+      const caller = resolveCallerRole(req)
+      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
       const show = media.getById(req.params.show)
       if (!show) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Show not found')
       return media.getSeasons(show.id)
@@ -135,8 +132,8 @@ export function registerLibrary(
   app.get<{ Params: { show: string; season: string } }>(
     '/library/shows/:show/seasons/:season',
     async (req, reply) => {
-      const caller = resolveCallerRole(users, req)
-      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+      const caller = resolveCallerRole(req)
+      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
       const show = media.getById(req.params.show)
       if (!show) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Show not found')
       const season = parseInt(req.params.season, 10)
@@ -158,8 +155,8 @@ export function registerLibrary(
   app.post<{ Body?: { paths?: string[] } }>(
     '/library/rescan',
     async (req, reply) => {
-      const caller = resolveCallerRole(users, req)
-      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+      const caller = resolveCallerRole(req)
+      if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
       if (caller.role === 'member') {
         return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can trigger a rescan')
       }
@@ -176,8 +173,8 @@ export function registerLibrary(
    * Useful for the UI button "refresh poster art" without re-walking the disk.
    */
   app.post('/library/metadata-refresh', async (req, reply) => {
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     if (caller.role === 'member') {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can trigger a metadata refresh')
     }
@@ -193,8 +190,8 @@ export function registerLibrary(
    * Combined scan + metadata health snapshot. Polling target for the UI.
    */
   app.get('/library/scan-status', async (req, reply) => {
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     const scan = workers.scanManager.status()
     const refresh = workers.refreshWorker.status()
     return {

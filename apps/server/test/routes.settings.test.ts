@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo } from '../src/repos/users.ts'
+import { createSessionRepo } from '../src/auth/session.ts'
+import { makeRequireAuth } from '../src/auth/middleware.ts'
 import { createServerSettings } from '../src/repos/serverSettings.ts'
 import { createSessionManager } from '../src/session/manager.ts'
 import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../src/metadata/refresh.ts'
@@ -23,26 +25,36 @@ function setup() {
     { role: 'admin' },
   )!
   const member = users.create({ name: 'Carol' })          // default member
-  return { users, serverSettings, owner, admin, member }
+  return { db, users, serverSettings, owner, admin, member }
 }
 
-async function buildApp(users: ReturnType<typeof setup>['users'], serverSettings: ServerSettings) {
+async function buildApp(
+  db: DatabaseSync,
+  users: ReturnType<typeof setup>['users'],
+  serverSettings: ServerSettings,
+) {
   const app = Fastify({ logger: false })
-  // registerSettings only reads cfg.mediaBases (root confinement); none of the
+  // registerSettings needs a cfg object; roots are no longer base-confined, none of the
   // tests in this file patch roots, so a placeholder base is sufficient.
-  const cfg = { mediaBases: ['/media'] } as unknown as import('../src/config.ts').Config
+  const cfg = {} as unknown as import('../src/config.ts').Config
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   registerSettings(app, users, serverSettings, cfg)
   await app.ready()
   return app
 }
 
+/** Session bearer header for a user id. */
+function hdr(db: DatabaseSync, userId: string): { authorization: string } {
+  return { authorization: `Bearer ${createSessionRepo(db).issue(userId).token}` }
+}
+
 describe('GET /settings/server', () => {
   it('returns the live row to any authenticated user', async () => {
-    const { users, serverSettings, member } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, member } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'GET', url: '/settings/server',
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.statusCode).toBe(200)
     const body = res.json()
@@ -53,40 +65,40 @@ describe('GET /settings/server', () => {
   })
 
   it('masks tmdbToken as "unset" when not set', async () => {
-    const { users, serverSettings, member } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, member } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'GET', url: '/settings/server',
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.json().tmdbToken).toBe('unset')
   })
 
   it('masks tmdbToken as "set" when a token is present', async () => {
-    const { users, serverSettings, owner } = setup()
+    const { db, users, serverSettings, owner } = setup()
     serverSettings.update({ tmdbToken: 'abc-secret' })
-    const app = await buildApp(users, serverSettings)
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'GET', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
     })
     expect(res.json().tmdbToken).toBe('set')
   })
 
-  it('rejects with 400 when X-Horizon-User header is missing', async () => {
-    const { users, serverSettings } = setup()
-    const app = await buildApp(users, serverSettings)
+  it('rejects with 401 when unauthenticated', async () => {
+    const { db, users, serverSettings } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({ method: 'GET', url: '/settings/server' })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('does not leak seededFromEnv', async () => {
-    const { users, serverSettings, member } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, member } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'GET', url: '/settings/server',
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
     })
     expect(res.json()).not.toHaveProperty('seededFromEnv')
   })
@@ -94,11 +106,11 @@ describe('GET /settings/server', () => {
 
 describe('PATCH /settings/server — role gate', () => {
   it('owner can PATCH', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { watchedThresholdPct: 85 },
     })
     expect(res.statusCode).toBe(200)
@@ -106,11 +118,11 @@ describe('PATCH /settings/server — role gate', () => {
   })
 
   it('admin can PATCH', async () => {
-    const { users, serverSettings, admin } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, admin } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': admin.id },
+      headers: hdr(db, admin.id),
       payload: { scanCronHour: 4 },
     })
     expect(res.statusCode).toBe(200)
@@ -118,36 +130,36 @@ describe('PATCH /settings/server — role gate', () => {
   })
 
   it('member is rejected with 403', async () => {
-    const { users, serverSettings, member } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, member } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': member.id },
+      headers: hdr(db, member.id),
       payload: { watchedThresholdPct: 50 },
     })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
 
-  it('missing header is rejected with 400', async () => {
-    const { users, serverSettings } = setup()
-    const app = await buildApp(users, serverSettings)
+  it('unauthenticated PATCH is rejected with 401', async () => {
+    const { db, users, serverSettings } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
       payload: { watchedThresholdPct: 50 },
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 })
 
 describe('PATCH /settings/server — validation', () => {
   it('rejects unknown keys (strict schema)', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { unknownField: 'oops' },
     })
     expect(res.statusCode).toBe(400)
@@ -155,44 +167,44 @@ describe('PATCH /settings/server — validation', () => {
   })
 
   it('rejects scanCronHour out of range', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { scanCronHour: 25 },
     })
     expect(res.statusCode).toBe(400)
   })
 
   it('rejects watchedThresholdPct out of range', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { watchedThresholdPct: 0 },
     })
     expect(res.statusCode).toBe(400)
   })
 
   it('accepts empty patch (no-op)', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: {},
     })
     expect(res.statusCode).toBe(200)
   })
 
   it('rejects maxSessions <= 0', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { maxSessions: 0 },
     })
     expect(res.statusCode).toBe(400)
@@ -200,11 +212,11 @@ describe('PATCH /settings/server — validation', () => {
   })
 
   it('rejects maxRenditions <= 0', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { maxRenditions: 0 },
     })
     expect(res.statusCode).toBe(400)
@@ -212,11 +224,11 @@ describe('PATCH /settings/server — validation', () => {
   })
 
   it('rejects maxSessions above hard cap', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { maxSessions: 100 },
     })
     expect(res.statusCode).toBe(400)
@@ -277,7 +289,6 @@ describe('serverSettings — bootstrapFromEnv', () => {
       forceEncoder: 'libx264',
       // Other Config fields not used by bootstrap:
       port: 7777,
-      mediaBases: ['/media'],
       corsOrigins: ['*'],
       cacheDir: '/tmp',
       dbPath: ':memory:',
@@ -317,7 +328,6 @@ describe('serverSettings — bootstrapFromEnv', () => {
       wsAttachMs: 10000,
       forceEncoder: undefined,
       port: 7777,
-      mediaBases: ['/media'],
       corsOrigins: ['*'],
       cacheDir: '/tmp',
       dbPath: ':memory:',
@@ -341,11 +351,11 @@ describe('serverSettings — bootstrapFromEnv', () => {
 
 describe('PATCH /settings/server — playback knobs', () => {
   it('persists maxSessions and get() reflects new value', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { maxSessions: 8 },
     })
     expect(res.statusCode).toBe(200)
@@ -353,11 +363,11 @@ describe('PATCH /settings/server — playback knobs', () => {
   })
 
   it('persists tonemapOperator and get() reflects new value', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { tonemapOperator: 'mobius' },
     })
     expect(res.statusCode).toBe(200)
@@ -365,11 +375,11 @@ describe('PATCH /settings/server — playback knobs', () => {
   })
 
   it('persists tonemapParam and tonemapDesat', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { tonemapParam: 0.5, tonemapDesat: 0.3 },
     })
     expect(res.statusCode).toBe(200)
@@ -436,14 +446,14 @@ describe('PATCH /settings/server — playback knobs', () => {
 
 describe('PATCH /settings/server — tmdbToken', () => {
   it('empty string normalises to unset (clears the token)', async () => {
-    const { users, serverSettings, owner } = setup()
+    const { db, users, serverSettings, owner } = setup()
     // Pre-seed a token.
     serverSettings.update({ tmdbToken: 'abc-secret' })
-    const app = await buildApp(users, serverSettings)
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { tmdbToken: '' },
     })
     expect(res.statusCode).toBe(200)
@@ -458,12 +468,12 @@ describe('PATCH /settings/server — tmdbToken', () => {
   const VALID_JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0IiwibmJmIjoxNzAwMDAwMDAwfQ.c2lnbmF0dXJlc2lnbmF0dXJlc2lnbmF0dXJl'
 
   it('valid JWT-format token saves and returns "set"', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { tmdbToken: VALID_JWT },
     })
     expect(res.statusCode).toBe(200)
@@ -471,12 +481,12 @@ describe('PATCH /settings/server — tmdbToken', () => {
   })
 
   it('rejects a non-JWT token with 400 invalid-input (#76)', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { tmdbToken: 'not-a-valid-token' },
     })
     expect(res.statusCode).toBe(400)
@@ -484,12 +494,12 @@ describe('PATCH /settings/server — tmdbToken', () => {
   })
 
   it('rejects a too-short token with 400 invalid-input (#76)', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { tmdbToken: 'a.b.c' },
     })
     expect(res.statusCode).toBe(400)
@@ -497,13 +507,13 @@ describe('PATCH /settings/server — tmdbToken', () => {
   })
 
   it('GET never leaks the actual token value', async () => {
-    const { users, serverSettings, owner } = setup()
+    const { db, users, serverSettings, owner } = setup()
     serverSettings.update({ tmdbToken: 'super-secret-token' })
-    const app = await buildApp(users, serverSettings)
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'GET', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
     })
     expect(res.statusCode).toBe(200)
     const body = res.json()
@@ -514,12 +524,12 @@ describe('PATCH /settings/server — tmdbToken', () => {
 
 describe('PATCH /settings/server — metadata fields', () => {
   it('metadataBatchSize persists and is readable', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { metadataBatchSize: 75 },
     })
     expect(res.statusCode).toBe(200)
@@ -528,12 +538,12 @@ describe('PATCH /settings/server — metadata fields', () => {
   })
 
   it('metadataMaxAgeMovieDays persists', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { metadataMaxAgeMovieDays: 14 },
     })
     expect(res.statusCode).toBe(200)
@@ -541,12 +551,12 @@ describe('PATCH /settings/server — metadata fields', () => {
   })
 
   it('metadataMaxAgeShowDays and metadataMaxAgeEpDays persist', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
 
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { metadataMaxAgeShowDays: 3, metadataMaxAgeEpDays: 45 },
     })
     expect(res.statusCode).toBe(200)
@@ -555,8 +565,8 @@ describe('PATCH /settings/server — metadata fields', () => {
   })
 
   it('PATCH metadataBatchSize is reflected in the next MetadataRefreshWorker run (#61/#65)', async () => {
-    const { users, serverSettings, owner } = setup()
-    const app = await buildApp(users, serverSettings)
+    const { db, users, serverSettings, owner } = setup()
+    const app = await buildApp(db, users, serverSettings)
 
     // The worker reads config from the SAME serverSettings the route mutates,
     // via a live getter — so a PATCH propagates to the next run().
@@ -599,7 +609,7 @@ describe('PATCH /settings/server — metadata fields', () => {
     // Shrink the batch size over HTTP, then run — the worker must honor it.
     const res = await app.inject({
       method: 'PATCH', url: '/settings/server',
-      headers: { 'x-horizon-user': owner.id },
+      headers: hdr(db, owner.id),
       payload: { metadataBatchSize: 4 },
     })
     expect(res.statusCode).toBe(200)

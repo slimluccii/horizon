@@ -15,11 +15,13 @@ const SRC_DIR = path.resolve(__dirname, '../src')
  * deliberate decision rather than silent drift.
  */
 const EXPECTED_CODES = [
+  'account-locked',
   'audio-track-invalid',
   'caller-forbidden',
   'fetch-failed',
   'ffmpeg-spawn-failed',
   'image-not-found',
+  'invalid-credentials',
   'invalid-input',
   'invalid-path',
   'invalid-reconnect-token',
@@ -32,6 +34,9 @@ const EXPECTED_CODES = [
   'not-ready',
   'owner-exists',
   'owner-protected',
+  'pairing-expired',
+  'pairing-not-found',
+  'password-required',
   'progress-not-found',
   'rate-limited',
   'role-immutable',
@@ -39,9 +44,11 @@ const EXPECTED_CODES = [
   'session-not-found',
   'tmdb-disabled',
   'transcode-failed',
+  'unauthorized',
   'unknown-scenario',
   'user-mismatch',
   'user-not-found',
+  'weak-password',
 ] as const
 
 describe('ErrorCodes (centralized error enum)', () => {

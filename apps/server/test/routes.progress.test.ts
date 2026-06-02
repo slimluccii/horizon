@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo, type UserRepo } from '../src/repos/users.ts'
+import { createSessionRepo } from '../src/auth/session.ts'
+import { makeRequireAuth } from '../src/auth/middleware.ts'
 import { createMediaRepo, type MediaRepo } from '../src/repos/media.ts'
 import { createProgressRepo, type ProgressRepo } from '../src/repos/progress.ts'
 import { registerProgress } from '../src/routes/progress.ts'
@@ -24,54 +26,62 @@ function setup() {
   const progress = createProgressRepo(db, media, { getWatchedThresholdPct: () => 90 })
   const u = users.create({ name: 'Luuk' })
   media.upsertMovie(movie('m1'))
-  return { users, media, progress, user: u }
+  return { db, users, media, progress, user: u }
 }
 
-async function buildApp(users: UserRepo, media: MediaRepo, progress: ProgressRepo) {
+async function buildApp(db: DatabaseSync, users: UserRepo, media: MediaRepo, progress: ProgressRepo) {
   const app = Fastify({ logger: false })
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   registerProgress(app, users, progress)
   await app.ready()
   return app
 }
 
+/** Session bearer header for a user id. */
+function hdr(db: DatabaseSync, userId: string): { authorization: string } {
+  return { authorization: `Bearer ${createSessionRepo(db).issue(userId).token}` }
+}
+
 describe('progress routes', () => {
   it('GET /users/:userId/progress/:mediaId 404 when no entry', async () => {
-    const { users, media, progress, user } = setup()
-    const app = await buildApp(users, media, progress)
+    const { db, users, media, progress, user } = setup()
+    const app = await buildApp(db, users, media, progress)
     const res = await app.inject({
       method: 'GET', url: `/users/${user.id}/progress/m1`,
-      headers: { 'x-horizon-user': user.id },
+      headers: hdr(db, user.id),
     })
     expect(res.statusCode).toBe(404)
   })
 
-  it('rejects with 400 when X-Horizon-User is missing', async () => {
-    const { users, media, progress, user } = setup()
-    const app = await buildApp(users, media, progress)
+  it('rejects with 401 when unauthenticated', async () => {
+    const { db, users, media, progress, user } = setup()
+    const app = await buildApp(db, users, media, progress)
     const res = await app.inject({
       method: 'GET', url: `/users/${user.id}/progress/m1`,
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
-  it('rejects when header user differs from path', async () => {
-    const { users, media, progress, user } = setup()
-    const app = await buildApp(users, media, progress)
+  it('rejects when session user differs from path user', async () => {
+    const { db, users, media, progress, user } = setup()
+    const other = users.create({ name: 'Other' })
+    const app = await buildApp(db, users, media, progress)
     const res = await app.inject({
       method: 'GET', url: `/users/${user.id}/progress/m1`,
-      headers: { 'x-horizon-user': 'someone-else' },
+      headers: hdr(db, other.id),
     })
     expect(res.statusCode).toBe(400)
+    expect(res.json().code).toBe('user-mismatch')
   })
 
   it('PATCH watched flag', async () => {
-    const { users, media, progress, user } = setup()
+    const { db, users, media, progress, user } = setup()
     progress.setProgress(user.id, 'm1', { positionMs: 1000, durationMs: 60_000 })
-    const app = await buildApp(users, media, progress)
+    const app = await buildApp(db, users, media, progress)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${user.id}/progress/m1`,
-      headers: { 'x-horizon-user': user.id },
+      headers: hdr(db, user.id),
       payload: { watched: true },
     })
     expect(res.statusCode).toBe(200)
@@ -79,12 +89,12 @@ describe('progress routes', () => {
   })
 
   it('GET continue-watching returns list', async () => {
-    const { users, media, progress, user } = setup()
+    const { db, users, media, progress, user } = setup()
     progress.setProgress(user.id, 'm1', { positionMs: 1000, durationMs: 60_000 })
-    const app = await buildApp(users, media, progress)
+    const app = await buildApp(db, users, media, progress)
     const res = await app.inject({
       method: 'GET', url: `/users/${user.id}/continue-watching`,
-      headers: { 'x-horizon-user': user.id },
+      headers: hdr(db, user.id),
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toHaveLength(1)

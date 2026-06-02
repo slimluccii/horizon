@@ -1,30 +1,20 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import type { UserRepo } from '../repos/users.ts'
+import type { AuthedUser } from '../auth/middleware.ts'
 import { badRequest, ErrorCodes } from './errors.ts'
 
 /**
- * Resolve the calling user from the X-Horizon-User header, falling back to a
- * `user` query param. Returns the user's id + role, or null if neither is
- * present, not a string, or does not resolve to an existing user. Callers
- * decide how to handle null (e.g. reply 400 / 403).
+ * Resolve the calling user from the authenticated session. Identity now comes
+ * exclusively from `req.user` (set by the global `requireAuth` hook after a
+ * session resolves) — the old `X-Horizon-User` header / `?user=` query hack is
+ * gone. Returns the caller's id + role, or null when no session is attached
+ * (only possible on allowlisted routes, which never call this).
  *
- * The query-param fallback exists because browser playback transports cannot
- * set request headers: a `WebSocket` upgrade, a `<video src>` (direct-play),
- * and a `<track src>` (subtitles) all issue header-less GETs. The identity is
- * not a secret (it is the same user id used in the X-Horizon-User header), so
- * carrying it in the query is no weaker than the header; the per-session
- * reconnectToken remains the proof-of-knowledge gate alongside this check.
+ * Kept as a thin accessor so route handlers read one helper instead of poking
+ * `req.user` directly, and so the role-gate call sites stay unchanged from the
+ * header era.
  */
-export function resolveCallerRole(
-  users: UserRepo,
-  req: FastifyRequest,
-): { id: string; role: 'owner' | 'admin' | 'member' } | null {
-  const hdr = req.headers['x-horizon-user']
-  const queryUser = (req.query as { user?: string } | undefined)?.user
-  const id = typeof hdr === 'string' ? hdr : (typeof queryUser === 'string' ? queryUser : null)
-  if (!id) return null
-  const u = users.get(id)
-  return u ? { id: u.id, role: u.role } : null
+export function resolveCallerRole(req: FastifyRequest): AuthedUser | null {
+  return req.user ?? null
 }
 
 /**
@@ -39,12 +29,12 @@ export function resolveCallerRole(
  *  - owner/admin may access any session (household-wide control).
  *  - a member may access only a session they own (caller.id === userId).
  *
- * `caller` is the resolved X-Horizon-User identity, or null when the header is
- * absent/unknown. A null caller can only reach headless sessions.
+ * `caller` is the resolved `req.user` identity, or null when no session is
+ * attached. A null caller can only reach headless sessions.
  */
 export function canAccessSession(
   sessionUserId: string | undefined,
-  caller: { id: string; role: 'owner' | 'admin' | 'member' } | null,
+  caller: AuthedUser | null,
 ): boolean {
   if (!sessionUserId) return true
   if (!caller) return false
@@ -53,19 +43,22 @@ export function canAccessSession(
 }
 
 /**
- * Ensure the active-user header is present + matches the path user + resolves
- * to an existing row. Returns null and writes a reply on failure.
+ * Ensure the authenticated caller matches the path user. Identity comes from
+ * `req.user` (the session), so this no longer reads a header — but the rule is
+ * unchanged from the header era: a caller may only act on their own per-user
+ * resource (continue-watching, progress). Returns the path user id, or null
+ * after writing a reply on failure.
  */
 export function requireUser(
-  users: UserRepo,
   req: FastifyRequest,
   reply: FastifyReply,
   pathUserId: string,
 ): string | null {
-  const hdr = req.headers['x-horizon-user']
-  const id = typeof hdr === 'string' ? hdr : null
-  if (!id) { badRequest(reply, ErrorCodes.NO_USER, 'Missing X-Horizon-User header'); return null }
-  if (id !== pathUserId) { badRequest(reply, ErrorCodes.USER_MISMATCH, 'Header user does not match path'); return null }
-  if (!users.get(id)) { badRequest(reply, ErrorCodes.NO_USER, 'User not found'); return null }
-  return id
+  const caller = req.user
+  if (!caller) { badRequest(reply, ErrorCodes.NO_USER, 'Authentication required'); return null }
+  if (caller.id !== pathUserId) {
+    badRequest(reply, ErrorCodes.USER_MISMATCH, 'Caller does not match path user')
+    return null
+  }
+  return pathUserId
 }

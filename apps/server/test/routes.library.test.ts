@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo } from '../src/repos/users.ts'
+import { createSessionRepo } from '../src/auth/session.ts'
+import { makeRequireAuth } from '../src/auth/middleware.ts'
 import { createMediaRepo } from '../src/repos/media.ts'
 import { createCollectionsRepo } from '../src/repos/collections.ts'
 import { registerLibrary } from '../src/routes/library.ts'
@@ -58,19 +60,25 @@ async function buildApp(
   workers: ScanWorkers = makeWorkers({ tmdbConfigured: true }),
 ) {
   const app = Fastify({ logger: false })
-  const cfg = { mediaBases: [] } as unknown as Config
+  const cfg = {} as unknown as Config
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(s.db), s.users))
   registerLibrary(app, s.media, s.collections, workers, s.users, cfg)
   await app.ready()
   return app
 }
 
+/** Session bearer header for a user id. */
+function hdr(db: DatabaseSync, userId: string): { authorization: string } {
+  return { authorization: `Bearer ${createSessionRepo(db).issue(userId).token}` }
+}
+
 describe('GET /library/* — authentication', () => {
-  it('GET /library/movies without X-Horizon-User → 400 no-user', async () => {
+  it('GET /library/movies without a session → 401 unauthorized', async () => {
     const s = setup()
     const app = await buildApp(s)
     const res = await app.inject({ method: 'GET', url: '/library/movies' })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('GET /library/movies with a member user → 200', async () => {
@@ -78,31 +86,31 @@ describe('GET /library/* — authentication', () => {
     const app = await buildApp(s)
     const res = await app.inject({
       method: 'GET', url: '/library/movies',
-      headers: { 'x-horizon-user': s.member.id },
+      headers: hdr(s.db, s.member.id),
     })
     expect(res.statusCode).toBe(200)
     expect(Array.isArray(res.json())).toBe(true)
   })
 
-  it('GET /library/movies with an unknown user → 400 no-user', async () => {
+  it('GET /library/movies with an invalid session token → 401 unauthorized', async () => {
     const s = setup()
     const app = await buildApp(s)
     const res = await app.inject({
       method: 'GET', url: '/library/movies',
-      headers: { 'x-horizon-user': 'ghost' },
+      headers: { authorization: 'Bearer not-a-real-token' },
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('GET /library/shows without header → 400; with member → 200', async () => {
     const s = setup()
     const app = await buildApp(s)
     const anon = await app.inject({ method: 'GET', url: '/library/shows' })
-    expect(anon.statusCode).toBe(400)
+    expect(anon.statusCode).toBe(401)
     const ok = await app.inject({
       method: 'GET', url: '/library/shows',
-      headers: { 'x-horizon-user': s.member.id },
+      headers: hdr(s.db, s.member.id),
     })
     expect(ok.statusCode).toBe(200)
     expect(Array.isArray(ok.json())).toBe(true)
@@ -112,10 +120,10 @@ describe('GET /library/* — authentication', () => {
     const s = setup()
     const app = await buildApp(s)
     const anon = await app.inject({ method: 'GET', url: '/library/movies/collections' })
-    expect(anon.statusCode).toBe(400)
+    expect(anon.statusCode).toBe(401)
     const ok = await app.inject({
       method: 'GET', url: '/library/movies/collections',
-      headers: { 'x-horizon-user': s.member.id },
+      headers: hdr(s.db, s.member.id),
     })
     expect(ok.statusCode).toBe(200)
     expect(Array.isArray(ok.json())).toBe(true)
@@ -125,10 +133,10 @@ describe('GET /library/* — authentication', () => {
     const s = setup()
     const app = await buildApp(s)
     const anon = await app.inject({ method: 'GET', url: '/library/scan-status' })
-    expect(anon.statusCode).toBe(400)
+    expect(anon.statusCode).toBe(401)
     const ok = await app.inject({
       method: 'GET', url: '/library/scan-status',
-      headers: { 'x-horizon-user': s.member.id },
+      headers: hdr(s.db, s.member.id),
     })
     expect(ok.statusCode).toBe(200)
     expect(ok.json()).toHaveProperty('scan')
@@ -137,23 +145,23 @@ describe('GET /library/* — authentication', () => {
 })
 
 describe('POST /library/rescan — authorization', () => {
-  it('without header → 400 no-user', async () => {
+  it('without a session → 401 unauthorized', async () => {
     const s = setup()
     const app = await buildApp(s)
     const res = await app.inject({ method: 'POST', url: '/library/rescan', payload: {} })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
-  it('with an unknown user → 400 no-user', async () => {
+  it('with an invalid session token → 401 unauthorized', async () => {
     const s = setup()
     const app = await buildApp(s)
     const res = await app.inject({
       method: 'POST', url: '/library/rescan', payload: {},
-      headers: { 'x-horizon-user': 'ghost' },
+      headers: { authorization: 'Bearer not-a-real-token' },
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('with a member user → 403 caller-forbidden', async () => {
@@ -161,7 +169,7 @@ describe('POST /library/rescan — authorization', () => {
     const app = await buildApp(s)
     const res = await app.inject({
       method: 'POST', url: '/library/rescan', payload: {},
-      headers: { 'x-horizon-user': s.member.id },
+      headers: hdr(s.db, s.member.id),
     })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
@@ -172,7 +180,7 @@ describe('POST /library/rescan — authorization', () => {
     const app = await buildApp(s)
     const res = await app.inject({
       method: 'POST', url: '/library/rescan', payload: {},
-      headers: { 'x-horizon-user': s.owner.id },
+      headers: hdr(s.db, s.owner.id),
     })
     expect(res.statusCode).toBe(202)
     expect(res.json().status).toBe('queued')
@@ -183,19 +191,19 @@ describe('POST /library/rescan — authorization', () => {
     const app = await buildApp(s)
     const res = await app.inject({
       method: 'POST', url: '/library/rescan', payload: {},
-      headers: { 'x-horizon-user': s.admin.id },
+      headers: hdr(s.db, s.admin.id),
     })
     expect(res.statusCode).toBe(202)
   })
 })
 
 describe('POST /library/metadata-refresh — authorization', () => {
-  it('without header → 400 no-user', async () => {
+  it('without a session → 401 unauthorized', async () => {
     const s = setup()
     const app = await buildApp(s)
     const res = await app.inject({ method: 'POST', url: '/library/metadata-refresh' })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('with a member user → 403 caller-forbidden (before the TMDB-config check)', async () => {
@@ -204,7 +212,7 @@ describe('POST /library/metadata-refresh — authorization', () => {
     const app = await buildApp(s, makeWorkers({ tmdbConfigured: false }))
     const res = await app.inject({
       method: 'POST', url: '/library/metadata-refresh',
-      headers: { 'x-horizon-user': s.member.id },
+      headers: hdr(s.db, s.member.id),
     })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
@@ -215,7 +223,7 @@ describe('POST /library/metadata-refresh — authorization', () => {
     const app = await buildApp(s, makeWorkers({ tmdbConfigured: true }))
     const res = await app.inject({
       method: 'POST', url: '/library/metadata-refresh',
-      headers: { 'x-horizon-user': s.owner.id },
+      headers: hdr(s.db, s.owner.id),
     })
     expect(res.statusCode).toBe(202)
     expect(res.json().status).toBe('queued')
@@ -226,7 +234,7 @@ describe('POST /library/metadata-refresh — authorization', () => {
     const app = await buildApp(s, makeWorkers({ tmdbConfigured: true }))
     const res = await app.inject({
       method: 'POST', url: '/library/metadata-refresh',
-      headers: { 'x-horizon-user': s.admin.id },
+      headers: hdr(s.db, s.admin.id),
     })
     expect(res.statusCode).toBe(202)
   })

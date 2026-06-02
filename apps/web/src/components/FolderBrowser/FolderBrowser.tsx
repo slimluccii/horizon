@@ -6,7 +6,7 @@ import { Button } from '../Button/Button.tsx';
 export type LibraryTag = 'movies' | 'shows';
 
 export interface FolderBrowserProps {
-  /** Lists immediate child folders of `path`; with no path, lists the configured bases. */
+  /** Lists immediate child folders of `path`; with no path, lists the filesystem root. */
   browse: (path?: string) => Promise<BrowseResult>;
   /** Called when the user assigns the current folder to a library kind. */
   onPick: (path: string, tag: LibraryTag) => void;
@@ -19,7 +19,7 @@ interface Crumb {
 }
 
 export function FolderBrowser({ browse, onPick, className }: FolderBrowserProps) {
-  // `null` path means "at the list of bases" (no current folder, cannot go up).
+  // `null` path means "at the filesystem root" (no current folder, cannot go up).
   const [path, setPath] = useState<string | null>(null);
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [entries, setEntries] = useState<BrowseEntry[]>([]);
@@ -87,7 +87,7 @@ export function FolderBrowser({ browse, onPick, className }: FolderBrowserProps)
           onClick={goToRoot}
           disabled={crumbs.length === 0}
         >
-          Bases
+          Root
         </button>
         {crumbs.map((crumb, index) => (
           <span key={crumb.path} className="hz-folder-browser__crumb-segment">
@@ -135,7 +135,7 @@ export function FolderBrowser({ browse, onPick, className }: FolderBrowserProps)
 
       <div className="hz-folder-browser__actions">
         <span className="hz-folder-browser__current" title={path ?? undefined}>
-          {path ?? 'Select a base to begin'}
+          {path ?? 'Select a folder to begin'}
         </span>
         <div className="hz-folder-browser__assign">
           <Button disabled={!path} onClick={() => path && onPick(path, 'movies')}>

@@ -30,11 +30,10 @@ services:
     environment:
       # Required
       HORIZON_PORT: "7777"
-      # Allowlisted base dir(s) the server may index. Library folders are picked
-      # at runtime in the web UI and must live under one of these. Colon-separated
-      # for multiple bases — keep these in sync with the volume mounts below
-      # (e.g. "/media:/media2" when you add a second mount).
-      HORIZON_MEDIA_BASE: "${HORIZON_MEDIA_BASE:-/media}"
+      # Library folders are picked at runtime in the web UI. The folder browser
+      # can reach anything the container can read, which in Docker means exactly
+      # the volumes you mount below — so mount your media read-only and that's all
+      # the UI will see. No base env var; the container IS the boundary.
       HORIZON_CACHE_DIR: "/data/cache"
       HORIZON_DB_PATH: "/data/horizon.db"
       # Optional — set in .env
@@ -62,12 +61,13 @@ services:
       TZ: "${TZ:-Europe/Amsterdam}"
 
     volumes:
-      # Media base — the host tree holding your movies/shows, mounted read-only.
-      # Pick the actual library folders under it at runtime in the web UI.
+      # Media — the host tree holding your movies/shows, mounted read-only at
+      # /media. Pick the actual library folders under it at runtime in the web UI.
+      # The container only sees what you mount here, so this mount IS the boundary.
       # Host path set in .env (TrueNAS: /mnt/<pool>/...).
       - "${HORIZON_MEDIA_HOST}:/media:ro"
-      # For multiple bases, add another mount and extend HORIZON_MEDIA_BASE above:
-      #   - "${HORIZON_MEDIA_HOST2}:/media2:ro"   # then HORIZON_MEDIA_BASE=/media:/media2
+      # Mount more trees if you like — each is browsable in the UI:
+      #   - "${HORIZON_MEDIA_HOST2}:/media2:ro"
       # Persistent state (SQLite DB + HLS transcode cache)
       - "${HORIZON_DATA_HOST}:/data"
 

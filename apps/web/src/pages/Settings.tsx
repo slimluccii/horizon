@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
@@ -17,15 +18,23 @@ function userColor(name: string): string {
 }
 
 function ProfilesPanel({
+  viewerId,
   viewerRole,
   onRoleChanged,
+  onToast,
 }: {
+  viewerId: string
   viewerRole: 'owner' | 'admin' | 'member'
   onRoleChanged: () => void
+  onToast: (msg: string) => void
 }) {
+  void viewerRole
   const [rows, setRows] = useState<User[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Which member's password is being reset (their id), and the pending value.
+  const [resetFor, setResetFor] = useState<string | null>(null)
+  const [resetPw, setResetPw] = useState('')
 
   useEffect(() => {
     horizon.users.list().then(setRows)
@@ -49,12 +58,36 @@ function ProfilesPanel({
     }
   }
 
+  // Owner/admin reset of another user — no old password required (the server
+  // gates this on the caller's role). Invalidates that user's other sessions.
+  async function handleResetPassword(id: string) {
+    if (resetPw.length < 8) { setErr('Use at least 8 characters.'); return }
+    setBusy(true)
+    setErr(null)
+    try {
+      await horizon.auth.setPassword({ userId: id, newPassword: resetPw })
+      setResetFor(null)
+      setResetPw('')
+      onToast('Password reset. The member must sign in again.')
+      const updated = await horizon.users.list()
+      setRows(updated)
+    } catch (e) {
+      setErr((e as { message?: string }).message ?? 'Failed to reset password')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div>
       <p className="settings__section-title">Profiles</p>
       {rows.map(row => {
         const color = userColor(row.name)
         const initial = row.avatar ?? row.name.charAt(0).toUpperCase()
+        const isSelf = row.id === viewerId
+        // Owner/admin may reset any non-owner, non-self member. The owner resets
+        // their own password via the Personal → Security "Change password".
+        const canReset = !isSelf && row.role !== 'owner'
         return (
           <div key={row.id} className={`settings__profile-row${row.role === 'owner' ? ' settings__profile-row--owner' : ''}`}>
             <div className="settings__profile-avatar" style={{ background: color }}>{initial}</div>
@@ -72,11 +105,157 @@ function ProfilesPanel({
                 <option value="admin">Admin</option>
               </select>
             )}
+            {canReset && (
+              resetFor === row.id ? (
+                <div className="settings__profile-reset">
+                  <input
+                    type="password"
+                    className="settings__input"
+                    placeholder="New password"
+                    value={resetPw}
+                    autoComplete="new-password"
+                    onChange={e => setResetPw(e.target.value)}
+                  />
+                  <button className="settings__token-replace" disabled={busy} onClick={() => handleResetPassword(row.id)}>
+                    Save
+                  </button>
+                  <button className="settings__token-cancel" disabled={busy} onClick={() => { setResetFor(null); setResetPw('') }}>
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="settings__token-replace"
+                  disabled={busy}
+                  onClick={() => { setResetFor(row.id); setResetPw(''); setErr(null) }}
+                >
+                  Reset password
+                </button>
+              )
+            )}
           </div>
         )
       })}
       {err && <p className="settings__profile-error">{err}</p>}
     </div>
+  )
+}
+
+/**
+ * Personal → Security: every user can change their own password (old + new) and
+ * end sessions — "Sign out" (this device) and "Sign out everywhere" (all
+ * sessions). Identity comes from the session, so there's no profile to clear
+ * client-side beyond the hook's cached user.
+ */
+function SecurityPanel({
+  onToast,
+  onSignOut,
+  logout,
+  logoutAll,
+}: {
+  onToast: (msg: string) => void
+  onSignOut: () => void
+  logout: () => Promise<void>
+  logoutAll: () => Promise<void>
+}) {
+  const [showChange, setShowChange] = useState(false)
+  const [oldPw, setOldPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function changePassword() {
+    if (newPw.length < 8) { setErr('Use at least 8 characters.'); return }
+    if (newPw !== confirmPw) { setErr('Passwords do not match.'); return }
+    setBusy(true)
+    setErr(null)
+    try {
+      await horizon.auth.setPassword({ oldPassword: oldPw, newPassword: newPw })
+      setShowChange(false)
+      setOldPw(''); setNewPw(''); setConfirmPw('')
+      onToast('Password changed.')
+    } catch (e) {
+      const code = (e as { code?: string }).code
+      setErr(code === 'invalid-credentials' ? 'Current password is incorrect.' : 'Could not change the password.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doLogout(all: boolean) {
+    setBusy(true)
+    try {
+      if (all) await logoutAll()
+      else await logout()
+      onSignOut()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <p className="settings__section-title">Security</p>
+
+      <div className="settings__field">
+        <label className="settings__label">Password</label>
+        {showChange ? (
+          <div className="settings__token-input-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+            <input
+              type="password"
+              className="settings__input"
+              placeholder="Current password"
+              value={oldPw}
+              autoComplete="current-password"
+              onChange={e => setOldPw(e.target.value)}
+            />
+            <input
+              type="password"
+              className="settings__input"
+              placeholder="New password"
+              value={newPw}
+              autoComplete="new-password"
+              onChange={e => setNewPw(e.target.value)}
+            />
+            <input
+              type="password"
+              className="settings__input"
+              placeholder="Confirm new password"
+              value={confirmPw}
+              autoComplete="new-password"
+              onChange={e => setConfirmPw(e.target.value)}
+            />
+            <div className="settings__token-row">
+              <button className="settings__token-replace" disabled={busy} onClick={changePassword}>
+                {busy ? 'Saving…' : 'Save password'}
+              </button>
+              <button className="settings__token-cancel" disabled={busy} onClick={() => { setShowChange(false); setErr(null) }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button className="settings__token-replace" type="button" onClick={() => { setShowChange(true); setErr(null) }}>
+            Change password
+          </button>
+        )}
+      </div>
+
+      <div className="settings__field">
+        <label className="settings__label">Sessions</label>
+        <div className="settings__token-row">
+          <button className="settings__token-cancel" disabled={busy} onClick={() => doLogout(false)}>
+            Sign out
+          </button>
+          <button className="settings__token-cancel" disabled={busy} onClick={() => doLogout(true)}>
+            Sign out everywhere
+          </button>
+        </div>
+      </div>
+
+      {err && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{err}</p>}
+    </>
   )
 }
 
@@ -128,7 +307,7 @@ const TONEMAP_OPERATORS = [
  * Library folders subsection of the Server tab. Lists the configured movies /
  * shows roots, lets an owner/admin add folders via the confined FolderBrowser
  * (tagging each Movies or Shows) and remove existing ones. Roots persist via
- * PATCH /settings/server; the server confines every path to HORIZON_MEDIA_BASE.
+ * PATCH /settings/server; the server validates each path is an existing directory.
  */
 function LibraryFoldersPanel({ onSave }: { onSave: (msg: string) => void }) {
   const [moviesRoots, setMoviesRoots] = useState<string[] | null>(null)
@@ -153,7 +332,7 @@ function LibraryFoldersPanel({ onSave }: { onSave: (msg: string) => void }) {
       setShowsRoots(nextShows)
       onSave('Library folders updated.')
     } catch (e) {
-      // Surface the server's reason (e.g. path outside the media base) when present.
+      // Surface the server's reason (e.g. path is not an existing directory) when present.
       const msg = (e as { message?: string })?.message
       setError(msg && msg !== 'undefined' ? `Failed to save: ${msg}` : 'Failed to save library folders.')
     } finally {
@@ -748,7 +927,8 @@ function mergeWithDefaults(prefs: Preferences): Required<Preferences> {
 }
 
 export default function Settings() {
-  const { user, userId } = useActiveUser()
+  const navigate = useNavigate()
+  const { user, userId, logout, logoutAll } = useActiveUser()
 
   const [activeTab, setActiveTab] = useState<Tab>('Personal')
   const [initial, setInitial] = useState<Required<Preferences>>(DEFAULT_FORM)
@@ -839,7 +1019,12 @@ export default function Settings() {
         )}
 
         {activeTab === 'Profiles' && user && (
-          <ProfilesPanel viewerRole={user.role} onRoleChanged={handleRoleChanged} />
+          <ProfilesPanel
+            viewerId={user.id}
+            viewerRole={user.role}
+            onRoleChanged={handleRoleChanged}
+            onToast={showToast}
+          />
         )}
 
         {activeTab === 'Personal' && (
@@ -931,6 +1116,13 @@ export default function Settings() {
                 {busy ? 'Saving…' : 'Save'}
               </button>
             </div>
+
+            <SecurityPanel
+              onToast={showToast}
+              onSignOut={() => navigate('/login', { replace: true })}
+              logout={logout}
+              logoutAll={logoutAll}
+            />
           </>
         )}
       </div>

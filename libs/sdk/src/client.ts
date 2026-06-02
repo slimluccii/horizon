@@ -1,5 +1,5 @@
 // sdk/src/client.ts
-import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult } from './types.ts'
+import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, AuthSession, SetPasswordResult, PairStartResult, PairPollResult } from './types.ts'
 import type { Preferences } from './preferences.ts'
 import { ErrorCodes } from './types.ts'
 import { detectCapabilities } from './capabilities.ts'
@@ -79,27 +79,37 @@ async function buildHttpError(res: Response): Promise<Error> {
 
 export class HorizonClient {
   private baseUrl: string
-  private activeUserId: string | null = null
+  /** Opaque session token for native clients (macOS, TV) sent as
+   *  `Authorization: Bearer`. Null on the web, where identity rides the
+   *  httpOnly `hz_session` cookie instead — set via `auth.login`. */
+  private token: string | null = null
 
   constructor(opts: HorizonClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '')
   }
 
-  setActiveUser(id: string | null): void {
-    this.activeUserId = id
+  /** Store the bearer token issued by `auth.login` / `auth.pairPoll`. Native
+   *  clients persist it (Keychain, etc.) and re-set it on the next launch; the
+   *  web ignores it because the cookie carries identity. Pass null to clear. */
+  setToken(token: string | null): void {
+    this.token = token
   }
 
-  getActiveUser(): string | null {
-    return this.activeUserId
+  getToken(): string | null {
+    return this.token
   }
 
-  private userHeaders(): Record<string, string> {
-    return this.activeUserId ? { 'X-Horizon-User': this.activeUserId } : {}
+  private authHeaders(): Record<string, string> {
+    return this.token ? { Authorization: `Bearer ${this.token}` } : {}
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...this.userHeaders(), ...(init?.headers ?? {}) },
+      // Always send credentials so the web's httpOnly hz_session cookie rides
+      // every request (including cross-origin dev via the Vite proxy). Native
+      // clients have no cookie and lean on the Authorization header instead.
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders(), ...(init?.headers ?? {}) },
       ...init,
     })
     if (!res.ok) {
@@ -111,9 +121,9 @@ export class HorizonClient {
 
   readonly library = {
     /**
-     * Confined directory browser for picking library roots (owner/admin only).
-     * No `path` → the configured bases as top-level entries. With `path` → the
-     * immediate subdirectories under it. `parent` is null at/above a base.
+     * Filesystem directory browser for picking library roots (owner/admin only).
+     * No `path` → the filesystem root's subdirectories. With `path` → the
+     * immediate subdirectories under it. `parent` is null at the filesystem root.
      */
     browse: (path?: string) =>
       this.fetch<BrowseResult>(
@@ -130,8 +140,23 @@ export class HorizonClient {
   readonly users = {
     list: () => this.fetch<User[]>('/users'),
     get: (id: string) => this.fetch<User>(`/users/${id}`),
-    create: (body: { name: string; avatar?: string | null }) =>
-      this.fetch<User>('/users', { method: 'POST', body: JSON.stringify(body) }),
+    /**
+     * Create a profile. On first boot (empty household) this creates the
+     * auto-elected owner AND the server issues a session: the web gets the
+     * httpOnly cookie, and the response carries `{ token }` for native clients —
+     * which we stash so the immediately-following `auth.setPassword` call is
+     * authenticated. Authenticated creates (every later profile) just return User.
+     */
+    create: async (body: { name: string; avatar?: string | null }): Promise<User> => {
+      const res = await this.fetch<User & { token?: string }>('/users', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+      if (res.token) this.setToken(res.token)
+      const { token: _drop, ...user } = res
+      void _drop
+      return user
+    },
     update: (id: string, body: { name?: string; avatar?: string | null; preferences?: Partial<Preferences>; role?: 'owner' | 'admin' | 'member' }) =>
       this.fetch<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) =>
@@ -159,6 +184,69 @@ export class HorizonClient {
       this.fetch<void>(`/users/${userId}/progress/${mediaId}`, { method: 'DELETE' }),
   }
 
+  readonly auth = {
+    /**
+     * Verify a username + password. On success the server sets the httpOnly
+     * `hz_session` cookie (web) AND returns `{ token, user }`; we stash the
+     * token via {@link setToken} so native clients send it as a bearer on
+     * subsequent requests. The web ignores the token and rides the cookie.
+     */
+    login: async (name: string, password: string): Promise<AuthSession> => {
+      const res = await this.fetch<AuthSession>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ name, password }),
+      })
+      this.setToken(res.token)
+      return res
+    },
+    /** Revoke the current session and clear the stored bearer token + cookie. */
+    logout: async (): Promise<void> => {
+      await this.fetch<{ ok: true }>('/auth/logout', { method: 'POST' })
+      this.setToken(null)
+    },
+    /** Revoke every session for the caller (all devices). Clears the local token. */
+    logoutAll: async (): Promise<{ revoked: number }> => {
+      const res = await this.fetch<{ revoked: number }>('/auth/logout-all', { method: 'POST' })
+      this.setToken(null)
+      return res
+    },
+    /** The SDK's identity source — resolves the caller from cookie/bearer. A
+     *  401 here is the web's signal to redirect to /login. */
+    me: () => this.fetch<User>('/auth/me'),
+    /**
+     * Set or change a password. Self-service supplies `oldPassword` once one is
+     * set (omitted on first-boot / forced set). Owner/admin reset another user
+     * via `userId` with no old password. A self-change re-issues a session and
+     * returns `{ token, user }` (token re-stored); an admin reset returns `{}`.
+     */
+    setPassword: async (body: { userId?: string; oldPassword?: string; newPassword: string }): Promise<SetPasswordResult> => {
+      const res = await this.fetch<SetPasswordResult>('/auth/set-password', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+      if (res.token) this.setToken(res.token)
+      return res
+    },
+    /** TV device-pairing: mint a short-lived code the TV displays, then polls. */
+    pairStart: () => this.fetch<PairStartResult>('/auth/pair/start', { method: 'POST' }),
+    /** Approve a pairing code from an already-authenticated phone/web client. */
+    pairApprove: (code: string) =>
+      this.fetch<{ ok: true }>('/auth/pair/approve', { method: 'POST', body: JSON.stringify({ code }) }),
+    /**
+     * Poll a pairing code. Returns `{ status: 'pending' }` (HTTP 202) until the
+     * code is approved, then `{ token, user }` once — the token is stored so the
+     * TV is logged in. Rejects (410 `pairing-expired`) after expiry/consumption.
+     */
+    pairPoll: async (code: string): Promise<PairPollResult> => {
+      const res = await this.fetch<PairPollResult>('/auth/pair/poll', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      })
+      if ('token' in res) this.setToken(res.token)
+      return res
+    },
+  }
+
   async play(mediaId: string, opts: PlayOptions): Promise<PlaybackSession> {
     const caps = detectCapabilities(opts.capabilities)
     const sessionInfo = await this.fetch<SessionInfo>('/sessions', {
@@ -168,7 +256,6 @@ export class HorizonClient {
         capabilities: caps,
         audioTrackIndex: opts.audioTrackIndex ?? 0,
         subtitleTrackIndex: opts.subtitleTrackIndex ?? null,
-        userId: this.activeUserId ?? undefined,
         startPositionMs: opts.startPositionMs,
       }),
     })
@@ -177,7 +264,7 @@ export class HorizonClient {
       sessionInfo,
       baseUrl: this.baseUrl,
       capabilities: caps,
-      userId: this.activeUserId ?? undefined,
+      token: this.token ?? undefined,
       onReady: opts.onReady,
       onQualityChange: opts.onQualityChange,
       onTrackChange: opts.onTrackChange,

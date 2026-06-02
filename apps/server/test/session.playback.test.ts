@@ -35,7 +35,7 @@ function fakeUsers(known: Set<string>): UserRepo {
 function baseCfg(overrides: Partial<Config> = {}): Config {
   return {
     port: 7777,
-    mediaBases: ['/media'], corsOrigins: ['*'],
+    corsOrigins: ['*'],
     cacheDir: '/tmp/horizon-test',
     dbPath: ':memory:',
     watchedThresholdPct: 90,
