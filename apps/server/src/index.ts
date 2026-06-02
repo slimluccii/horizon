@@ -5,6 +5,7 @@ import { migrate } from './db/migrations.ts'
 import { createMediaRepo } from './repos/media.ts'
 import { createCollectionsRepo } from './repos/collections.ts'
 import { createUserRepo } from './repos/users.ts'
+import { createSessionRepo } from './auth/session.ts'
 import { createProgressRepo } from './repos/progress.ts'
 import { createServerSettings } from './repos/serverSettings.ts'
 import { createScanRootsRepo, createChangesCursorRepo, createScanHistoryRepo } from './repos/scanState.ts'
@@ -34,6 +35,29 @@ async function main() {
   const mediaRepo = createMediaRepo(db)
   const collectionsRepo = createCollectionsRepo(db)
   const userRepo = createUserRepo(db)
+
+  // Owner-lockout escape hatch (DEPLOY.md → "Owner lockout escape hatch"):
+  // boot once with HORIZON_RESET_OWNER_PASSWORD=1 to clear the owner's password
+  // hash + failed-attempt/lockout state, forcing them back through the
+  // set-password flow like first boot. One-shot — the operator removes the var
+  // and restarts afterwards (leaving it set wipes the owner's password on every
+  // boot). Read directly from the env so it bypasses the seeded ServerSettings
+  // overlay and works even when the DB row already exists.
+  if (process.env.HORIZON_RESET_OWNER_PASSWORD === '1') {
+    const ownerName = userRepo.resetOwnerPassword()
+    if (ownerName) {
+      console.warn(
+        `HORIZON_RESET_OWNER_PASSWORD=1: cleared password + lockout for owner "${ownerName}". ` +
+        'Owner must set a new password on next login. Unset this variable and restart.',
+      )
+    } else {
+      console.warn('HORIZON_RESET_OWNER_PASSWORD=1: no owner row found; nothing to reset.')
+    }
+  }
+
+  const sessionRepo = createSessionRepo(db)
+  // Boot sweep of expired sessions (incremental cleanup also happens on resolve).
+  sessionRepo.sweepExpired()
   const serverSettings = createServerSettings(db)
   // Overlay env values exactly once (fresh install / first boot after upgrade).
   serverSettings.bootstrapFromEnv(cfg)
@@ -97,7 +121,7 @@ async function main() {
   const app = await buildServer(
     cfg,
     hwAccel,
-    { mediaRepo, collectionsRepo, userRepo, progressRepo, serverSettings },
+    { mediaRepo, collectionsRepo, userRepo, sessionRepo, progressRepo, serverSettings },
     sessions,
     { scanManager, refreshWorker, scanHistory: scanHistoryRepo },
     orchestrator,

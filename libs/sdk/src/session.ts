@@ -12,11 +12,12 @@ export interface PlaybackSessionOptions {
   sessionInfo: SessionInfo
   baseUrl: string
   capabilities: ClientCapabilities
-  /** Active user id. Threaded onto every browser playback transport that cannot
-   *  set the X-Horizon-User header (WebSocket upgrade, `<video src>`,
-   *  `<track src>`) as a `user` query param so the server's ownership gate can
-   *  resolve the caller. hls.js requests set the header directly via xhrSetup. */
-  userId?: string
+  /** Opaque session token for native clients. The web sends nothing here and
+   *  relies on the httpOnly `hz_session` cookie, which auto-rides the WebSocket
+   *  upgrade, `<video src>`, `<track src>`, and hls.js fetches on the same
+   *  origin. Native clients (which have no cookie) attach this token as a bearer
+   *  on the requests they control. Identity no longer travels in the URL. */
+  token?: string
   onReady?: (info: SessionInfo) => void
   onQualityChange?: (profile: QualityProfile, reason: string) => void
   onTrackChange?: (info: { audio?: number; subtitle?: number | null }) => void
@@ -32,10 +33,10 @@ export class PlaybackSession {
   readonly sessionId: string
   readonly method: PlaybackMethod
   readonly wsUrl: string
-  /** Active user id, exposed so the web player can stamp the X-Horizon-User
-   *  header on hls.js manifest/segment requests (xhrSetup). Null for headless
-   *  sessions. */
-  readonly userId: string | null
+  /** Opaque session token for native clients, exposed so the player can attach
+   *  it as a bearer on the requests it controls. Null on the web (identity rides
+   *  the httpOnly cookie) and for headless sessions. */
+  readonly token: string | null
 
   /** Raw stream URL without the proof-of-knowledge token. hls.js requests
    *  (transcode method) attach the token via the X-Reconnect-Token header in
@@ -59,7 +60,7 @@ export class PlaybackSession {
     this._opts = opts
     this.sessionId = opts.sessionInfo.sessionId
     this.method = opts.sessionInfo.method
-    this.userId = opts.userId ?? null
+    this.token = opts.token ?? null
     this._streamUrl = `${opts.baseUrl}${opts.sessionInfo.streamUrl}`
     // When baseUrl is empty (same-origin via Vite proxy), derive the WS origin
     // from window.location — WebSocket constructor rejects relative URLs.
@@ -68,11 +69,10 @@ export class PlaybackSession {
       : (typeof window !== 'undefined'
         ? `${window.location.protocol.replace('http', 'ws')}//${window.location.host}`
         : '')
-    // The WebSocket upgrade cannot carry the X-Horizon-User header, so the
-    // server's ownership gate reads the caller id from this `user` query param
-    // (see resolveCallerRole). Without it a non-headless session closes the
-    // socket with 4001 and the client reconnect-loops forever.
-    this.wsUrl = this._withUser(`${wsOrigin}${opts.sessionInfo.wsUrl}`)
+    // Identity rides the httpOnly cookie (web) on the WS upgrade, so the URL no
+    // longer carries a caller id. Native clients authenticate the upgrade via
+    // the bearer header they control.
+    this.wsUrl = `${wsOrigin}${opts.sessionInfo.wsUrl}`
     // direct-play sessions arrive with profiles=[] — synthesize a sentinel so
     // _profile is never undefined; consumers should check method first anyway.
     this._profile = opts.sessionInfo.profiles[0] ?? {
@@ -104,15 +104,6 @@ export class PlaybackSession {
     return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(this._reconnectToken)}`
   }
 
-  /** Append the active user id as a `user` query param. Used for header-less
-   *  transports (WebSocket upgrade, `<video src>`, `<track src>`) so the
-   *  server's ownership gate can resolve the caller. Returns the URL unchanged
-   *  for headless sessions (no userId). */
-  private _withUser(url: string): string {
-    if (!this.userId) return url
-    return `${url}${url.includes('?') ? '&' : '?'}user=${encodeURIComponent(this.userId)}`
-  }
-
   /** Playable stream URL. For direct-play this is the `/direct` endpoint with
    *  the reconnect token appended as a query param, because the browser
    *  `<video src>` cannot send the X-Reconnect-Token header the server requires.
@@ -121,9 +112,10 @@ export class PlaybackSession {
    *  onReady fires, by which point the token is assigned. */
   get streamUrl(): string {
     // direct-play streams through `<video src>`, which cannot set headers — so
-    // both the proof-of-knowledge token and the caller id ride as query params.
-    // transcode manifests are fetched by hls.js, which sets both via xhrSetup.
-    return this.method === 'direct-play' ? this._withUser(this._withToken(this._streamUrl)) : this._streamUrl
+    // the proof-of-knowledge reconnect token rides as a query param. Identity
+    // rides the cookie (web); the URL no longer carries a caller id. transcode
+    // manifests are fetched by hls.js, which sets the token header via xhrSetup.
+    return this.method === 'direct-play' ? this._withToken(this._streamUrl) : this._streamUrl
   }
 
   private _connect() {
@@ -268,9 +260,9 @@ export class PlaybackSession {
    *  embeddable text subs after ffmpeg starts; URL may 404 briefly while the
    *  extraction process is still running. */
   subtitleUrl(index: number): string {
-    // `<track src>` cannot send headers, so both the proof-of-knowledge token
-    // and the caller id ride as query params here.
-    return this._withUser(this._withToken(`${this._opts.baseUrl}/sessions/${this.sessionId}/subtitles/${index}.vtt`))
+    // `<track src>` cannot send headers, so the proof-of-knowledge reconnect
+    // token rides as a query param. Identity rides the cookie (web).
+    return this._withToken(`${this._opts.baseUrl}/sessions/${this.sessionId}/subtitles/${index}.vtt`)
   }
 
   park() { this._send({ type: 'park' }) }
@@ -290,7 +282,13 @@ export class PlaybackSession {
     // unknown/already-gone session as an idempotent 204, so the miss is benign.)
     fetch(`${this._opts.baseUrl}/sessions/${this.sessionId}`, {
       method: 'DELETE',
-      ...(this._reconnectToken ? { headers: { 'X-Reconnect-Token': this._reconnectToken } } : {}),
+      // The cookie (web) / bearer (native) authenticates the caller; the
+      // reconnect token is the per-session proof-of-knowledge on top.
+      credentials: 'include',
+      headers: {
+        ...(this._reconnectToken ? { 'X-Reconnect-Token': this._reconnectToken } : {}),
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      },
     }).catch(() => {})
   }
 

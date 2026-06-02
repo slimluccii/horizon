@@ -1,23 +1,45 @@
 import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo, type UserRepo } from '../src/repos/users.ts'
+import { createSessionRepo } from '../src/auth/session.ts'
+import { makeRequireAuth } from '../src/auth/middleware.ts'
 import { registerUsers } from '../src/routes/users.ts'
+import fastifyCookie from '@fastify/cookie'
 import { SUPPORTED_LANGUAGES } from '@horizon/sdk/preferences'
 
-async function buildApp(users: UserRepo) {
+// Session-auth cutover: tests authenticate with a real session bearer token
+// (no more X-Horizon-User header). buildApp installs the production auth guard
+// hook; `hdr(db, userId)` mints a token and returns the Authorization header.
+async function buildApp(users: UserRepo, db: DatabaseSync) {
   const app = Fastify({ logger: false })
-  registerUsers(app, users)
+  const sessions = createSessionRepo(db)
+  // First-boot POST /users sets the session cookie, which needs @fastify/cookie
+  // registered (in production registerAuth does this before registerUsers).
+  await app.register(fastifyCookie)
+  const requireAuth = makeRequireAuth(sessions, users)
+  // Mirror server.ts: first-boot POST /users (empty household) bypasses the guard.
+  app.addHook('onRequest', async (req, reply) => {
+    const path = req.routeOptions?.url ?? req.url.split('?')[0]
+    if (req.method === 'POST' && path === '/users' && users.list().length === 0) return
+    return requireAuth(req, reply)
+  })
+  registerUsers(app, users, sessions)
   await app.ready()
   return app
+}
+
+function hdr(db: DatabaseSync, userId: string): { authorization: string } {
+  const token = createSessionRepo(db).issue(userId).token
+  return { authorization: `Bearer ${token}` }
 }
 
 describe('POST /users', () => {
   it('creates a user', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Luuk' } })
     expect(res.statusCode).toBe(200)
     const body = res.json() as any
@@ -27,7 +49,7 @@ describe('POST /users', () => {
   it('rejects missing name', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({ method: 'POST', url: '/users', payload: {} })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
@@ -37,8 +59,8 @@ describe('POST /users', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Luuk' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'luuk' }, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'luuk' }, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(409)
     expect(res.json().code).toBe('name-taken')
   })
@@ -46,7 +68,7 @@ describe('POST /users', () => {
   it('first POST returns role owner', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Alice' } })
     expect(res.statusCode).toBe(200)
     expect(res.json().role).toBe('owner')
@@ -56,8 +78,8 @@ describe('POST /users', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Bob' }, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Bob' }, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(200)
     expect(res.json().role).toBe('member')
   })
@@ -66,10 +88,12 @@ describe('POST /users', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     users.create({ name: 'Alice' }) // owner
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
+    // Once the household is non-empty the first-boot bypass no longer applies,
+    // so the global auth guard rejects the unauthenticated request with 401.
     const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Bob' } })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('rejects member-authenticated creation when users exist', async () => {
@@ -77,8 +101,8 @@ describe('POST /users', () => {
     const users = createUserRepo(db)
     users.create({ name: 'Alice' }) // owner
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Carol' }, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Carol' }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
@@ -86,7 +110,7 @@ describe('POST /users', () => {
   it('allows unauthenticated creation on empty database', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Alice' } })
     expect(res.statusCode).toBe(200)
     expect(res.json().role).toBe('owner')
@@ -97,9 +121,9 @@ describe('GET /users and /users/:id', () => {
   it('lists users', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    users.create({ name: 'A' })
-    const app = await buildApp(users)
-    const list = await app.inject({ method: 'GET', url: '/users' })
+    const owner = users.create({ name: 'A' })
+    const app = await buildApp(users, db)
+    const list = await app.inject({ method: 'GET', url: '/users', headers: hdr(db, owner.id) })
     expect(list.json()).toHaveLength(1)
   })
 
@@ -107,16 +131,17 @@ describe('GET /users and /users/:id', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
-    const app = await buildApp(users)
-    const one = await app.inject({ method: 'GET', url: `/users/${u.id}` })
+    const app = await buildApp(users, db)
+    const one = await app.inject({ method: 'GET', url: `/users/${u.id}`, headers: hdr(db, u.id) })
     expect(one.json().id).toBe(u.id)
   })
 
   it('404 for missing user', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    const app = await buildApp(users)
-    const missing = await app.inject({ method: 'GET', url: '/users/missing' })
+    const owner = users.create({ name: 'A' })
+    const app = await buildApp(users, db)
+    const missing = await app.inject({ method: 'GET', url: '/users/missing', headers: hdr(db, owner.id) })
     expect(missing.statusCode).toBe(404)
   })
 })
@@ -126,8 +151,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${u.id}`, payload: { name: 'B' }, headers: { 'x-horizon-user': u.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${u.id}`, payload: { name: 'B' }, headers: hdr(db, u.id) })
     expect(res.statusCode).toBe(200)
     expect(res.json().name).toBe('B')
   })
@@ -137,8 +162,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     users.create({ name: 'Alice' }) // owner
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { name: 'Bobby' }, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { name: 'Bobby' }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(200)
     expect(res.json().name).toBe('Bobby')
   })
@@ -148,8 +173,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     users.create({ name: 'Alice' }) // owner
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { preferences: { theme: 'dark' } }, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { preferences: { theme: 'dark' } }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(200)
     expect(res.json().preferences).toEqual({ theme: 'dark' })
   })
@@ -159,8 +184,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { name: 'Mallory' }, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { name: 'Mallory' }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
@@ -170,8 +195,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { preferences: { theme: 'dark' } }, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { preferences: { theme: 'dark' } }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
@@ -181,20 +206,20 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { name: 'Robert' }, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { name: 'Robert' }, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
 
-  it('PATCH profile without x-horizon-user header returns 400 no-user', async () => {
+  it('PATCH profile without a session returns 401 unauthorized', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({ method: 'PATCH', url: `/users/${u.id}`, payload: { name: 'B' } })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('deletes + subsequent 404', async () => {
@@ -202,22 +227,22 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     const owner = users.create({ name: 'A' }) // owner
     const b = users.create({ name: 'B' }) // member
-    const app = await buildApp(users)
-    const del = await app.inject({ method: 'DELETE', url: `/users/${b.id}`, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const del = await app.inject({ method: 'DELETE', url: `/users/${b.id}`, headers: hdr(db, owner.id) })
     expect(del.statusCode).toBe(204)
-    const get = await app.inject({ method: 'GET', url: `/users/${b.id}` })
+    const get = await app.inject({ method: 'GET', url: `/users/${b.id}`, headers: hdr(db, owner.id) })
     expect(get.statusCode).toBe(404)
   })
 
-  it('DELETE without caller header returns 400 no-user', async () => {
+  it('DELETE without a session returns 401 unauthorized', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     users.create({ name: 'A' }) // owner
     const b = users.create({ name: 'B' }) // member
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({ method: 'DELETE', url: `/users/${b.id}` })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('member cannot DELETE another user (403 caller-forbidden)', async () => {
@@ -226,8 +251,8 @@ describe('PATCH + DELETE /users/:id', () => {
     users.create({ name: 'A' }) // owner
     const member = users.create({ name: 'B' }) // member
     const victim = users.create({ name: 'C' }) // member
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'DELETE', url: `/users/${victim.id}`, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${victim.id}`, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
     // Victim must still exist.
@@ -238,8 +263,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'DELETE', url: `/users/${owner.id}`, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${owner.id}`, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('owner-protected')
   })
@@ -248,8 +273,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { role: 'member' }, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('role-immutable')
   })
@@ -259,21 +284,21 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     const owner = users.create({ name: 'Alice' })
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'owner' }, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'owner' }, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(409)
     expect(res.json().code).toBe('owner-exists')
   })
 
-  it('PATCH role without x-horizon-user header returns 400 no-user', async () => {
+  it('PATCH role without a session returns 401 unauthorized', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    const owner = users.create({ name: 'Alice' })
+    users.create({ name: 'Alice' })
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' } })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('PATCH role with caller role=member returns 403 caller-forbidden', async () => {
@@ -281,8 +306,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     users.create({ name: 'Alice' }) // owner
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' }, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
@@ -293,8 +318,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const owner = users.create({ name: 'Alice' })
     const adminUser = users.create({ name: 'Bob' })
     users.update(adminUser.id, { role: 'admin' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${adminUser.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': owner.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${adminUser.id}`, payload: { role: 'member' }, headers: hdr(db, owner.id) })
     expect(res.statusCode).toBe(200)
     expect(res.json().role).toBe('member')
   })
@@ -307,8 +332,8 @@ describe('PATCH + DELETE /users/:id', () => {
     users.update(admin1.id, { role: 'admin' })
     const admin2 = users.create({ name: 'Charlie' })
     users.update(admin2.id, { role: 'admin' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${admin2.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': admin1.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${admin2.id}`, payload: { role: 'member' }, headers: hdr(db, admin1.id) })
     expect(res.statusCode).toBe(200)
     expect(res.json().role).toBe('member')
   })
@@ -319,8 +344,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const owner = users.create({ name: 'Alice' })
     const adminUser = users.create({ name: 'Bob' })
     users.update(adminUser.id, { role: 'admin' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { role: 'member' }, headers: { 'x-horizon-user': adminUser.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${owner.id}`, payload: { role: 'member' }, headers: hdr(db, adminUser.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('role-immutable')
   })
@@ -330,8 +355,8 @@ describe('PATCH + DELETE /users/:id', () => {
     const users = createUserRepo(db)
     users.create({ name: 'Alice' }) // owner
     const member = users.create({ name: 'Bob' })
-    const app = await buildApp(users)
-    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' }, headers: { 'x-horizon-user': member.id } })
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'PATCH', url: `/users/${member.id}`, payload: { role: 'admin' }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
@@ -342,11 +367,11 @@ describe('PATCH /users/:id preferences', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A', preferences: { theme: 'dark', audioLanguage: 'en' } })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { theme: 'light' } },
-      headers: { 'x-horizon-user': u.id },
+      headers: hdr(db, u.id),
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().preferences).toEqual({ theme: 'light', audioLanguage: 'en' })
@@ -356,10 +381,11 @@ describe('PATCH /users/:id preferences', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { theme: 'dark', foo: 'bar' } },
+      headers: hdr(db, u.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
@@ -369,10 +395,11 @@ describe('PATCH /users/:id preferences', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { theme: 'midnight' } },
+      headers: hdr(db, u.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
@@ -382,10 +409,11 @@ describe('PATCH /users/:id preferences', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { audioLanguage: 'klingon' } },
+      headers: hdr(db, u.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
@@ -394,13 +422,13 @@ describe('PATCH /users/:id preferences', () => {
   it('accepts every curated language code', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     for (const { code } of SUPPORTED_LANGUAGES) {
       const u = users.create({ name: `user-${code}` })
       const res = await app.inject({
         method: 'PATCH', url: `/users/${u.id}`,
         payload: { preferences: { audioLanguage: code, subtitleLanguage: code } },
-        headers: { 'x-horizon-user': u.id },
+        headers: hdr(db, u.id),
       })
       expect(res.statusCode, `expected 200 for language code ${code}`).toBe(200)
       expect(res.json().preferences.audioLanguage).toBe(code)
@@ -412,10 +440,11 @@ describe('PATCH /users/:id preferences', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A' })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { subtitlesEnabled: 'yes' } },
+      headers: hdr(db, u.id),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
@@ -425,11 +454,11 @@ describe('PATCH /users/:id preferences', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A', preferences: { theme: 'light' } })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { name: 'B' },
-      headers: { 'x-horizon-user': u.id },
+      headers: hdr(db, u.id),
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().preferences).toEqual({ theme: 'light' })
@@ -439,11 +468,11 @@ describe('PATCH /users/:id preferences', () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
     const u = users.create({ name: 'A', preferences: { theme: 'light', subtitlesEnabled: true, audioLanguage: 'fr' } })
-    const app = await buildApp(users)
+    const app = await buildApp(users, db)
     const res = await app.inject({
       method: 'PATCH', url: `/users/${u.id}`,
       payload: { preferences: { theme: 'dark' } },
-      headers: { 'x-horizon-user': u.id },
+      headers: hdr(db, u.id),
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().preferences).toEqual({ theme: 'dark', subtitlesEnabled: true, audioLanguage: 'fr' })

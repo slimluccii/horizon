@@ -77,10 +77,10 @@ export default function VideoPlayer({
       xhrSetup: (xhr, _url) => {
         const token = session.reconnectToken
         if (token) xhr.setRequestHeader('X-Reconnect-Token', token)
-        // The server's ownership gate (canAccessSession) needs the caller id on
-        // every session data route, including the manifest + segment GETs. XHR
-        // can set headers (unlike <video>/<track>/WebSocket), so stamp it here.
-        if (session.userId) xhr.setRequestHeader('X-Horizon-User', session.userId)
+        // Identity now rides the httpOnly hz_session cookie, which the browser
+        // attaches to these same-origin manifest + segment XHRs automatically —
+        // no X-Horizon-User header to stamp. The reconnectToken above remains the
+        // per-session ownership proof on top of that identity.
       },
     })
     hlsRef.current = hls

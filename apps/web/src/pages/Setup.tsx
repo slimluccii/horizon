@@ -14,7 +14,7 @@ const STEPS: StepId[] = ['owner', 'folders', 'tmdb', 'finish']
 
 export default function Setup() {
   const navigate = useNavigate()
-  const { setUserId } = useActiveUser()
+  const { refresh } = useActiveUser()
 
   const [step, setStep] = useState<StepId>('owner')
   const [busy, setBusy] = useState(false)
@@ -23,8 +23,9 @@ export default function Setup() {
   // Step 1 — owner
   const [name, setName] = useState('')
   const [avatar, setAvatar] = useState<string | null>(null)
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
   const [ownerCreated, setOwnerCreated] = useState(false)
-  const [ownerId, setOwnerId] = useState<string | null>(null)
 
   // Step 2 — library folders
   const [moviesRoots, setMoviesRoots] = useState<string[]>([])
@@ -40,23 +41,41 @@ export default function Setup() {
     setStep(next)
   }
 
-  // --- Step 1: create owner ------------------------------------------------
+  // --- Step 1: create owner + set the owner password -----------------------
+  // The owner profile is the household account that can never be removed; it
+  // also gets the first password. We create the profile (allowlisted on an empty
+  // DB) then immediately set its password via auth.setPassword, which issues the
+  // session (httpOnly cookie + stored bearer) so the rest of the wizard runs
+  // authenticated. No more X-Horizon-User header — identity rides the session.
   async function createOwner() {
     if (!name.trim()) {
       setError('Name required')
       return
     }
+    if (password.length < 8) {
+      setError('Use a password of at least 8 characters')
+      return
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      const u = await horizon.users.create({ name: name.trim(), avatar })
-      setUserId(u.id)
-      setOwnerId(u.id)
+      await horizon.users.create({ name: name.trim(), avatar })
+      // Set-password on a brand-new owner needs no old password; on success the
+      // server re-issues a session, so subsequent owner/admin-gated calls (the
+      // folder save + scan kick) are authenticated.
+      await horizon.auth.setPassword({ newPassword: password })
+      await refresh()
       setOwnerCreated(true)
       goTo('folders')
     } catch (err) {
       const code = (err as { code?: string }).code
-      setError(code === 'name-taken' ? 'That name is already in use' : String((err as Error).message))
+      if (code === 'name-taken') setError('That name is already in use')
+      else if (code === 'weak-password') setError('Use a stronger password (at least 8 characters)')
+      else setError(String((err as Error).message))
     } finally {
       setBusy(false)
     }
@@ -115,12 +134,15 @@ export default function Setup() {
     setError(null)
     try {
       // Only kick a scan if at least one folder was configured. The rescan
-      // endpoint is owner/admin-gated, so it carries the active-user header
-      // identifying the freshly-created owner.
+      // endpoint is owner/admin-gated; the owner's session cookie (set when the
+      // password was created in step 1) rides the request via credentials.
       if (moviesRoots.length > 0 || showsRoots.length > 0) {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-        if (ownerId) headers['X-Horizon-User'] = ownerId
-        await fetch('/library/rescan', { method: 'POST', headers, body: JSON.stringify({}) })
+        await fetch('/api/library/rescan', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
       }
     } catch {
       // A failed scan kick shouldn't block landing in the app; it can be
@@ -153,7 +175,7 @@ export default function Setup() {
             <>
               <div className="eyebrow">First run · step 1 of 4</div>
               <h1 className="setup__title">Welcome to Horizon</h1>
-              <p className="setup__subtitle">Create a profile to start watching.</p>
+              <p className="setup__subtitle">Create the owner profile and set its password.</p>
               <p className="setup__subtitle">
                 You'll be the household owner — the account that can never be removed.
               </p>
@@ -186,17 +208,39 @@ export default function Setup() {
                 </div>
               </div>
 
+              <label className="setup__field">
+                <span className="setup__label">Password</span>
+                <input
+                  className="setup__input"
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
+                />
+              </label>
+
+              <label className="setup__field">
+                <span className="setup__label">Confirm password</span>
+                <input
+                  className="setup__input"
+                  type="password"
+                  value={confirm}
+                  onChange={e => setConfirm(e.target.value)}
+                  placeholder="Re-enter password"
+                  autoComplete="new-password"
+                  onKeyDown={e => e.key === 'Enter' && createOwner()}
+                />
+              </label>
+
               {error && <div className="setup__error">{error}</div>}
 
               <button
                 className="setup__submit"
-                disabled={busy || !name.trim()}
+                disabled={busy || !name.trim() || !password || !confirm}
                 onClick={createOwner}
               >
                 {busy ? 'Creating…' : <>Continue <Icon name="chevron-right" size={14} color="#000" /></>}
-              </button>
-              <button className="setup__skip" type="button" disabled={busy} onClick={() => goTo('folders')}>
-                Skip for now
               </button>
             </>
           )}

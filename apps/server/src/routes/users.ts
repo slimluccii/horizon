@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../repos/users.ts'
+import type { SessionRepo } from '../auth/session.ts'
+import { setSessionCookie } from '../auth/middleware.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
@@ -17,7 +19,7 @@ const PatchBody = z.object({
   role: z.enum(['owner', 'admin', 'member']).optional(),
 })
 
-export function registerUsers(app: FastifyInstance, users: UserRepo): void {
+export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: SessionRepo): void {
   app.post('/users', async (req, reply) => {
     const parse = CreateBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
@@ -26,16 +28,29 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
     // exists, creating further profiles requires an owner/admin caller.
     const isEmptyDatabase = users.list().length === 0
     if (!isEmptyDatabase) {
-      const caller = resolveCallerRole(users, req)
+      const caller = resolveCallerRole(req)
       if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Cannot create user without authentication')
       if (caller.role === 'member') return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can create users')
     }
     try {
       const { preferences, ...rest } = parse.data
-      return users.create({
+      const created = users.create({
         ...rest,
         ...(preferences !== undefined ? { preferences: preferences as Record<string, unknown> } : {}),
       })
+      // First-boot owner: this request was unauthenticated (allowlisted), but the
+      // very next step of the setup wizard is POST /auth/set-password, which
+      // REQUIRES a session. Issue one here — set the httpOnly cookie (web) and
+      // return the raw token (native) — so the new owner is immediately
+      // authenticated and can set their password. Subsequent (authenticated)
+      // creates don't get a session; they return the plain User as before.
+      if (isEmptyDatabase) {
+        const ua = req.headers['user-agent']
+        const { token } = sessions.issue(created.id, typeof ua === 'string' ? ua : null)
+        setSessionCookie(reply, req, token)
+        return { ...created, token }
+      }
+      return created
     } catch (err) {
       const code = (err as { code?: string }).code
       if (code === ErrorCodes.NAME_TAKEN) {
@@ -61,8 +76,8 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
     if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
     // Every PATCH must identify its caller. Without this gate any client could
     // mutate any other user's profile (IDOR).
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     // Profile fields (name / avatar / preferences) are personal: a caller may
     // only edit their own profile. This closes the IDOR for non-role fields.
     const editsProfile =
@@ -109,8 +124,8 @@ export function registerUsers(app: FastifyInstance, users: UserRepo): void {
     // any client could delete any non-owner profile (the repo only protects the
     // owner) — an authz hole, since every other user mutation already checks
     // the caller's role.
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     if (caller.role === 'member') {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can delete users')
     }

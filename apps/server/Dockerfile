@@ -84,9 +84,9 @@ ENV NODE_ENV=production \
 
 EXPOSE 7777
 
-# Healthcheck hits the server's /health route
+# Healthcheck hits the server's /api/health route
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.HORIZON_PORT||7777)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.HORIZON_PORT||7777)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "--enable-source-maps", "node_modules/.bin/tsx", "apps/server/src/index.ts"]

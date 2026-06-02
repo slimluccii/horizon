@@ -14,10 +14,10 @@ function userColor(name: string): string {
 }
 
 /** Top-nav profile control. Circular coloured initial; dropdown on click with
- *  switch / delete. Hidden when no active user — Guard redirects to /profiles
+ *  sign-out / delete. Hidden when no active user — the Guard redirects to /login
  *  before any screen that shows this chrome mounts. */
 export default function ProfileBadgeButton() {
-  const { user, setUserId } = useActiveUser()
+  const { user, logout } = useActiveUser()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -36,11 +36,22 @@ export default function ProfileBadgeButton() {
   const color = userColor(user.name)
   const initial = user.avatar ?? user.name.charAt(0).toUpperCase()
 
+  // Sign out → revoke the session, then land on the login screen (the profile
+  // picker). Replaces the old "switch profile" since identity is a session now.
+  async function signOut() {
+    setOpen(false)
+    await logout()
+    navigate('/login', { replace: true })
+  }
+
+  // Delete the current profile (non-owner only), then sign out — the session is
+  // dead with the user gone, so route to login.
   async function deleteProfile() {
     if (!user || !window.confirm(`Delete profile "${user.name}"? Watch history will be lost.`)) return
+    setOpen(false)
     await horizon.users.delete(user.id)
-    setUserId(null)
-    navigate('/profiles')
+    await logout()
+    navigate('/login', { replace: true })
   }
 
   return (
@@ -62,11 +73,11 @@ export default function ProfileBadgeButton() {
               <div className="pb-badge__role">Active profile</div>
             </div>
           </div>
-          <button className="pb-badge__item" onClick={() => { setOpen(false); navigate('/profiles') }}>
-            Switch profile
-          </button>
           <button className="pb-badge__item" onClick={() => { setOpen(false); navigate('/settings') }}>
             Settings
+          </button>
+          <button className="pb-badge__item" onClick={signOut}>
+            Sign out
           </button>
           {user.role !== 'owner' && (
             <button className="pb-badge__item pb-badge__item--danger" onClick={deleteProfile}>

@@ -3,33 +3,15 @@ import fastifyStatic from '@fastify/static'
 import { sendNotFound, ErrorCodes } from './errors.ts'
 
 /**
- * API route prefixes owned by the JSON API. An unmatched request under one of
- * these is a real 404 (a bad API call), NOT a client-side route — so it must
- * return JSON, never the SPA shell. Everything else falls through to index.html
- * so the browser-side router (react-router) can handle deep links / reloads.
- *
- * Note `/settings/server` (the API) rather than `/settings` (a web page): the
- * web UI has a `/settings` route, so only the deeper API path is reserved.
- */
-const API_PREFIXES = [
-  '/library',
-  '/sessions',
-  '/users',
-  '/metadata',
-  '/health',
-  '/dev',
-  '/settings/server',
-]
-
-function isApiPath(pathname: string): boolean {
-  return API_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/'))
-}
-
-/**
  * Serve the bundled web UI (apps/web/dist) same-origin, Plex/Jellyfin style.
- * Registered AFTER all API routes so real endpoints always win. Static assets
- * are served directly; any other GET resolves to the SPA shell via the
- * not-found handler (wildcard:false lets misses fall through to it).
+ * Registered at the root, AFTER the /api plugin. Static assets are served
+ * directly; any other GET resolves to the SPA shell via the not-found handler
+ * (wildcard:false lets misses fall through to it) so react-router handles deep
+ * links / reloads.
+ *
+ * Since every backend endpoint now lives under `/api`, the rule is simple: an
+ * unmatched request under `/api` is a real API 404 (JSON); anything else GET is
+ * a client-side route → index.html.
  *
  * Must be called last in buildServer, and only when cfg.serveWeb is true.
  */
@@ -38,8 +20,8 @@ export async function registerWeb(app: FastifyInstance, webDir: string): Promise
 
   app.setNotFoundHandler((req, reply) => {
     const pathname = req.url.split('?')[0]
-    // Non-GET or genuine API misses get a JSON 404 — never the HTML shell.
-    if (req.method !== 'GET' || isApiPath(pathname)) {
+    // Non-GET, or a genuine API miss → JSON 404, never the HTML shell.
+    if (req.method !== 'GET' || pathname === '/api' || pathname.startsWith('/api/')) {
       return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Not found')
     }
     // Client-side route or deep link → hand off to the SPA.

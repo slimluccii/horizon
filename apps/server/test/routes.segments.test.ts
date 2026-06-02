@@ -3,11 +3,13 @@ import Fastify from 'fastify'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createServerSettings } from '../src/repos/serverSettings.ts'
 import { createMediaRepo, type MovieUpsert } from '../src/repos/media.ts'
 import { createUserRepo } from '../src/repos/users.ts'
+import { createSessionRepo } from '../src/auth/session.ts'
+import { makeRequireAuth } from '../src/auth/middleware.ts'
 import { createSessionManager } from '../src/session/manager.ts'
 import { registerSegments } from '../src/routes/segments.ts'
 import type { HwAccel } from '../src/transcode/hwaccel.ts'
@@ -80,15 +82,17 @@ function setup(opts: { renditionCount: number; subtitleTracks?: number; userId?:
     durationSec: 100,
     userId: userId ?? undefined,
   } as unknown as Parameters<typeof sessions.create>[0])
-  return { sessions, media, users, session, sessionDir, owner, admin, member, other }
+  return { db, sessions, media, users, session, sessionDir, owner, admin, member, other }
 }
 
 async function buildApp(
+  db: DatabaseSync,
   sessions: ReturnType<typeof createSessionManager>,
   media: ReturnType<typeof createMediaRepo>,
   users: ReturnType<typeof createUserRepo>,
 ) {
   const app = Fastify({ logger: false })
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   registerSegments(app, hwAccel, sessions, media, users)
   await app.ready()
   return app
@@ -97,39 +101,50 @@ async function buildApp(
 let app: Awaited<ReturnType<typeof buildApp>> | undefined
 afterEach(async () => { if (app) { await app.close(); app = undefined } })
 
-const tokenHeader = (token: string) => ({ 'x-reconnect-token': token })
+/** Session bearer header for a user id (authenticates the request). */
+function bearer(db: DatabaseSync, userId: string): { authorization: string } {
+  return { authorization: `Bearer ${createSessionRepo(db).issue(userId).token}` }
+}
+
+/** Reconnect-token header plus an authenticated owner session bearer. Most
+ *  segment tests run against a headless session and only care about the
+ *  reconnect-token / bounds logic, so they authenticate as the owner. */
+const tokenHeader = (db: DatabaseSync, ownerId: string, token: string) => ({
+  'x-reconnect-token': token,
+  ...bearer(db, ownerId),
+})
 
 describe('GET /sessions/:id/renditions/:r/:seg reconnect token (#78)', () => {
   it('rejects a request without the reconnect token header with 400 invalid-reconnect-token', async () => {
-    const { sessions, media, users, session } = setup({ renditionCount: 2 })
-    app = await buildApp(sessions, media, users)
-    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/renditions/0/init.mp4` })
+    const { db, owner, sessions, media, users, session } = setup({ renditionCount: 2 })
+    app = await buildApp(db, sessions, media, users)
+    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/renditions/0/init.mp4`, headers: bearer(db, owner.id) })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-reconnect-token')
   })
 
   it('rejects a request with a mismatched reconnect token with 400 invalid-reconnect-token', async () => {
-    const { sessions, media, users, session } = setup({ renditionCount: 2 })
-    app = await buildApp(sessions, media, users)
+    const { db, owner, sessions, media, users, session } = setup({ renditionCount: 2 })
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/renditions/0/init.mp4`,
-      headers: tokenHeader('wrong-token'),
+      headers: tokenHeader(db, owner.id, 'wrong-token'),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-reconnect-token')
   })
 
   it('serves an init segment that exists on disk with the correct token', async () => {
-    const { sessions, media, users, session, sessionDir } = setup({ renditionCount: 2 })
+    const { db, owner, sessions, media, users, session, sessionDir } = setup({ renditionCount: 2 })
     const { mkdirSync } = await import('node:fs')
     mkdirSync(path.join(sessionDir, 'r0'), { recursive: true })
     writeFileSync(path.join(sessionDir, 'r0', 'init.mp4'), 'fakeinit')
-    app = await buildApp(sessions, media, users)
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/renditions/0/init.mp4`,
-      headers: tokenHeader(session.reconnectToken),
+      headers: tokenHeader(db, owner.id, session.reconnectToken),
     })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toBe('video/mp4')
@@ -138,24 +153,24 @@ describe('GET /sessions/:id/renditions/:r/:seg reconnect token (#78)', () => {
 
 describe('GET /sessions/:id/renditions/:r/:seg rendition bounds (#86)', () => {
   it('rejects r >= plan.renditions.length with 400 invalid-input', async () => {
-    const { sessions, media, users, session } = setup({ renditionCount: 2 })
-    app = await buildApp(sessions, media, users)
+    const { db, owner, sessions, media, users, session } = setup({ renditionCount: 2 })
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/renditions/2/init.mp4`,
-      headers: tokenHeader(session.reconnectToken),
+      headers: tokenHeader(db, owner.id, session.reconnectToken),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
 
   it('rejects every rendition for a direct-play session (0 renditions)', async () => {
-    const { sessions, media, users, session } = setup({ renditionCount: 0 })
-    app = await buildApp(sessions, media, users)
+    const { db, owner, sessions, media, users, session } = setup({ renditionCount: 0 })
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/renditions/0/init.mp4`,
-      headers: tokenHeader(session.reconnectToken),
+      headers: tokenHeader(db, owner.id, session.reconnectToken),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
@@ -164,37 +179,37 @@ describe('GET /sessions/:id/renditions/:r/:seg rendition bounds (#86)', () => {
 
 describe('GET /sessions/:id/subtitles/:trackIdx.vtt bounds (#89)', () => {
   it('rejects trackIdx >= subtitleTracks.length with 400 invalid-input (not 404)', async () => {
-    const { sessions, media, users, session } = setup({ renditionCount: 2, subtitleTracks: 2 })
-    app = await buildApp(sessions, media, users)
+    const { db, owner, sessions, media, users, session } = setup({ renditionCount: 2, subtitleTracks: 2 })
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/subtitles/999.vtt`,
-      headers: tokenHeader(session.reconnectToken),
+      headers: tokenHeader(db, owner.id, session.reconnectToken),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
 
   it('rejects all subtitle indices when the media has 0 subtitle tracks', async () => {
-    const { sessions, media, users, session } = setup({ renditionCount: 2, subtitleTracks: 0 })
-    app = await buildApp(sessions, media, users)
+    const { db, owner, sessions, media, users, session } = setup({ renditionCount: 2, subtitleTracks: 0 })
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/subtitles/0.vtt`,
-      headers: tokenHeader(session.reconnectToken),
+      headers: tokenHeader(db, owner.id, session.reconnectToken),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-input')
   })
 
   it('serves a VTT for an in-bounds track that exists on disk (happy path)', async () => {
-    const { sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
+    const { db, owner, sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
     writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
-    app = await buildApp(sessions, media, users)
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/subtitles/0.vtt`,
-      headers: tokenHeader(session.reconnectToken),
+      headers: tokenHeader(db, owner.id, session.reconnectToken),
     })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('text/vtt')
@@ -203,21 +218,23 @@ describe('GET /sessions/:id/subtitles/:trackIdx.vtt bounds (#89)', () => {
 
 describe('GET /sessions/:id/subtitles/:trackIdx.vtt reconnect token (#41)', () => {
   it('rejects a request without the reconnect token with 400 invalid-reconnect-token', async () => {
-    const { sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
+    const { db, owner, sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
     writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
-    app = await buildApp(sessions, media, users)
-    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/subtitles/0.vtt` })
+    app = await buildApp(db, sessions, media, users)
+    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/subtitles/0.vtt`, headers: bearer(db, owner.id) })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-reconnect-token')
   })
 
-  it('accepts the token via the `token` query param (header-less transport)', async () => {
-    const { sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
+  it('accepts the reconnect token via the `token` query param (header-less <track src>), with the session cookie riding the request', async () => {
+    const { db, owner, sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2 })
     writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
-    app = await buildApp(sessions, media, users)
+    app = await buildApp(db, sessions, media, users)
+    const token = createSessionRepo(db).issue(owner.id).token
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/subtitles/0.vtt?token=${session.reconnectToken}`,
+      headers: { cookie: `hz_session=${token}` },
     })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('text/vtt')
@@ -235,31 +252,33 @@ describe('GET /sessions/:id/direct reconnect token (#41)', () => {
   }
 
   it('rejects a request without the reconnect token with 400 invalid-reconnect-token', async () => {
-    const { sessions, media, users, session } = directSetup()
-    app = await buildApp(sessions, media, users)
-    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/direct` })
+    const { db, owner, sessions, media, users, session } = directSetup()
+    app = await buildApp(db, sessions, media, users)
+    const res = await app.inject({ method: 'GET', url: `/sessions/${session.id}/direct`, headers: bearer(db, owner.id) })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-reconnect-token')
   })
 
   it('rejects a mismatched token with 400 invalid-reconnect-token', async () => {
-    const { sessions, media, users, session } = directSetup()
-    app = await buildApp(sessions, media, users)
+    const { db, owner, sessions, media, users, session } = directSetup()
+    app = await buildApp(db, sessions, media, users)
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/direct`,
-      headers: tokenHeader('wrong-token'),
+      headers: tokenHeader(db, owner.id, 'wrong-token'),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-reconnect-token')
   })
 
-  it('serves bytes with the correct token via the `token` query param', async () => {
-    const { sessions, media, users, session } = directSetup()
-    app = await buildApp(sessions, media, users)
+  it('serves bytes with the correct reconnect token via the `token` query param (session cookie riding)', async () => {
+    const { db, owner, sessions, media, users, session } = directSetup()
+    app = await buildApp(db, sessions, media, users)
+    const cookieTok = createSessionRepo(db).issue(owner.id).token
     const res = await app.inject({
       method: 'GET',
       url: `/sessions/${session.id}/direct?token=${session.reconnectToken}`,
+      headers: { cookie: `hz_session=${cookieTok}` },
     })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toBe('video/x-matroska')
@@ -267,76 +286,77 @@ describe('GET /sessions/:id/direct reconnect token (#41)', () => {
 })
 
 describe('segment routes userId ownership (#41)', () => {
-  const userHeaders = (token: string, userId?: string) => ({
+  // Reconnect-token header plus an authenticated session bearer for `userId`.
+  const userHeaders = (db: DatabaseSync, token: string, userId: string) => ({
     'x-reconnect-token': token,
-    ...(userId ? { 'x-horizon-user': userId } : {}),
+    ...bearer(db, userId),
   })
 
   describe('GET /sessions/:id/renditions/:r/:seg', () => {
     it('rejects a member who does not own the session with 403 caller-forbidden', async () => {
-      const { sessions, media, users, session, member, other } = setup({ renditionCount: 2, ownedByMember: true })
-      app = await buildApp(sessions, media, users)
+      const { db, owner, sessions, media, users, session, member, other } = setup({ renditionCount: 2, ownedByMember: true })
+      app = await buildApp(db, sessions, media, users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${session.id}/renditions/0/init.mp4`,
-        headers: userHeaders(session.reconnectToken, other.id),
+        headers: userHeaders(db, session.reconnectToken, other.id),
       })
       expect(res.statusCode).toBe(403)
       expect(res.json().code).toBe('caller-forbidden')
     })
 
     it('allows the session owner (matching userId) through the ownership gate', async () => {
-      const { sessions, media, users, session, sessionDir, member } = setup({ renditionCount: 2, ownedByMember: true })
+      const { db, owner, sessions, media, users, session, sessionDir, member } = setup({ renditionCount: 2, ownedByMember: true })
       const { mkdirSync } = await import('node:fs')
       mkdirSync(path.join(sessionDir, 'r0'), { recursive: true })
       writeFileSync(path.join(sessionDir, 'r0', 'init.mp4'), 'fakeinit')
-      app = await buildApp(sessions, media, users)
+      app = await buildApp(db, sessions, media, users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${session.id}/renditions/0/init.mp4`,
-        headers: userHeaders(session.reconnectToken, member.id),
+        headers: userHeaders(db, session.reconnectToken, member.id),
       })
       expect(res.statusCode).toBe(200)
     })
 
     it('allows an admin to access a session owned by someone else', async () => {
-      const { sessions, media, users, session, sessionDir, member, admin } = setup({ renditionCount: 2, ownedByMember: true })
+      const { db, owner, sessions, media, users, session, sessionDir, member, admin } = setup({ renditionCount: 2, ownedByMember: true })
       const { mkdirSync } = await import('node:fs')
       mkdirSync(path.join(sessionDir, 'r0'), { recursive: true })
       writeFileSync(path.join(sessionDir, 'r0', 'init.mp4'), 'fakeinit')
-      app = await buildApp(sessions, media, users)
+      app = await buildApp(db, sessions, media, users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${session.id}/renditions/0/init.mp4`,
-        headers: userHeaders(session.reconnectToken, admin.id),
+        headers: userHeaders(db, session.reconnectToken, admin.id),
       })
       expect(res.statusCode).toBe(200)
     })
 
     it('allows access to a headless (userId=null) session with no user header', async () => {
-      const { sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, userId: null })
+      const { db, owner, sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, userId: null })
       const { mkdirSync } = await import('node:fs')
       mkdirSync(path.join(sessionDir, 'r0'), { recursive: true })
       writeFileSync(path.join(sessionDir, 'r0', 'init.mp4'), 'fakeinit')
-      app = await buildApp(sessions, media, users)
+      app = await buildApp(db, sessions, media, users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${session.id}/renditions/0/init.mp4`,
-        headers: tokenHeader(session.reconnectToken),
+        headers: tokenHeader(db, owner.id, session.reconnectToken),
       })
       expect(res.statusCode).toBe(200)
     })
 
-    it('rejects an owned session when no user header is present (anonymous caller)', async () => {
-      const { sessions, media, users, session, member } = setup({ renditionCount: 2, ownedByMember: true })
-      app = await buildApp(sessions, media, users)
+    it('rejects an owned session when the request is unauthenticated (401)', async () => {
+      const { db, sessions, media, users, session } = setup({ renditionCount: 2, ownedByMember: true })
+      app = await buildApp(db, sessions, media, users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${session.id}/renditions/0/init.mp4`,
-        headers: tokenHeader(session.reconnectToken),
+        headers: { 'x-reconnect-token': session.reconnectToken },
       })
-      expect(res.statusCode).toBe(403)
-      expect(res.json().code).toBe('caller-forbidden')
+      expect(res.statusCode).toBe(401)
+      expect(res.json().code).toBe('unauthorized')
     })
   })
 
@@ -356,11 +376,11 @@ describe('segment routes userId ownership (#41)', () => {
 
     it('rejects a non-owner member with 403 caller-forbidden', async () => {
       const owned = directSetup()
-      app = await buildApp(owned.sessions, owned.media, owned.users)
+      app = await buildApp(owned.db, owned.sessions, owned.media, owned.users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${owned.session.id}/direct`,
-        headers: userHeaders(owned.session.reconnectToken, owned.other.id),
+        headers: userHeaders(owned.db, owned.session.reconnectToken, owned.other.id),
       })
       expect(res.statusCode).toBe(403)
       expect(res.json().code).toBe('caller-forbidden')
@@ -368,46 +388,49 @@ describe('segment routes userId ownership (#41)', () => {
 
     it('allows the owner', async () => {
       const owned = directSetup()
-      app = await buildApp(owned.sessions, owned.media, owned.users)
+      app = await buildApp(owned.db, owned.sessions, owned.media, owned.users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${owned.session.id}/direct`,
-        headers: userHeaders(owned.session.reconnectToken, owned.member.id),
+        headers: userHeaders(owned.db, owned.session.reconnectToken, owned.member.id),
       })
       expect(res.statusCode).toBe(200)
     })
 
     it('allows an admin for another user\'s session', async () => {
       const owned = directSetup()
-      app = await buildApp(owned.sessions, owned.media, owned.users)
+      app = await buildApp(owned.db, owned.sessions, owned.media, owned.users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${owned.session.id}/direct`,
-        headers: userHeaders(owned.session.reconnectToken, owned.admin.id),
+        headers: userHeaders(owned.db, owned.session.reconnectToken, owned.admin.id),
       })
       expect(res.statusCode).toBe(200)
     })
 
-    it('allows a headless session with no user header', async () => {
+    it('allows any authenticated user on a headless session', async () => {
       const ctx = directSetup({ headless: true })
-      app = await buildApp(ctx.sessions, ctx.media, ctx.users)
+      app = await buildApp(ctx.db, ctx.sessions, ctx.media, ctx.users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${ctx.session.id}/direct`,
-        headers: tokenHeader(ctx.session.reconnectToken),
+        headers: tokenHeader(ctx.db, ctx.owner.id, ctx.session.reconnectToken),
       })
       expect(res.statusCode).toBe(200)
     })
 
-    // Browser path: a `<video src>` cannot set headers, so both the token and
-    // the owner id ride as query params. Regression for the playback hang where
-    // resolveCallerRole only read the header and 403'd every browser direct-play.
-    it('allows the owner via token + user query params (no headers, browser path)', async () => {
+    // Browser path: a `<video src>` cannot set headers, so the reconnect token
+    // rides as a `token` query param while the httpOnly hz_session cookie carries
+    // identity (the `?user=` identity hack is gone). Regression for the playback
+    // hang where the owner's browser direct-play used to 403.
+    it('allows the owner via token query param with the session cookie riding (browser path)', async () => {
       const owned = directSetup()
-      app = await buildApp(owned.sessions, owned.media, owned.users)
+      app = await buildApp(owned.db, owned.sessions, owned.media, owned.users)
+      const cookieTok = createSessionRepo(owned.db).issue(owned.member.id).token
       const res = await app.inject({
         method: 'GET',
-        url: `/sessions/${owned.session.id}/direct?token=${owned.session.reconnectToken}&user=${owned.member.id}`,
+        url: `/sessions/${owned.session.id}/direct?token=${owned.session.reconnectToken}`,
+        headers: { cookie: `hz_session=${cookieTok}` },
       })
       expect(res.statusCode).toBe(200)
     })
@@ -415,13 +438,13 @@ describe('segment routes userId ownership (#41)', () => {
 
   describe('GET /sessions/:id/subtitles/:trackIdx.vtt', () => {
     it('rejects a non-owner member with 403 caller-forbidden', async () => {
-      const { sessions, media, users, session, sessionDir, member, other } = setup({ renditionCount: 2, subtitleTracks: 2, ownedByMember: true })
+      const { db, owner, sessions, media, users, session, sessionDir, member, other } = setup({ renditionCount: 2, subtitleTracks: 2, ownedByMember: true })
       writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
-      app = await buildApp(sessions, media, users)
+      app = await buildApp(db, sessions, media, users)
       const res = await app.inject({
         method: 'GET',
         url: `/sessions/${session.id}/subtitles/0.vtt`,
-        headers: userHeaders(session.reconnectToken, other.id),
+        headers: userHeaders(db, session.reconnectToken, other.id),
       })
       expect(res.statusCode).toBe(403)
       expect(res.json().code).toBe('caller-forbidden')
@@ -430,39 +453,39 @@ describe('segment routes userId ownership (#41)', () => {
     it('allows the owner, an admin, and a headless session', async () => {
       // owner
       {
-        const { sessions, media, users, session, sessionDir, member } = setup({ renditionCount: 2, subtitleTracks: 2, ownedByMember: true })
+        const { db, owner, sessions, media, users, session, sessionDir, member } = setup({ renditionCount: 2, subtitleTracks: 2, ownedByMember: true })
         writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
-        const a = await buildApp(sessions, media, users)
+        const a = await buildApp(db, sessions, media, users)
         const res = await a.inject({
           method: 'GET',
           url: `/sessions/${session.id}/subtitles/0.vtt`,
-          headers: userHeaders(session.reconnectToken, member.id),
+          headers: userHeaders(db, session.reconnectToken, member.id),
         })
         expect(res.statusCode).toBe(200)
         await a.close()
       }
       // admin
       {
-        const { sessions, media, users, session, sessionDir, member, admin } = setup({ renditionCount: 2, subtitleTracks: 2, ownedByMember: true })
+        const { db, owner, sessions, media, users, session, sessionDir, member, admin } = setup({ renditionCount: 2, subtitleTracks: 2, ownedByMember: true })
         writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
-        const a = await buildApp(sessions, media, users)
+        const a = await buildApp(db, sessions, media, users)
         const res = await a.inject({
           method: 'GET',
           url: `/sessions/${session.id}/subtitles/0.vtt`,
-          headers: userHeaders(session.reconnectToken, admin.id),
+          headers: userHeaders(db, session.reconnectToken, admin.id),
         })
         expect(res.statusCode).toBe(200)
         await a.close()
       }
       // headless
       {
-        const { sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2, userId: null })
+        const { db, owner, sessions, media, users, session, sessionDir } = setup({ renditionCount: 2, subtitleTracks: 2, userId: null })
         writeFileSync(path.join(sessionDir, 'sub_0.vtt'), 'WEBVTT\n\n')
-        app = await buildApp(sessions, media, users)
+        app = await buildApp(db, sessions, media, users)
         const res = await app.inject({
           method: 'GET',
           url: `/sessions/${session.id}/subtitles/0.vtt`,
-          headers: tokenHeader(session.reconnectToken),
+          headers: tokenHeader(db, owner.id, session.reconnectToken),
         })
         expect(res.statusCode).toBe(200)
       }

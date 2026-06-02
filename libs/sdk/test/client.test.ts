@@ -9,6 +9,18 @@ function mockFetch(impl: () => Partial<Response> & { json?: () => Promise<unknow
   vi.stubGlobal('fetch', vi.fn(async () => impl() as unknown as Response))
 }
 
+/** Capture every fetch call so tests can assert URL, method, headers, and the
+ *  always-on `credentials: 'include'`. Returns ok JSON `body` for each call. */
+function spyFetch(body: unknown = {}, status = 200) {
+  const fn = vi.fn(async () => ({
+    ok: status < 400,
+    status,
+    json: async () => body,
+  }) as unknown as Response)
+  vi.stubGlobal('fetch', fn)
+  return fn
+}
+
 describe('isProgressNotFoundError', () => {
   it('returns true for an error with code progress-not-found', () => {
     const err = Object.assign(new Error('no progress'), { code: 'progress-not-found' })
@@ -138,5 +150,136 @@ describe('HorizonClient.fetch error code handling', () => {
       // status prefix + ': ' + at most 200 chars of snippet
       expect((err as Error).message.length).toBeLessThan(260)
     }
+  })
+})
+
+describe('HorizonClient token model', () => {
+  it('starts with no token and stores/clears one via setToken/getToken', () => {
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    expect(client.getToken()).toBeNull()
+    client.setToken('tok-1')
+    expect(client.getToken()).toBe('tok-1')
+    client.setToken(null)
+    expect(client.getToken()).toBeNull()
+  })
+
+  it('always sends credentials:include and omits Authorization when no token set', async () => {
+    const fn = spyFetch([])
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    await client.users.list()
+    const init = fn.mock.calls[0][1] as RequestInit
+    expect(init.credentials).toBe('include')
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
+  })
+
+  it('sends Authorization: Bearer once a token is set', async () => {
+    const fn = spyFetch([])
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    client.setToken('tok-2')
+    await client.users.list()
+    const init = fn.mock.calls[0][1] as RequestInit
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok-2')
+  })
+
+  it('never sends the legacy X-Horizon-User header', async () => {
+    const fn = spyFetch([])
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    client.setToken('tok-3')
+    await client.users.list()
+    const headers = (fn.mock.calls[0][1] as RequestInit).headers as Record<string, string>
+    expect(headers['X-Horizon-User']).toBeUndefined()
+  })
+})
+
+describe('HorizonClient.auth', () => {
+  const user = { id: 'u1', name: 'Ada', hasPassword: true, role: 'owner' }
+
+  it('login posts name+password, stores the returned token, returns {token,user}', async () => {
+    const fn = spyFetch({ token: 'sess-tok', user })
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    const res = await client.auth.login('Ada', 'pw')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/login')
+    const init = fn.mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ name: 'Ada', password: 'pw' })
+    expect(res).toEqual({ token: 'sess-tok', user })
+    expect(client.getToken()).toBe('sess-tok')
+  })
+
+  it('logout posts and clears the stored token', async () => {
+    const fn = spyFetch({ ok: true })
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    client.setToken('sess-tok')
+    await client.auth.logout()
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/logout')
+    expect(client.getToken()).toBeNull()
+  })
+
+  it('logoutAll returns {revoked} and clears the token', async () => {
+    const fn = spyFetch({ revoked: 3 })
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    client.setToken('sess-tok')
+    const res = await client.auth.logoutAll()
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/logout-all')
+    expect(res).toEqual({ revoked: 3 })
+    expect(client.getToken()).toBeNull()
+  })
+
+  it('me GETs /auth/me and returns the user', async () => {
+    const fn = spyFetch(user)
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    const res = await client.auth.me()
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/me')
+    expect(res).toEqual(user)
+  })
+
+  it('setPassword re-stores the token on a self-change that re-issues a session', async () => {
+    const fn = spyFetch({ token: 'new-tok', user })
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    const res = await client.auth.setPassword({ oldPassword: 'old', newPassword: 'newlongpw' })
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/set-password')
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ oldPassword: 'old', newPassword: 'newlongpw' })
+    expect(client.getToken()).toBe('new-tok')
+    expect(res).toEqual({ token: 'new-tok', user })
+  })
+
+  it('setPassword leaves the token untouched on an admin reset (no token returned)', async () => {
+    spyFetch({})
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    client.setToken('admin-tok')
+    await client.auth.setPassword({ userId: 'u2', newPassword: 'resetpw99' })
+    expect(client.getToken()).toBe('admin-tok')
+  })
+
+  it('pairStart returns {code,expiresAt}', async () => {
+    const fn = spyFetch({ code: 'ABCD-2345', expiresAt: 123 })
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    const res = await client.auth.pairStart()
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/pair/start')
+    expect(res).toEqual({ code: 'ABCD-2345', expiresAt: 123 })
+  })
+
+  it('pairApprove posts the code', async () => {
+    const fn = spyFetch({ ok: true })
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    await client.auth.pairApprove('ABCD-2345')
+    expect(fn.mock.calls[0][0]).toBe('http://x/api/auth/pair/approve')
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ code: 'ABCD-2345' })
+  })
+
+  it('pairPoll returns pending without storing a token', async () => {
+    spyFetch({ status: 'pending' }, 202)
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    const res = await client.auth.pairPoll('ABCD-2345')
+    expect(res).toEqual({ status: 'pending' })
+    expect(client.getToken()).toBeNull()
+  })
+
+  it('pairPoll stores the token once the code is approved', async () => {
+    spyFetch({ token: 'tv-tok', user })
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    const res = await client.auth.pairPoll('ABCD-2345')
+    expect(res).toEqual({ token: 'tv-tok', user })
+    expect(client.getToken()).toBe('tv-tok')
   })
 })

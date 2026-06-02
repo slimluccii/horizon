@@ -6,6 +6,7 @@ import type { HwAccel } from './transcode/hwaccel.ts'
 import type { MediaRepo } from './repos/media.ts'
 import type { CollectionsRepo } from './repos/collections.ts'
 import type { UserRepo } from './repos/users.ts'
+import type { SessionRepo } from './auth/session.ts'
 import type { ProgressRepo } from './repos/progress.ts'
 import type { ScanHistoryRepo } from './repos/scanState.ts'
 import type { ServerSettings } from './repos/serverSettings.ts'
@@ -13,6 +14,8 @@ import type { SessionManager } from './session/manager.ts'
 import type { ScanManager } from './scanner/manager.ts'
 import type { MetadataRefreshWorker } from './metadata/refresh.ts'
 import type { PlaybackOrchestrator } from './session/playback.ts'
+import { registerAuth } from './routes/auth.ts'
+import { makeRequireAuth } from './auth/middleware.ts'
 import { registerHealth } from './routes/health.ts'
 import { registerLibrary } from './routes/library.ts'
 import { registerSessions } from './routes/sessions.ts'
@@ -31,6 +34,7 @@ export interface Repos {
   mediaRepo: MediaRepo
   collectionsRepo: CollectionsRepo
   userRepo: UserRepo
+  sessionRepo: SessionRepo
   progressRepo: ProgressRepo
   serverSettings: ServerSettings
 }
@@ -60,22 +64,45 @@ export async function buildServer(
   })
   await app.register(fastifyWebSocket)
 
-  registerHealth(app, hwAccel)
-  registerLibrary(app, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
-  registerSessions(app, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
-  registerPlaylists(app, sessions, repos.userRepo)
-  registerSegments(app, hwAccel, sessions, repos.mediaRepo, repos.userRepo)
-  registerMetadata(app, cfg)
-  registerUsers(app, repos.userRepo)
-  registerProgress(app, repos.userRepo, repos.progressRepo)
-  registerSettings(app, repos.userRepo, repos.serverSettings, cfg)
+  // All API routes live under the `/api` prefix, inside one encapsulated plugin.
+  // This is the clean API/web split: the session guard is an onRequest hook
+  // scoped to THIS plugin, so it never runs for the web UI (`/`, `/login`,
+  // `/play/:id`, static assets, SPA fallback) served at the root below. No
+  // path-allowlist of open-ended client routes — anything not under /api is web.
+  await app.register(async (api) => {
+    // Auth routes also register @fastify/cookie so `req.cookies` is populated
+    // before the guard reads the session cookie.
+    await registerAuth(api, repos.userRepo, repos.sessionRepo)
 
-  if (cfg.devSeedEnabled && db) {
-    app.log.warn('HORIZON_DEV_SEED=1 — exposing POST /dev/seed/:scenario. DO NOT enable in production.')
-    registerDev(app, { media: repos.mediaRepo, collections: repos.collectionsRepo, db })
-  }
+    const requireAuth = makeRequireAuth(repos.sessionRepo, repos.userRepo)
+    api.addHook('onRequest', async (req, reply) => {
+      // First-boot bootstrap: creating the very first profile (auto-elected
+      // owner) must be reachable before any session can exist. POST /api/users
+      // self-gates (only unauthenticated while the household is empty), so it's
+      // safe to bypass the guard for that one request.
+      const path = req.routeOptions?.url ?? req.url.split('?')[0]
+      if (req.method === 'POST' && path === '/api/users' && repos.userRepo.list().length === 0) return
+      return requireAuth(req, reply)
+    })
 
-  // Web UI last: its catch-all SPA fallback must not shadow any API route.
+    registerHealth(api, hwAccel)
+    registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
+    registerSessions(api, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
+    registerPlaylists(api, sessions, repos.userRepo)
+    registerSegments(api, hwAccel, sessions, repos.mediaRepo, repos.userRepo)
+    registerMetadata(api, cfg)
+    registerUsers(api, repos.userRepo, repos.sessionRepo)
+    registerProgress(api, repos.userRepo, repos.progressRepo)
+    registerSettings(api, repos.userRepo, repos.serverSettings, cfg)
+
+    if (cfg.devSeedEnabled && db) {
+      api.log.warn('HORIZON_DEV_SEED=1 — exposing POST /api/dev/seed/:scenario. DO NOT enable in production.')
+      registerDev(api, { media: repos.mediaRepo, collections: repos.collectionsRepo, db })
+    }
+  }, { prefix: '/api' })
+
+  // Web UI at the root, OUTSIDE the /api plugin → never hits the auth guard.
+  // Its catch-all SPA fallback is registered last so it can't shadow /api.
   if (cfg.serveWeb && cfg.webDir) {
     if (existsSync(cfg.webDir)) {
       await registerWeb(app, cfg.webDir)

@@ -67,7 +67,7 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
-      if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+      if (!canAccessSession(session.userId, resolveCallerRole(req))) {
         return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
       }
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
@@ -124,7 +124,7 @@ export function registerSegments(
     const session = sessions.get(req.params.id)
     if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
     if (!requireReconnectToken(session, req, reply)) return
-    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+    if (!canAccessSession(session.userId, resolveCallerRole(req))) {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
     }
 
@@ -154,7 +154,7 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
-      if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+      if (!canAccessSession(session.userId, resolveCallerRole(req))) {
         return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
       }
       if (!/^\d+$/.test(req.params.trackIdx)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid track index')

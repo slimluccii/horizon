@@ -35,7 +35,7 @@ function fakeUsers(known: Set<string>): UserRepo {
 function baseCfg(overrides: Partial<Config> = {}): Config {
   return {
     port: 7777,
-    mediaBases: ['/media'], corsOrigins: ['*'],
+    corsOrigins: ['*'],
     cacheDir: '/tmp/horizon-test',
     dbPath: ':memory:',
     watchedThresholdPct: 90,
@@ -331,8 +331,8 @@ describe('PlaybackOrchestrator', () => {
 
     expect(info.sessionId).toMatch(/[0-9a-f-]+/)
     expect(info.method).not.toBe('direct-play')
-    expect(info.streamUrl).toMatch(/^\/sessions\/.+\/stream\.m3u8$/)
-    expect(info.wsUrl).toMatch(/^\/sessions\/.+\/ws$/)
+    expect(info.streamUrl).toMatch(/^\/api\/sessions\/.+\/stream\.m3u8$/)
+    expect(info.wsUrl).toMatch(/^\/api\/sessions\/.+\/ws$/)
     expect(info.profiles.length).toBeGreaterThan(0)
 
     const session = sessions.get(info.sessionId)

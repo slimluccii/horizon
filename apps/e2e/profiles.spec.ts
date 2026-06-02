@@ -1,97 +1,91 @@
+/**
+ * Profiles / role-management e2e over real sessions.
+ *
+ * Profile *switching* is gone in the auth world (you log out / log in as a
+ * different profile rather than hot-swapping a header), so these tests focus on
+ * what the Settings → Profiles panel actually does now: the tab is owner/admin
+ * only, owner/admin can change another user's role, and a self-demote bounces
+ * the viewer back to the Personal tab.
+ *
+ * Backend on :7777, Vite on :5173 (playwright.config). The browser is
+ * authenticated by planting the relevant user's session cookie.
+ */
 import { test, expect } from '@playwright/test'
+import { APP, ensureOwner, createUser, authBrowser } from './helpers/auth.ts'
 
-const BASE = 'http://localhost:5173'
+test.describe('profiles & roles', () => {
+  test('owner sees the Profiles tab; members do not', async ({ browser, request }) => {
+    const owner = await ensureOwner(request)
+    const member = await createUser(request, owner, 'Member-tab')
 
-test('switch between two profiles', async ({ page, request }) => {
-  // Seed two users
-  const a = await request.post(`${BASE}/users`, { data: { name: 'Alice', avatar: '🐱' } })
-  const b = await request.post(`${BASE}/users`, { data: { name: 'Bob', avatar: '🐶' } })
-  expect(a.ok() && b.ok()).toBe(true)
+    // Owner context → Profiles tab visible.
+    const ownerCtx = await browser.newContext()
+    await authBrowser(ownerCtx, owner)
+    const ownerPage = await ownerCtx.newPage()
+    await ownerPage.goto(`${APP}/settings`)
+    await expect(ownerPage.getByRole('button', { name: 'Profiles' })).toBeVisible()
+    await ownerCtx.close()
 
-  await page.goto(`${BASE}/profiles`)
-  await page.getByText('Alice').click()
-  await expect(page).toHaveURL(/\/$/)
-  await expect(page.getByText('Alice')).toBeVisible()
-
-  await page.getByText('Alice').click()        // open badge
-  await page.getByText('Switch profile').click()
-  await page.getByText('Bob').click()
-  await expect(page.getByText('Bob')).toBeVisible()
-})
-
-test('Profiles tab visible only to owner/admin', async ({ page, request }) => {
-  const ownerRes = await request.post(`${BASE}/users`, { data: { name: 'Alice' } })
-  const alice = await ownerRes.json()
-  const bobRes = await request.post(`${BASE}/users`, { data: { name: 'Bob' } })
-  const bob = await bobRes.json()
-
-  // Alice (owner) should see the Profiles tab
-  await page.goto(`${BASE}/profiles`)
-  await page.getByText('Alice').click()
-  await page.goto(`${BASE}/settings`)
-  await expect(page.getByRole('button', { name: 'Profiles' })).toBeVisible()
-
-  // Bob (member) should not see the Profiles tab
-  await page.getByText('Alice').click() // open badge
-  await page.getByText('Switch profile').click()
-  await page.getByText('Bob').click()
-  await page.goto(`${BASE}/settings`)
-  await expect(page.getByRole('button', { name: 'Profiles' })).not.toBeVisible()
-})
-
-test('admin can demote another admin', async ({ page, request }) => {
-  const ownerRes = await request.post(`${BASE}/users`, { data: { name: 'Alice' } })
-  const owner = await ownerRes.json()
-  const admin1Res = await request.post(`${BASE}/users`, { data: { name: 'Admin1' } })
-  const admin1 = await admin1Res.json()
-  const admin2Res = await request.post(`${BASE}/users`, { data: { name: 'Admin2' } })
-  const admin2 = await admin2Res.json()
-
-  // Promote admin1 and admin2 via API
-  await request.patch(`${BASE}/users/${admin1.id}`, {
-    data: { role: 'admin' },
-    headers: { 'x-horizon-user': owner.id },
-  })
-  await request.patch(`${BASE}/users/${admin2.id}`, {
-    data: { role: 'admin' },
-    headers: { 'x-horizon-user': owner.id },
+    // Member context → no Profiles tab (members only get Personal).
+    const memberCtx = await browser.newContext()
+    await authBrowser(memberCtx, member)
+    const memberPage = await memberCtx.newPage()
+    await memberPage.goto(`${APP}/settings`)
+    await expect(memberPage.getByRole('button', { name: 'Profiles' })).not.toBeVisible()
+    await memberCtx.close()
   })
 
-  // Switch to admin1, open Settings > Profiles, demote admin2
-  await page.goto(`${BASE}/profiles`)
-  await page.getByText('Admin1').click()
-  await page.goto(`${BASE}/settings`)
-  await page.getByRole('button', { name: 'Profiles' }).click()
+  test('owner can change another user\'s role', async ({ context, page, request }) => {
+    const owner = await ensureOwner(request)
+    await createUser(request, owner, 'Roley')
+    await authBrowser(context, owner)
 
-  const admin2Row = page.locator('.settings__profile-row', { hasText: 'Admin2' })
-  await admin2Row.locator('select').selectOption('member')
+    await page.goto(`${APP}/settings`)
+    await page.getByRole('button', { name: 'Profiles' }).click()
 
-  await expect(admin2Row.locator('select')).toHaveValue('member')
-})
+    const row = page.locator('.settings__profile-row', { hasText: 'Roley' })
+    await row.locator('select').selectOption('admin')
+    await expect(row.locator('select')).toHaveValue('admin')
 
-test('self-demote: admin demotes self → redirected to Personal tab + toast', async ({ page, request }) => {
-  const ownerRes = await request.post(`${BASE}/users`, { data: { name: 'Owner' } })
-  const owner = await ownerRes.json()
-  const adminRes = await request.post(`${BASE}/users`, { data: { name: 'Self' } })
-  const admin = await adminRes.json()
-
-  // Promote admin via API (owner header required)
-  await request.patch(`${BASE}/users/${admin.id}`, {
-    data: { role: 'admin' },
-    headers: { 'x-horizon-user': owner.id },
+    // Persisted: re-open Settings and confirm.
+    await page.goto(`${APP}/settings`)
+    await page.getByRole('button', { name: 'Profiles' }).click()
+    await expect(
+      page.locator('.settings__profile-row', { hasText: 'Roley' }).locator('select'),
+    ).toHaveValue('admin')
   })
 
-  // Switch to admin user, open Settings > Profiles
-  await page.goto(`${BASE}/profiles`)
-  await page.getByText('Self').click()
-  await page.goto(`${BASE}/settings`)
-  await page.getByRole('button', { name: 'Profiles' }).click()
+  test('admin self-demote → redirected to Personal tab with a toast', async ({ context, page, request }) => {
+    const owner = await ensureOwner(request)
+    const self = await createUser(request, owner, 'SelfDemote', { role: 'admin' })
+    // Act AS the admin: plant their session.
+    await authBrowser(context, self)
 
-  // Demote self (Self row — non-owner, should have a select)
-  const selfRow = page.locator('.settings__profile-row', { hasText: 'Self' })
-  await selfRow.locator('select').selectOption('member')
+    await page.goto(`${APP}/settings`)
+    await page.getByRole('button', { name: 'Profiles' }).click()
 
-  // Should redirect to Personal tab and show toast
-  await expect(page.getByRole('button', { name: 'Personal' })).toHaveClass(/is-active/)
-  await expect(page.getByRole('status')).toHaveText('Your role changed.')
+    const selfRow = page.locator('.settings__profile-row', { hasText: 'SelfDemote' })
+    await selfRow.locator('select').selectOption('member')
+
+    await expect(page.getByRole('button', { name: 'Personal' })).toHaveClass(/is-active/)
+    await expect(page.getByRole('status')).toHaveText(/role changed/i)
+  })
+
+  test('profile badge → Sign out returns to /login and ends the session', async ({ context, page, request }) => {
+    const owner = await ensureOwner(request)
+    await authBrowser(context, owner)
+
+    await page.goto(`${APP}/`)
+    await expect(page).not.toHaveURL(/\/login$/)
+
+    // Open the badge dropdown (its accessible name is the owner's name) → Sign out.
+    await page.getByRole('button', { name: owner.name }).click()
+    await page.getByRole('button', { name: /sign out/i }).click()
+
+    // Lands on the login profile picker, and the session is gone — revisiting a
+    // guarded route bounces back to /login.
+    await expect(page).toHaveURL(/\/login$/)
+    await page.goto(`${APP}/settings`)
+    await expect(page).toHaveURL(/\/login$/)
+  })
 })

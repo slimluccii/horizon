@@ -129,6 +129,57 @@ describe('userRepo', () => {
     expect(members).toHaveLength(1)
   })
 
+  it('new users have no password (hasPassword false, passwordSetAt null)', () => {
+    const u = repo.create({ name: 'A' })
+    expect(u.hasPassword).toBe(false)
+    expect(u.passwordSetAt).toBeNull()
+  })
+
+  it('setPassword stamps the hash + passwordSetAt and flips hasPassword', () => {
+    const u = repo.create({ name: 'A' })
+    expect(repo.setPassword(u.id, '$argon2id$hash')).toBe(true)
+    const after = repo.get(u.id)!
+    expect(after.hasPassword).toBe(true)
+    expect(after.passwordSetAt).toBeGreaterThan(0)
+    const auth = repo.getAuthById(u.id)!
+    expect(auth.passwordHash).toBe('$argon2id$hash')
+  })
+
+  it('setPassword on a missing user returns false', () => {
+    expect(repo.setPassword('ghost', 'x')).toBe(false)
+  })
+
+  it('getAuthByName resolves case-insensitively, null on miss', () => {
+    const u = repo.create({ name: 'Alice' })
+    expect(repo.getAuthByName('alice')!.id).toBe(u.id)
+    expect(repo.getAuthByName('nobody')).toBeNull()
+  })
+
+  it('recordFailedLogin increments the counter and sets the lockout deadline', () => {
+    const u = repo.create({ name: 'A' })
+    expect(repo.recordFailedLogin(u.id, null)).toBe(1)
+    expect(repo.recordFailedLogin(u.id, 5000)).toBe(2)
+    expect(repo.getAuthById(u.id)!.lockedUntil).toBe(5000)
+  })
+
+  it('clearLockout resets failed attempts + lockout', () => {
+    const u = repo.create({ name: 'A' })
+    repo.recordFailedLogin(u.id, 5000)
+    repo.clearLockout(u.id)
+    const auth = repo.getAuthById(u.id)!
+    expect(auth.failedAttempts).toBe(0)
+    expect(auth.lockedUntil).toBeNull()
+  })
+
+  it('setPassword clears any prior lockout state', () => {
+    const u = repo.create({ name: 'A' })
+    repo.recordFailedLogin(u.id, 5000)
+    repo.setPassword(u.id, '$argon2id$hash')
+    const auth = repo.getAuthById(u.id)!
+    expect(auth.failedAttempts).toBe(0)
+    expect(auth.lockedUntil).toBeNull()
+  })
+
   it('transaction rollback on name conflict leaves DB clean', () => {
     repo.create({ name: 'A' }) // owner
     expect(() => repo.create({ name: 'a' })).toThrow(/name-taken/)

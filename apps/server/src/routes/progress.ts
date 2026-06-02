@@ -15,7 +15,7 @@ export function registerProgress(
   app.get<{ Params: { userId: string } }>(
     '/users/:userId/continue-watching',
     async (req, reply) => {
-      const userId = requireUser(users, req, reply, req.params.userId)
+      const userId = requireUser(req, reply, req.params.userId)
       if (!userId) return
       return progress.continueWatching(userId)
     },
@@ -24,7 +24,7 @@ export function registerProgress(
   app.get<{ Params: { userId: string; mediaId: string } }>(
     '/users/:userId/progress/:mediaId',
     async (req, reply) => {
-      const userId = requireUser(users, req, reply, req.params.userId)
+      const userId = requireUser(req, reply, req.params.userId)
       if (!userId) return
       const wp = progress.getProgress(userId, req.params.mediaId)
       if (!wp) return sendNotFound(reply, ErrorCodes.PROGRESS_NOT_FOUND, 'No progress for media')
@@ -35,7 +35,7 @@ export function registerProgress(
   app.patch<{ Params: { userId: string; mediaId: string } }>(
     '/users/:userId/progress/:mediaId',
     async (req, reply) => {
-      const userId = requireUser(users, req, reply, req.params.userId)
+      const userId = requireUser(req, reply, req.params.userId)
       if (!userId) return
       const parse = PatchBody.safeParse(req.body)
       if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
@@ -48,7 +48,7 @@ export function registerProgress(
   app.delete<{ Params: { userId: string; mediaId: string } }>(
     '/users/:userId/progress/:mediaId',
     async (req, reply) => {
-      const userId = requireUser(users, req, reply, req.params.userId)
+      const userId = requireUser(req, reply, req.params.userId)
       if (!userId) return
       progress.clear(userId, req.params.mediaId)
       return reply.status(204).send()

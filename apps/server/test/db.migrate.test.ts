@@ -7,7 +7,7 @@ describe('migrate', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(5)
+    expect(ver).toBe(6)
   })
 
   it('is idempotent — applying twice leaves version at the latest', () => {
@@ -15,9 +15,9 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(5)
+    expect(ver).toBe(6)
     const rows = db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]
-    expect(rows.map(r => r.version)).toEqual([1, 2, 3, 4, 5])
+    expect(rows.map(r => r.version)).toEqual([1, 2, 3, 4, 5, 6])
   })
 
   it('creates all tables', () => {
@@ -38,6 +38,9 @@ describe('migrate', () => {
     expect(names).toContain('scan_history')
     // v4 additions
     expect(names).toContain('server_settings')
+    // v6 additions
+    expect(names).toContain('sessions')
+    expect(names).toContain('pairing_codes')
   })
 
   it('enforces kind CHECK on media_items', () => {
@@ -104,7 +107,7 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(5)
+    expect(ver).toBe(6)
     const owners = db.prepare("SELECT id FROM users WHERE role = 'owner'").all() as { id: string }[]
     expect(owners).toHaveLength(1)
     expect(owners[0].id).toBe('u1')
@@ -121,11 +124,12 @@ describe('migrate', () => {
     }).toThrow(/UNIQUE constraint failed: users\.role/)
   })
 
-  it('v5: user_version is 5 after fresh migrate', () => {
+  it('v5: server_settings movies_roots/shows_roots exist after fresh migrate', () => {
     const db = openDatabase(':memory:')
     migrate(db)
-    const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(5)
+    const cols = (db.prepare('PRAGMA table_info(server_settings)').all() as { name: string }[]).map(c => c.name)
+    expect(cols).toContain('movies_roots')
+    expect(cols).toContain('shows_roots')
   })
 
   it('v5: server_settings has movies_roots/shows_roots defaulting to []', () => {
@@ -172,5 +176,87 @@ describe('migrate', () => {
     expect(row.id).toBe(1)
     expect(row.seeded_from_env).toBe(0)
     expect(row.watched_threshold_pct).toBe(90)
+  })
+
+  it('v6: user_version is 6 after fresh migrate', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+    expect(ver).toBe(6)
+  })
+
+  it('v6: users gains password + lockout columns', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const cols = db.prepare('PRAGMA table_info(users)').all() as { name: string; dflt_value: string | null }[]
+    const byName = Object.fromEntries(cols.map(c => [c.name, c]))
+    expect(byName.password_hash).toBeDefined()
+    expect(byName.password_set_at).toBeDefined()
+    expect(byName.failed_attempts).toBeDefined()
+    expect(byName.failed_attempts.dflt_value).toBe('0')
+    expect(byName.locked_until).toBeDefined()
+  })
+
+  it('v6: sessions table has expected columns + unique token_hash', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const cols = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[]).map(c => c.name)
+    expect(cols).toEqual(
+      expect.arrayContaining(['id', 'token_hash', 'user_id', 'created_at', 'expires_at', 'last_seen_at', 'user_agent']),
+    )
+    db.prepare('INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('u1', 'Alice', null, '{}', 'owner', 1000, 1000)
+    db.prepare('INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('s1', 'hash1', 'u1', 0, 0, 0)
+    expect(() => {
+      db.prepare('INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run('s2', 'hash1', 'u1', 0, 0, 0)
+    }).toThrow(/UNIQUE constraint failed: sessions\.token_hash/)
+  })
+
+  it('v6: deleting a user cascades to their sessions', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    db.prepare('INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('u1', 'Alice', null, '{}', 'owner', 1000, 1000)
+    db.prepare('INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('s1', 'hash1', 'u1', 0, 0, 0)
+    db.prepare('DELETE FROM users WHERE id = ?').run('u1')
+    const rows = db.prepare('SELECT id FROM sessions').all()
+    expect(rows).toHaveLength(0)
+  })
+
+  it('v6: pairing_codes table has expected columns', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const cols = (db.prepare('PRAGMA table_info(pairing_codes)').all() as { name: string }[]).map(c => c.name)
+    expect(cols).toEqual(
+      expect.arrayContaining(['code', 'created_at', 'expires_at', 'approved_user_id', 'consumed', 'session_id']),
+    )
+  })
+
+  it('v6: applies onto an existing pre-v6 (v5) DB', () => {
+    const db = openDatabase(':memory:')
+    db.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        avatar TEXT,
+        preferences TEXT NOT NULL DEFAULT '{}',
+        role TEXT NOT NULL DEFAULT 'member',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `)
+    db.exec('PRAGMA user_version = 5')
+    db.prepare('INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('u1', 'Alice', null, '{}', 'owner', 1000, 1000)
+    migrate(db)
+    const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+    expect(ver).toBe(6)
+    const row = db.prepare('SELECT password_set_at, failed_attempts FROM users WHERE id = ?').get('u1') as { password_set_at: number | null; failed_attempts: number }
+    expect(row.password_set_at).toBeNull()
+    expect(row.failed_attempts).toBe(0)
   })
 })

@@ -4,14 +4,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'nod
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { registerLibrary } from '../src/routes/library.ts'
+import { makeRequireAuth } from '../src/auth/middleware.ts'
 import type { Config } from '../src/config.ts'
 import type { MediaRepo } from '../src/repos/media.ts'
 import type { CollectionsRepo } from '../src/repos/collections.ts'
 import type { UserRepo } from '../src/repos/users.ts'
+import type { SessionRepo } from '../src/auth/session.ts'
 import type { ScanWorkers } from '../src/server.ts'
 
 // Minimal fakes — the browse endpoint only touches the user repo (for the role
-// gate) and cfg.mediaBases; the media/collections/workers args are unused here.
+// gate); the media/collections/workers/cfg args are unused by it now (the
+// filesystem browser has no base confinement).
 type Role = 'owner' | 'admin' | 'member'
 function fakeUsers(byId: Record<string, Role>): UserRepo {
   return {
@@ -19,34 +22,46 @@ function fakeUsers(byId: Record<string, Role>): UserRepo {
   } as unknown as UserRepo
 }
 
+// Fake session repo for the auth hook: the bearer token IS the user id, so a
+// request authenticates as whatever id it presents (kept simple — the browse
+// authz logic, not session minting, is what's under test here).
+function fakeSessions(byId: Record<string, Role>): SessionRepo {
+  return {
+    resolve: (token: string) => (byId[token]
+      ? { id: `sess-${token}`, userId: token, createdAt: 0, expiresAt: Date.now() + 1e6, lastSeenAt: 0, userAgent: null }
+      : null),
+  } as unknown as SessionRepo
+}
+
+/** Bearer header that authenticates as a given user id. */
+const tok = (id: string) => ({ authorization: `Bearer ${id}` })
+
 const noopMedia = {} as MediaRepo
 const noopCollections = {} as CollectionsRepo
 const noopWorkers = {} as ScanWorkers
+const noopCfg = {} as Config
 
-function buildApp(cfg: Config, users: UserRepo): FastifyInstance {
+function buildApp(users: UserRepo, sessions: SessionRepo): FastifyInstance {
   const app = Fastify()
-  registerLibrary(app, noopMedia, noopCollections, noopWorkers, users, cfg)
+  app.addHook('onRequest', makeRequireAuth(sessions, users))
+  registerLibrary(app, noopMedia, noopCollections, noopWorkers, users, noopCfg)
   return app
-}
-
-function cfgWithBases(bases: string[]): Config {
-  return { mediaBases: bases } as unknown as Config
 }
 
 describe('GET /library/browse', () => {
   let base: string
   let app: FastifyInstance
-  const users = fakeUsers({ owner1: 'owner', admin1: 'admin', member1: 'member' })
+  const roles: Record<string, Role> = { owner1: 'owner', admin1: 'admin', member1: 'member' }
+  const users = fakeUsers(roles)
+  const sessions = fakeSessions(roles)
 
   beforeAll(() => {
-    // realpathSync so the base matches what the endpoint returns: the browse
-    // endpoint resolves every path through realpath (symlink hardening), and on
-    // macOS tmpdir() is under /var which is a symlink to /private/var. Without
-    // this, the test's base (/var/...) would never equal the endpoint's
-    // resolved paths (/private/var/...).
+    // realpathSync so the test dir matches what the endpoint returns: the browse
+    // endpoint canonicalises every path, and on macOS tmpdir() is under /var
+    // which is a symlink to /private/var.
     base = realpathSync(mkdtempSync(path.join(tmpdir(), 'horizon-browse-')))
     // base/
-    //   movies/   (dir)
+    //   movies/   (dir) → action/ (dir), readme.txt (file)
     //   shows/    (dir)
     //   notes.txt (file — must never appear)
     mkdirSync(path.join(base, 'movies'))
@@ -61,46 +76,40 @@ describe('GET /library/browse', () => {
   })
 
   beforeEach(() => {
-    app = buildApp(cfgWithBases([base]), users)
+    app = buildApp(users, sessions)
   })
 
   afterEach(async () => {
     await app.close()
   })
 
-  it('400 NO_USER when the caller header is missing/unknown', async () => {
+  it('401 unauthorized when unauthenticated', async () => {
     const res = await app.inject({ method: 'GET', url: '/library/browse' })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('no-user')
+    expect(res.statusCode).toBe(401)
+    expect(res.json().code).toBe('unauthorized')
   })
 
   it('403 CALLER_FORBIDDEN for members', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/library/browse',
-      headers: { 'x-horizon-user': 'member1' },
-    })
+    const res = await app.inject({ method: 'GET', url: '/library/browse', headers: tok('member1') })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
   })
 
-  it('lists the configured bases with no path (parent null)', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/library/browse',
-      headers: { 'x-horizon-user': 'owner1' },
-    })
+  it('defaults to the filesystem root with no path (parent null)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/library/browse', headers: tok('owner1') })
     expect(res.statusCode).toBe(200)
     const body = res.json()
+    // Root of the filesystem: no parent, and it lists real top-level dirs.
     expect(body.parent).toBeNull()
-    expect(body.entries).toEqual([{ name: path.basename(base), path: base }])
+    expect(Array.isArray(body.entries)).toBe(true)
+    expect(body.entries.length).toBeGreaterThan(0)
   })
 
   it('lists immediate subdirectories only (never files)', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/library/browse?path=${encodeURIComponent(base)}`,
-      headers: { 'x-horizon-user': 'admin1' },
+      headers: tok('admin1'),
     })
     expect(res.statusCode).toBe(200)
     const body = res.json()
@@ -114,48 +123,53 @@ describe('GET /library/browse', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/library/browse?path=${encodeURIComponent(path.join(base, 'movies'))}`,
-      headers: { 'x-horizon-user': 'owner1' },
+      headers: tok('owner1'),
     })
     expect(res.statusCode).toBe(200)
     const names = res.json().entries.map((e: { name: string }) => e.name)
     expect(names).toEqual(['action'])
   })
 
-  it('parent is null at a base root — cannot browse above a base', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: `/library/browse?path=${encodeURIComponent(base)}`,
-      headers: { 'x-horizon-user': 'owner1' },
-    })
-    expect(res.statusCode).toBe(200)
-    expect(res.json().parent).toBeNull()
-  })
-
-  it('parent resolves to the base when browsing a subdir', async () => {
+  it('parent resolves to the containing directory when browsing a subdir', async () => {
     const res = await app.inject({
       method: 'GET',
       url: `/library/browse?path=${encodeURIComponent(path.join(base, 'movies'))}`,
-      headers: { 'x-horizon-user': 'owner1' },
+      headers: tok('owner1'),
     })
     expect(res.statusCode).toBe(200)
     expect(res.json().parent).toBe(base)
   })
 
-  it('400 INVALID_PATH for a path outside the bases', async () => {
+  it('can browse anywhere readable — no base confinement (e.g. the temp root)', async () => {
+    // The parent of our base is browsable now; under the old model this 400'd.
+    const parent = path.dirname(base)
     const res = await app.inject({
       method: 'GET',
-      url: `/library/browse?path=${encodeURIComponent('/etc')}`,
-      headers: { 'x-horizon-user': 'owner1' },
+      url: `/library/browse?path=${encodeURIComponent(parent)}`,
+      headers: tok('owner1'),
     })
-    expect(res.statusCode).toBe(400)
-    expect(res.json().code).toBe('invalid-path')
+    expect(res.statusCode).toBe(200)
+    const names = res.json().entries.map((e: { name: string }) => e.name)
+    expect(names).toContain(path.basename(base))
   })
 
-  it('400 INVALID_PATH for a traversal escape above a base', async () => {
+  it('normalises traversal segments (..) into a canonical path', async () => {
+    // base/movies/.. → base ; resolves cleanly rather than being rejected.
     const res = await app.inject({
       method: 'GET',
-      url: `/library/browse?path=${encodeURIComponent(path.join(base, '..'))}`,
-      headers: { 'x-horizon-user': 'owner1' },
+      url: `/library/browse?path=${encodeURIComponent(path.join(base, 'movies', '..'))}`,
+      headers: tok('owner1'),
+    })
+    expect(res.statusCode).toBe(200)
+    const names = res.json().entries.map((e: { name: string }) => e.name)
+    expect(names).toEqual(['movies', 'shows'])
+  })
+
+  it('400 INVALID_PATH for a non-existent / unreadable directory', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/library/browse?path=${encodeURIComponent(path.join(base, 'does-not-exist'))}`,
+      headers: tok('owner1'),
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().code).toBe('invalid-path')

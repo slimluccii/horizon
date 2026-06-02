@@ -61,12 +61,12 @@ export function registerSessions(
     }
     const input = parsed.data
 
-    // Authenticate the caller via X-Horizon-User. Playback is always tied to a
-    // user (for watch-history + capacity accounting). owner/admin may delegate
-    // playback on behalf of another household member; members may only play as
-    // themselves.
-    const caller = resolveCallerRole(users, req)
-    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Missing or unknown X-Horizon-User header')
+    // The caller is the authenticated session user (req.user, set by the global
+    // requireAuth hook). Playback is always tied to a user (for watch-history +
+    // capacity accounting). owner/admin may delegate playback on behalf of
+    // another household member; members may only play as themselves.
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
 
     const requestedUserId = input.userId
     if (requestedUserId && requestedUserId !== caller.id && caller.role === 'member') {
@@ -128,7 +128,7 @@ export function registerSessions(
     // Ownership gate on top of the token: a member who somehow holds a token
     // for another user's session still may not tear it down. owner/admin may
     // destroy any session; headless sessions are destroyable by anyone.
-    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
+    if (!canAccessSession(session.userId, resolveCallerRole(req))) {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
     }
     await sessions.destroy(req.params.id)
@@ -144,11 +144,12 @@ export function registerSessions(
     }
 
     // Ownership gate. The hello handshake later proves token knowledge, but the
-    // X-Horizon-User identity must also be entitled to this session: a member
-    // may attach only to their own session, owner/admin to any, and a headless
-    // session (no userId) to anyone. 4001 = unauthorized close code.
-    if (!canAccessSession(session.userId, resolveCallerRole(users, req))) {
-      socket.close(4001, 'unauthorized')
+    // authenticated session identity (req.user, from the cookie/bearer that rode
+    // the WS upgrade) must also be entitled to this session: a member may attach
+    // only to their own session, owner/admin to any, and a headless session
+    // (no userId) to any authenticated user. 4001 = unauthorized close code.
+    if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+      socket.close(4001, ErrorCodes.UNAUTHORIZED)
       return
     }
 
@@ -166,8 +167,8 @@ export function registerSessions(
         type: 'session-ready',
         method: session.plan.method,
         streamUrl: session.plan.method === 'direct-play'
-          ? `/sessions/${session.id}/direct`
-          : `/sessions/${session.id}/stream.m3u8`,
+          ? `/api/sessions/${session.id}/direct`
+          : `/api/sessions/${session.id}/stream.m3u8`,
         profile: session.plan.renditions[0].profile,
         reconnectToken: session.reconnectToken,
       }))

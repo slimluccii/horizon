@@ -1,20 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { openDatabase } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createUserRepo } from '../src/repos/users.ts'
-import { resolveCallerRole, requireUser } from '../src/routes/authz.ts'
+import { resolveCallerRole, requireUser, canAccessSession } from '../src/routes/authz.ts'
+import type { AuthedUser } from '../src/auth/middleware.ts'
 
-function setup() {
-  const db = openDatabase(':memory:'); migrate(db)
-  const users = createUserRepo(db)
-  const user = users.create({ name: 'Luuk' })
-  return { users, user }
-}
-
-/** Minimal FastifyRequest stub carrying only the headers authz reads. */
-function req(headers: Record<string, unknown>): FastifyRequest {
-  return { headers } as unknown as FastifyRequest
+/** Minimal FastifyRequest stub carrying only `req.user` (set by the auth hook). */
+function req(user?: AuthedUser): FastifyRequest {
+  return { user } as unknown as FastifyRequest
 }
 
 /** Reply stub that records the last status + body written. */
@@ -27,60 +18,57 @@ function makeReply() {
   return { reply, state }
 }
 
+const owner: AuthedUser = { id: 'u-owner', role: 'owner' }
+const member: AuthedUser = { id: 'u-member', role: 'member' }
+
 describe('resolveCallerRole', () => {
-  it('returns null when header missing', () => {
-    const { users } = setup()
-    expect(resolveCallerRole(users, req({}))).toBeNull()
+  it('returns null when no session is attached', () => {
+    expect(resolveCallerRole(req())).toBeNull()
   })
 
-  it('returns null when header is not a string', () => {
-    const { users } = setup()
-    expect(resolveCallerRole(users, req({ 'x-horizon-user': ['a', 'b'] }))).toBeNull()
-  })
-
-  it('returns null for unknown user id', () => {
-    const { users } = setup()
-    expect(resolveCallerRole(users, req({ 'x-horizon-user': 'nope' }))).toBeNull()
-  })
-
-  it('returns {id, role} for a valid user id', () => {
-    const { users, user } = setup()
-    expect(resolveCallerRole(users, req({ 'x-horizon-user': user.id }))).toEqual({
-      id: user.id,
-      role: user.role,
-    })
+  it('returns the attached req.user', () => {
+    expect(resolveCallerRole(req(owner))).toEqual(owner)
   })
 })
 
 describe('requireUser', () => {
-  it('replies 400 no-user and returns null when header missing', () => {
-    const { users, user } = setup()
+  it('replies 400 no-user and returns null when unauthenticated', () => {
     const { reply, state } = makeReply()
-    expect(requireUser(users, req({}), reply, user.id)).toBeNull()
+    expect(requireUser(req(), reply, 'u-owner')).toBeNull()
     expect(state.status).toBe(400)
     expect(state.body?.code).toBe('no-user')
   })
 
-  it('replies 400 user-mismatch when header user differs from path user', () => {
-    const { users, user } = setup()
+  it('replies 400 user-mismatch when caller differs from path user', () => {
     const { reply, state } = makeReply()
-    expect(requireUser(users, req({ 'x-horizon-user': user.id }), reply, 'other')).toBeNull()
+    expect(requireUser(req(member), reply, 'other')).toBeNull()
     expect(state.status).toBe(400)
     expect(state.body?.code).toBe('user-mismatch')
   })
 
-  it('replies 400 no-user when user does not exist', () => {
-    const { users } = setup()
+  it('returns the path user id when caller matches', () => {
     const { reply, state } = makeReply()
-    expect(requireUser(users, req({ 'x-horizon-user': 'ghost' }), reply, 'ghost')).toBeNull()
-    expect(state.status).toBe(400)
-    expect(state.body?.code).toBe('no-user')
+    expect(requireUser(req(owner), reply, 'u-owner')).toBe('u-owner')
+    expect(state.status).toBeUndefined()
+  })
+})
+
+describe('canAccessSession', () => {
+  it('allows anyone on a headless session', () => {
+    expect(canAccessSession(undefined, null)).toBe(true)
+    expect(canAccessSession(undefined, member)).toBe(true)
   })
 
-  it('returns the userId when header present and matches an existing path user', () => {
-    const { users, user } = setup()
-    const { reply, state } = makeReply()
-    expect(requireUser(users, req({ 'x-horizon-user': user.id }), reply, user.id)).toBe(user.id)
-    expect(state.status).toBeUndefined()
+  it('rejects a null caller on an owned session', () => {
+    expect(canAccessSession('u-member', null)).toBe(false)
+  })
+
+  it('lets owner/admin reach any session', () => {
+    expect(canAccessSession('u-member', owner)).toBe(true)
+  })
+
+  it('lets a member reach only their own session', () => {
+    expect(canAccessSession('u-member', member)).toBe(true)
+    expect(canAccessSession('u-other', member)).toBe(false)
   })
 })
