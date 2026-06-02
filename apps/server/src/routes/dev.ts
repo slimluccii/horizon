@@ -23,7 +23,14 @@ import { badRequest, ErrorCodes } from './errors.ts'
 import { IpRateLimiter, rateLimit } from './rate-limit.ts'
 
 const SEED_WINDOW_MS = 5 * 60 * 1000
-const SEED_MAX_PER_WINDOW = 1
+// Strict by default (blunt abuse if a DEV_SEED deployment leaks). E2E runs many
+// seeds per run, so the cap is overridable via HORIZON_DEV_SEED_MAX_PER_WINDOW.
+// Only meaningful when HORIZON_DEV_SEED=1 anyway (the routes don't exist otherwise).
+const SEED_MAX_PER_WINDOW = (() => {
+  const raw = process.env.HORIZON_DEV_SEED_MAX_PER_WINDOW
+  const n = raw ? parseInt(raw, 10) : NaN
+  return Number.isFinite(n) && n > 0 ? n : 1
+})()
 
 export interface DevDeps {
   media: MediaRepo

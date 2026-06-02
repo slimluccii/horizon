@@ -61,9 +61,19 @@ export const AUTH_ALLOWLIST: ReadonlyArray<string> = [
   '/auth/pair/poll',
 ]
 
-/** Prefixes under which every path is unauthenticated (static web assets). */
+/** Prefixes under which every path is unauthenticated.
+ *  - `/assets/` — static web bundle, served to the login page itself.
+ *  - `/dev/` — the destructive dev-seed routes. These ONLY exist when
+ *    HORIZON_DEV_SEED=1 (registered conditionally in server.ts, and the startup
+ *    guard forbids that flag in production), so allowlisting the prefix can't
+ *    expose anything in a real deployment; it lets e2e seed without a session. */
 export const AUTH_ALLOWLIST_PREFIXES: ReadonlyArray<string> = [
   '/assets/',
+  '/dev/',
+  // Poster/backdrop image proxy. Served to <img> tags (which can't send a
+  // bearer) and to external caches; the content is non-secret artwork keyed by
+  // opaque TMDB/mock paths, so it's safe to leave unauthenticated.
+  '/metadata/',
 ]
 
 /**

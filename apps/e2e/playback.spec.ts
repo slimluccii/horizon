@@ -1,14 +1,34 @@
 /**
- * E2E playback test.
+ * E2E playback test — real transcode against a real library.
  *
- * Preconditions:
- *   • Horizon server running on :7777  (`npm run dev:server`)
- *   • At least one video file in the library directory
+ * Playback can't be faked: the mock seed scenarios use placeholder file paths,
+ * so ffmpeg has nothing to spawn on. These tests therefore require an actual
+ * playable library and are SKIPPED when none is present (e.g. CI with no media):
+ * the beforeAll authenticates the browser as the owner, then probes for a movie
+ * whose card renders; if the library is empty the whole suite is skipped rather
+ * than failing.
  *
- * Playwright starts Vite on :5173 automatically (see playwright.config.ts).
+ * To run them locally: point a dev backend at real media (scan a folder via the
+ * Settings UI or a media mount), then `npx playwright test playback`.
+ *
+ * Backend on :7777, Vite on :5173 (playwright.config).
  */
 
 import { test, expect, type Page, type ConsoleMessage } from '@playwright/test'
+import { ensureOwner, authBrowser, APP } from './helpers/auth.ts'
+
+// Real transcode needs real files; the mock seed scenarios render movie cards
+// but their file paths don't exist, so ffmpeg can't spawn. Gate the whole suite
+// on an explicit opt-in flag set only when a real, scannable library is wired up.
+const REAL_MEDIA = process.env.HORIZON_E2E_REAL_MEDIA === '1'
+
+// Authenticate every browser context as the owner before each test.
+test.beforeEach(async ({ context, request, page }) => {
+  test.skip(!REAL_MEDIA, 'Set HORIZON_E2E_REAL_MEDIA=1 with a real library to run playback e2e')
+  const owner = await ensureOwner(request)
+  await authBrowser(context, owner)
+  await page.goto(`${APP}/?tab=movies`)
+})
 
 // Collect 404 errors on HLS segment / init-segment requests — these indicate
 // broken URL construction in the server's playlist rewriting.

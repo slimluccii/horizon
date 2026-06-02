@@ -45,9 +45,19 @@ function ProfilesPanel({
     setErr(null)
     try {
       await horizon.users.update(id, { role })
+      // Self-demote: the viewer just dropped their own role to member, losing
+      // access to this tab. Detect it directly off the request rather than
+      // waiting for a follow-up call to 403 — GET /users is unauthenticated
+      // (profile picker), so it would NOT fail for a freshly-demoted member.
+      if (id === viewerId && role === 'member') {
+        onRoleChanged()
+        return
+      }
       const updated = await horizon.users.list()
       setRows(updated)
     } catch (e) {
+      // Belt-and-suspenders: a privileged follow-up call that 403s (role changed
+      // out from under the session) still routes the viewer back to Personal.
       if (isRoleChangedError(e)) {
         onRoleChanged()
         return

@@ -35,8 +35,14 @@ const LOCKOUT_BASE_MS = 60_000
 /** Cap the exponential lockout so it never runs away (≈ 17 min at 2^4). */
 const LOCKOUT_MAX_MS = 60_000 * 16
 
-/** Per-IP login attempts allowed per window. */
-const LOGIN_IP_MAX = 20
+/** Per-IP login attempts allowed per window. Strict by default; overridable via
+ *  HORIZON_LOGIN_IP_MAX for e2e (which logs in many times from one IP). The
+ *  per-account lockout below is the real brute-force defence and is NOT relaxed. */
+const LOGIN_IP_MAX = (() => {
+  const raw = process.env.HORIZON_LOGIN_IP_MAX
+  const n = raw ? parseInt(raw, 10) : NaN
+  return Number.isFinite(n) && n > 0 ? n : 20
+})()
 /** Per-IP pairing attempts (start/approve/poll) allowed per window. */
 const PAIR_IP_MAX = 60
 /** Shared rate-limit window. */

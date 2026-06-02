@@ -8,7 +8,6 @@ import os from 'node:os'
 const E2E_DIR = path.join(os.tmpdir(), 'horizon-e2e')
 const E2E_DB = path.join(E2E_DIR, 'horizon.db')
 const E2E_CACHE = path.join(E2E_DIR, 'cache')
-const E2E_MEDIA = path.join(E2E_DIR, 'media')
 
 export default defineConfig({
   testDir: './apps/e2e',
@@ -30,6 +29,19 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
 
+  // Deterministic ordering via project dependency: the first-boot wizard MUST
+  // run against the freshly-wiped empty DB, so it's its own `setup` project that
+  // everything else depends on. The `main` project then runs with the owner that
+  // setup created (its specs use the auth helper, which logs in as that owner).
+  projects: [
+    { name: 'setup', testMatch: /00-setup\.spec\.ts/ },
+    {
+      name: 'main',
+      testIgnore: /00-setup\.spec\.ts/,
+      dependencies: ['setup'],
+    },
+  ],
+
   // Start BOTH the backend (own e2e DB + media base, no dev DB wipe) and Vite.
   // The backend owns :7777; Vite proxies /auth, /users, /library, /settings… to it.
   webServer: [
@@ -43,9 +55,14 @@ export default defineConfig({
         HORIZON_PORT: '7777',
         HORIZON_DB_PATH: E2E_DB,
         HORIZON_CACHE_DIR: E2E_CACHE,
-        HORIZON_MEDIA_BASE: E2E_MEDIA,
         // Serve API only; Vite serves the UI in dev.
         HORIZON_SERVE_WEB: '0',
+        // Deterministic library fixtures for the scenario/authz specs.
+        HORIZON_DEV_SEED: '1',
+        // Relax security throttles for the test run (many seeds + logins from one
+        // IP). These are dev-only overrides; production keeps the strict defaults.
+        HORIZON_DEV_SEED_MAX_PER_WINDOW: '1000',
+        HORIZON_LOGIN_IP_MAX: '1000',
       },
     },
     {
