@@ -14,6 +14,9 @@ export default defineConfig({
   timeout: 90_000,          // transcode + buffer can take >30s for HDR
   expect: { timeout: 60_000 },
   fullyParallel: false,     // single FFmpeg box — run tests serially
+  // One worker: all specs share a single backend + SQLite DB, so parallel files
+  // would clobber each other's library/session state. Serialize everything.
+  workers: 1,
   retries: 0,
   reporter: 'list',
 
@@ -23,6 +26,11 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:5173',
     ...devices['Desktop Chrome'],
+    // Allow unmuted autoplay so the playback specs' <video> actually advances in
+    // headless Chromium (otherwise play() is blocked and currentTime stays 0).
+    launchOptions: {
+      args: ['--autoplay-policy=no-user-gesture-required'],
+    },
     // capture failed-test artifacts
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -63,6 +71,9 @@ export default defineConfig({
         // IP). These are dev-only overrides; production keeps the strict defaults.
         HORIZON_DEV_SEED_MAX_PER_WINDOW: '1000',
         HORIZON_LOGIN_IP_MAX: '1000',
+        // Playback specs open several sessions; raise the cap so a leaked/old
+        // session can't exhaust it and get one torn down mid-test.
+        HORIZON_MAX_SESSIONS: '16',
       },
     },
     {

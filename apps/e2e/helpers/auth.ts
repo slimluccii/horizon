@@ -104,6 +104,37 @@ export async function seed(request: APIRequestContext, scenario: string): Promis
   return res.json()
 }
 
+/**
+ * Point the library at a real movies directory and rescan, then wait until at
+ * least one movie is indexed (rescan is fire-and-forget, so we poll). Uses the
+ * owner session. Returns the indexed movie list. Used by the playback specs to
+ * index the synthetic fixture clip via the real ffprobe scan path.
+ */
+export async function scanMoviesRoot(
+  request: APIRequestContext,
+  owner: SessionUser,
+  moviesRoot: string,
+  timeoutMs = 30_000,
+): Promise<Array<{ id: string; title: string }>> {
+  const patch = await request.patch(`${API}/settings/server`, {
+    headers: bearer(owner),
+    data: { moviesRoots: [moviesRoot] },
+  })
+  expect(patch.ok(), `set moviesRoots → ${patch.status()}`).toBe(true)
+
+  await request.post(`${API}/library/rescan`, { headers: bearer(owner), data: {} })
+
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const movies = (await (await request.get(`${API}/library/movies`, { headers: bearer(owner) })).json()) as Array<{ id: string; title: string }>
+    if (movies.length > 0) return movies
+    if (Date.now() > deadline) {
+      throw new Error(`No movies indexed under ${moviesRoot} within ${timeoutMs}ms`)
+    }
+    await new Promise(r => setTimeout(r, 500))
+  }
+}
+
 /** Log in through the UI login page (profile picker + password). */
 export async function loginUi(page: Page, name: string, password = PASSWORD): Promise<void> {
   await page.goto(`${APP}/login`)
