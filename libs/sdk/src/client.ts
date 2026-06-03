@@ -1,5 +1,5 @@
 // sdk/src/client.ts
-import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, AuthSession, SetPasswordResult, PairStartResult, PairPollResult } from './types.ts'
+import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, AuthSession, SetPasswordResult, PairStartResult, PairPollResult, ScanStatusResponse } from './types.ts'
 import type { Preferences } from './preferences.ts'
 import { ErrorCodes } from './types.ts'
 import { detectCapabilities } from './capabilities.ts'
@@ -147,6 +147,12 @@ export class HorizonClient {
     getShow: (showId: string) => this.fetch<ShowSummary>(`/library/shows/${showId}`),
     listSeasons: (showId: string) => this.fetch<SeasonSummary[]>(`/library/shows/${showId}/seasons`),
     listEpisodes: (showId: string, season: number) => this.fetch<MediaItem[]>(`/library/shows/${showId}/seasons/${season}`),
+    /** Combined scan + metadata-refresh health snapshot. Any authed user may
+     *  read it; the web shows it only in the admin (owner/admin) Server tab. */
+    scanStatus: () => this.fetch<ScanStatusResponse>('/library/scan-status'),
+    /** Trigger a full library rescan (owner/admin). Fire-and-forget; poll
+     *  scanStatus() to watch progress. */
+    rescan: () => this.fetch<{ status: string }>('/library/rescan', { method: 'POST', body: JSON.stringify({}) }),
   }
 
   readonly users = {

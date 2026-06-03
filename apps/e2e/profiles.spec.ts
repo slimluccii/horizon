@@ -88,4 +88,15 @@ test.describe('profiles & roles', () => {
     await page.goto(`${APP}/settings`)
     await expect(page).toHaveURL(/\/login$/)
   })
+
+  test('admin scan-status indicator shows on the Server tab', async ({ context, page, request }) => {
+    const owner = await ensureOwner(request)
+    await authBrowser(context, owner)
+    await page.goto(`${APP}/settings`)
+    await page.getByRole('button', { name: 'Server' }).click()
+    // Discreet idle/scanning chip + manual rescan, admin-only (Server tab is
+    // owner/admin-gated, so regular users never reach it).
+    await expect(page.getByText(/Idle ·|Scanning|Refreshing metadata/i)).toBeVisible()
+    await expect(page.getByRole('button', { name: /rescan now/i })).toBeVisible()
+  })
 })

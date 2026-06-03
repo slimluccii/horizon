@@ -16,6 +16,7 @@ export type {
   User, WatchProgress, ContinueWatchingItem,
   ServerSettings, ServerSettingsPatch,
   BrowseEntry, BrowseResult,
+  ScanStatusResponse, ScanHistoryEntry, ScanResultSummary,
   AuthSession, SetPasswordResult, PairStartResult, PairPollResult,
 } from './types.ts'
 export { tmdbImageUrl } from './metadata.ts'

@@ -450,3 +450,55 @@
   justify-content: flex-end;
   margin-top: 8px;
 }
+
+/* ── Scan status (admin Server tab only) ──────────────────────────────────── */
+.settings__scan {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+  color: var(--text-soft);
+}
+.settings__scan.is-active {
+  border-color: var(--accent-dim);
+}
+.settings__scan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.settings__scan-dot.is-active {
+  background: var(--accent);
+  animation: settings-scan-pulse 1.4s ease-in-out infinite;
+}
+@keyframes settings-scan-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-shadow); }
+  50%      { opacity: 0.45; box-shadow: 0 0 0 4px transparent; }
+}
+.settings__scan-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings__scan-rescan {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border-hi);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.settings__scan-rescan:hover:not(:disabled) { border-color: var(--accent); }
+.settings__scan-rescan:disabled { opacity: 0.5; cursor: default; }
