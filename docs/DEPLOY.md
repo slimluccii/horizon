@@ -71,9 +71,9 @@ cd /mnt/<pool>/apps/horizon-src
 ### 2. Create the persistent data directory
 
 ```bash
-sudo mkdir -p /mnt/<pool>/apps/horizon/data
+sudo mkdir -p /mnt/<pool>/apps/horizon/config
 # 568:568 is the TrueNAS Apps user. Match this to PUID/PGID in .env.
-sudo chown -R 568:568 /mnt/<pool>/apps/horizon/data
+sudo chown -R 568:568 /mnt/<pool>/apps/horizon/config
 ```
 
 ### 3. Get the image — pull from GHCR (default) or build locally
@@ -126,7 +126,7 @@ In the Dockge web UI:
 
    ```env
    HORIZON_MEDIA_HOST=/mnt/<pool>/media
-   HORIZON_DATA_HOST=/mnt/<pool>/apps/horizon/data
+   HORIZON_DATA_HOST=/mnt/<pool>/apps/horizon/config
    PUID=568
    PGID=568
    HORIZON_PORT=7777
@@ -257,13 +257,13 @@ HORIZON_RESET_OWNER_PASSWORD=1
 | **Update server** | `cd /mnt/<pool>/apps/horizon-src && git pull && docker build -f apps/server/Dockerfile -t horizon:latest . && (in Dockge) restart stack` |
 | **View logs** | Dockge → `horizon` stack → Logs tab |
 | **Re-scan library** | `curl -XPOST http://<truenas-ip>:7777/library/rescan -H "Authorization: Bearer <session-token>"` (owner/admin only). Get a token via `POST /auth/login`. Also runs at boot and nightly at `HORIZON_SCAN_CRON_HOUR`. |
-| **Reset state** | Stop stack → `rm -rf /mnt/<pool>/apps/horizon/data/*` → start stack |
+| **Reset state** | Stop stack → `rm -rf /mnt/<pool>/apps/horizon/config/*` → start stack |
 
 ### 9. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| Container restarts in a loop, logs show `EACCES: permission denied, open '/data/horizon.db'` | `PUID:PGID` doesn't own `HORIZON_DATA_HOST` | `chown -R <PUID>:<PGID> <data dir>` |
+| Container restarts in a loop, logs show `EACCES: permission denied, open '/config/horizon.db'` | `PUID:PGID` doesn't own `HORIZON_DATA_HOST` | `chown -R <PUID>:<PGID> <data dir>` |
 | `Library shows 0 items` | No library folders configured yet, or media base mount empty inside container | First check you've added folders in the web UI (Settings → Library folders). Then `docker exec horizon ls /media` — should list your media tree. If empty, fix the `HORIZON_MEDIA_HOST` path. |
 | `ffmpeg not found in PATH` | Image built without ffmpeg layer | Re-build; ensure no override of the runtime stage. |
 | Playback stutters on Shield | Software transcode on a slow CPU | See **GPU passthrough** below, or transcode fewer renditions: `HORIZON_MAX_RENDITIONS=2`. |
@@ -411,7 +411,7 @@ adb -s <shield-ip>:5555 uninstall network.luuk.horizontv
 | Server compose | [`docker-compose.yml`](../docker-compose.yml) |
 | Server env template | [`.env.example`](../.env.example) |
 | Server health | `GET http://<host>:7777/api/health` |
-| Server data dir | `HORIZON_DATA_HOST` on host → `/data` in container |
+| Server data dir | `HORIZON_DATA_HOST` on host → `/config` in container |
 | TV deploy | `tv/bin/deploy-shield <ip>` |
 | TV server URL config | `tv/local.properties` → `HORIZON_SERVER_URL` |
 | TV package id | `network.luuk.horizontv` |

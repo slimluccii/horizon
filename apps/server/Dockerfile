@@ -69,16 +69,17 @@ COPY --from=builder /app/package.json ./
 # Built web UI, served same-origin by the server (Plex/Jellyfin style).
 COPY --from=webbuilder /app/apps/web/dist ./apps/web/dist
 
-# Persistent state lives here (DB + transcode cache). Mount a volume.
-RUN mkdir -p /data /media/movies /media/shows
-VOLUME ["/data"]
+# Persistent state (SQLite DB = all config/settings/users/library + transcode
+# cache) lives under /config. Mount a single volume there (Plex-style :config).
+RUN mkdir -p /config
+VOLUME ["/config"]
 
+# Sensible defaults so a minimal compose needs only the volume mount + media —
+# no path/port env required. All overridable.
 ENV NODE_ENV=production \
     HORIZON_PORT=7777 \
-    HORIZON_MOVIES_ROOT=/media/movies \
-    HORIZON_SHOWS_ROOT=/media/shows \
-    HORIZON_CACHE_DIR=/data/cache \
-    HORIZON_DB_PATH=/data/horizon.db \
+    HORIZON_CACHE_DIR=/config/cache \
+    HORIZON_DB_PATH=/config/horizon.db \
     HORIZON_WEB_DIR=/app/apps/web/dist \
     HORIZON_SERVE_WEB=1
 
