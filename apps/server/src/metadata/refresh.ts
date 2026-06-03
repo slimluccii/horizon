@@ -295,12 +295,20 @@ export function createMetadataRefreshWorker(
     },
 
     /**
-     * Run one refresh pass. Returns counts; updates cursor + media rows.
+     * Run a refresh pass. Returns counts; updates cursor + media rows.
      * Concurrent calls coalesce — second caller waits for first to finish
      * and gets the same result (cheap deduplication).
      * Returns early with zero counts if no TMDB client is configured.
+     *
+     * `drain` (post-scan first-import): after the changes-feed phase, keep
+     * pulling batchSize-sized batches of stale/never-fetched items and enriching
+     * them until the queue is dry — so a fresh library gets FULL metadata in one
+     * pass instead of `batchSize` items per trigger. Calls stay serial (the
+     * provider's own concurrency cap applies); backoff still excludes
+     * permanently-failing items, so the loop terminates. Without `drain` the
+     * behaviour is unchanged: a single batchSize batch.
      */
-    async run(opts: { useChangesFeed: boolean }): Promise<RefreshResult> {
+    async run(opts: { useChangesFeed: boolean; drain?: boolean }): Promise<RefreshResult> {
       if (!tmdb) return { refreshed: 0, failed: 0, changesFeedHits: 0, durationMs: 0, errorState: null }
       if (running) {
         // Wait until current run finishes, return its result.
@@ -352,6 +360,8 @@ export function createMetadataRefreshWorker(
           work.push(...picks.slice(0, cfg.changesFeedExtraCap))
         }
 
+        // First pass: changes-feed picks (already in `work`) + one batch of
+        // stale/never-fetched, deduped against the changes picks.
         const stale = deps.media.findStaleMetadata({
           nowMs: Date.now(),
           limit: cfg.batchSize,
@@ -370,6 +380,33 @@ export function createMetadataRefreshWorker(
         for (const pick of work) {
           const ok = await refreshOne(pick).catch(() => false)
           if (ok) refreshed++ ; else failed++
+        }
+
+        // Drain mode (post-scan): keep pulling fresh batches until the queue is
+        // dry. findStaleMetadata's failure-backoff guard excludes items we just
+        // marked failed, so each batch shrinks and the loop terminates. Bounded
+        // by a generous safety cap so a pathological state can't spin forever.
+        if (opts.drain) {
+          const MAX_DRAIN_BATCHES = 10_000
+          for (let b = 0; b < MAX_DRAIN_BATCHES; b++) {
+            const batch = deps.media.findStaleMetadata({
+              nowMs: Date.now(),
+              limit: cfg.batchSize,
+              maxAgeMs: cfg.maxAgeMs,
+              failureBackoffMs: cfg.failureBackoffMs,
+              failureBackoffCap: cfg.failureBackoffCapMs,
+            })
+            if (batch.length === 0) break
+            let batchProgress = 0
+            for (const pick of batch) {
+              const ok = await refreshOne(pick).catch(() => false)
+              if (ok) { refreshed++; batchProgress++ } else { failed++ }
+            }
+            // If a full batch came back but none succeeded, every item is now in
+            // backoff (or permanently failing) — the next query would return the
+            // same rows. Stop to avoid a tight loop.
+            if (batchProgress === 0) break
+          }
         }
       } finally {
         const result = { refreshed, failed, changesFeedHits, durationMs: Date.now() - t0, errorState }

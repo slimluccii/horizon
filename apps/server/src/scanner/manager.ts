@@ -19,6 +19,11 @@ export interface ScanStatus {
     trigger: ScanTrigger
     scope: 'full' | string
     startedAt: number
+    /** Live progress: items probed so far / total discovered so far. `total`
+     *  grows as roots are walked, then stabilises; both 0 before the first
+     *  walk completes. */
+    processed: number
+    total: number
   } | null
   pendingPaths: string[]
   lastResult: ScanResult | null
@@ -69,7 +74,7 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     return { ...cfg, moviesRoots: movies, showsRoots: shows }
   }
 
-  let running: { trigger: ScanTrigger; scope: 'full' | string; startedAt: number } | null = null
+  let running: { trigger: ScanTrigger; scope: 'full' | string; startedAt: number; processed: number; total: number } | null = null
   let runningPromise: Promise<ScanResult> | null = null
   let pending: Pending | null = null
   let pendingResolvers: Array<(r: ScanResult) => void> = []
@@ -133,12 +138,17 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     const scope = pendingToScope(p)
     const scopeLabel = p.full ? 'full' : [...p.paths].sort().join(',')
     const startedAt = Date.now()
-    running = { trigger: p.trigger, scope: scopeLabel, startedAt }
+    running = { trigger: p.trigger, scope: scopeLabel, startedAt, processed: 0, total: 0 }
+    // Live progress sink — mutates the `running` snapshot read by status().
+    const progress = {
+      addTotal(n: number) { if (running) running.total += n },
+      tick() { if (running) running.processed += 1 },
+    }
     const histId = deps.scanHistory.begin(p.trigger, p.full ? 'full' : scopeLabel, startedAt)
     const errors: string[] = []
     let result: ScanResult
     try {
-      result = await runScan(scope, cfg, deps)
+      result = await runScan(scope, cfg, deps, progress)
     } catch (err) {
       errors.push((err as Error).message)
       result = {

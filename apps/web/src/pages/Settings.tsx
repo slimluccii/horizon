@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
-import type { Preferences, User, ServerSettings } from '@horizon/sdk'
+import type { Preferences, User, ServerSettings, ScanStatusResponse } from '@horizon/sdk'
 import { FolderBrowser, type LibraryTag } from '../components/FolderBrowser/FolderBrowser.tsx'
 import LargeTopNav from '../components/chrome/LargeTopNav.tsx'
 import './Settings.css'
@@ -438,6 +438,107 @@ function LibraryFoldersPanel({ onSave }: { onSave: (msg: string) => void }) {
 
       {error && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{error}</p>}
     </>
+  )
+}
+
+/** Compact "x ago" for the last-scan line. */
+function timeAgo(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return `${s}s ago`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
+
+/**
+ * Discreet scan/metadata status indicator for the admin Server tab only — it
+ * lives inside Settings → Server, which is owner/admin-gated, so regular users
+ * never see it. Polls /library/scan-status every 5s while mounted; shows a
+ * pulsing "Scanning…" chip when a scan or metadata refresh is running, else an
+ * idle line with the last-scan summary. Includes a manual "Rescan now" button.
+ */
+function ScanStatusBadge({ onToast }: { onToast: (msg: string) => void }) {
+  const [status, setStatus] = useState<ScanStatusResponse | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      try {
+        const s = await horizon.library.scanStatus()
+        if (alive) setStatus(s)
+      } catch { /* transient — keep last known */ }
+    }
+    void poll()
+    const id = setInterval(poll, 5000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  async function rescan() {
+    setBusy(true)
+    try {
+      await horizon.library.rescan()
+      onToast('Rescan started.')
+      setStatus(await horizon.library.scanStatus())
+    } catch {
+      onToast('Could not start a rescan.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const scanning = !!status?.scan.running
+  const refreshing = !!status?.metadata.running
+  const active = scanning || refreshing
+  const cur = status?.scan.current
+  const last = status?.scan.lastResult
+  const lastAt = status?.scan.lastFinishedAt
+
+  // Live "scanned X of Y" while a scan runs and totals are known.
+  const processed = cur?.processed ?? 0
+  const total = cur?.total ?? 0
+  const showBar = scanning && total > 0
+  const pct = showBar ? Math.min(100, Math.round((processed / total) * 100)) : 0
+
+  let detail: string
+  if (scanning) {
+    if (total > 0) {
+      const where = cur?.scope && cur.scope !== 'full' ? ` · ${cur.scope}` : ''
+      detail = `Scanning ${processed} of ${total} items${where}`
+    } else {
+      detail = 'Scanning library… (discovering files)'
+    }
+  } else if (refreshing) {
+    detail = 'Refreshing metadata…'
+  } else if (lastAt && last) {
+    detail = `Idle · last scan ${timeAgo(lastAt)} (${last.itemsSeen} items${last.itemsFailed ? `, ${last.itemsFailed} failed` : ''})`
+  } else {
+    detail = 'Idle · no scan yet'
+  }
+
+  return (
+    <div className={`settings__scan ${active ? 'is-active' : ''}`}>
+      <div className="settings__scan-row">
+        <span className={`settings__scan-dot ${active ? 'is-active' : ''}`} aria-hidden="true" />
+        <span className="settings__scan-text">{detail}</span>
+        <button className="settings__scan-rescan" type="button" disabled={busy || active} onClick={rescan}>
+          {busy ? 'Starting…' : 'Rescan now'}
+        </button>
+      </div>
+      {showBar && (
+        <div
+          className="settings__scan-bar"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={processed}
+        >
+          <div className="settings__scan-bar-fill" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1023,6 +1124,7 @@ export default function Settings() {
 
         {activeTab === 'Server' && (
           <>
+            <ScanStatusBadge onToast={showToast} />
             <LibraryFoldersPanel onSave={showToast} />
             <ServerPanel onSave={showToast} />
           </>

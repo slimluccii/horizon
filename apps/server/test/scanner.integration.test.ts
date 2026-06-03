@@ -75,6 +75,29 @@ describe('rescan (integration)', () => {
     expect(media.getEpisodes(media.listShows()[0].id)).toHaveLength(0)
   })
 
+  it('reports live progress (addTotal + tick per item)', async () => {
+    const moviesRoot = path.join(tmpRoot, 'movies')
+    mkdirSync(moviesRoot, { recursive: true })
+    writeFileSync(path.join(moviesRoot, 'Oppenheimer (2023) {tmdb-872585}.mkv'), '')
+    writeFileSync(path.join(moviesRoot, 'Dune (2021) {tmdb-1}.mkv'), '')
+
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const media = createMediaRepo(db)
+    const collections = createCollectionsRepo(db)
+
+    let total = 0
+    let processed = 0
+    const cfg = { moviesRoots: [moviesRoot], showsRoots: [], cacheDir: tmpRoot, scanConcurrency: 2 }
+    await runScan(fullScope(cfg), cfg, { media, collections }, {
+      addTotal: (n) => { total += n },
+      tick: () => { processed += 1 },
+    })
+
+    expect(total).toBe(2)        // two movie candidates discovered
+    expect(processed).toBe(2)    // each ticked once on completion
+  })
+
   it('counts a probe timeout as a failed item, not a crash (#72)', async () => {
     const moviesRoot = path.join(tmpRoot, 'movies')
     mkdirSync(moviesRoot, { recursive: true })

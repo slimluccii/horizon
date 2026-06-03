@@ -70,15 +70,18 @@ services:
       # cache). Point this anywhere — Plex-style :config. Must be owned by PUID:PGID.
       - "${HORIZON_DATA_HOST}:/config"
 
-    # Uncomment if you have an Intel iGPU and want QSV hwaccel
-    # devices:
-    #   - "/dev/dri:/dev/dri"
-    #   - "/dev/dri/renderD128:/dev/dri/renderD128"
-    # group_add:
-    #   - "video"
-    #   - "render"
+    # Intel / AMD iGPU passthrough for QSV/VAAPI hardware transcode. On by
+    # default — Horizon auto-detects the GPU and falls back to CPU if it can't
+    # use it. If your host has NO /dev/dri (no iGPU), comment this block out, or
+    # `docker compose up` will fail with "no such file or directory".
+    devices:
+      - "/dev/dri:/dev/dri"
+    group_add:
+      - "video"
+      - "render"
 
-    # NVIDIA hwaccel (requires nvidia-container-toolkit on host):
+    # NVIDIA hwaccel instead (requires nvidia-container-toolkit on host) —
+    # comment the devices/group_add block above and uncomment this:
     # deploy:
     #   resources:
     #     reservations:

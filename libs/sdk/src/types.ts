@@ -322,3 +322,48 @@ export interface BrowseResult {
   entries: BrowseEntry[]
   parent: string | null
 }
+
+/** A finished scan's summary (subset of the server's ScanResult). */
+export interface ScanResultSummary {
+  scope: { fullScope: boolean } & Record<string, unknown>
+  itemsSeen: number
+  itemsAdded: number
+  itemsRemoved: number
+  itemsFailed: number
+  durationMs: number
+}
+
+/** One row of recent scan history. */
+export interface ScanHistoryEntry {
+  id: number
+  trigger: 'boot' | 'cron' | 'manual' | 'watcher' | 'metadata'
+  scope: string
+  startedAt: number
+  finishedAt: number | null
+  itemsSeen: number
+  itemsAdded: number
+  itemsRemoved: number
+  metadataRefreshed: number
+  errors: string[] | null
+}
+
+/**
+ * Wire shape of GET /library/scan-status — a combined health snapshot for the
+ * admin panel. `scan.running` / `metadata.running` drive the live indicator.
+ */
+export interface ScanStatusResponse {
+  scan: {
+    running: boolean
+    current: { trigger: string; scope: string; startedAt: number; processed: number; total: number } | null
+    pendingPaths: string[]
+    lastResult: ScanResultSummary | null
+    lastFinishedAt: number | null
+  }
+  metadata: {
+    running: boolean
+    configured: boolean
+    lastResult: { refreshed: number; failed: number; changesFeedHits: number; durationMs: number } | null
+    errorState: { code: string; message: string; firstOccurredAt: number } | null
+  }
+  recentRuns: ScanHistoryEntry[]
+}
