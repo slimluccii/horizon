@@ -21,22 +21,19 @@ services:
 
     restart: unless-stopped
 
-    # Run as the user that owns /data on the host (TrueNAS apps user is 568:568).
-    # Override via .env. The media base mount is read-only so its ownership doesn't matter.
+    # Run as the user that owns the /config host dir (TrueNAS apps user is 568:568).
+    # Override via .env. The media mount is read-only so its ownership doesn't matter.
     user: "${PUID:-568}:${PGID:-568}"
 
     ports:
       - "${HORIZON_PORT:-7777}:7777"
 
     environment:
-      # Required
-      HORIZON_PORT: "7777"
-      # Library folders are picked at runtime in the web UI. The folder browser
-      # can reach anything the container can read, which in Docker means exactly
-      # the volumes you mount below — so mount your media read-only and that's all
-      # the UI will see. No base env var; the container IS the boundary.
-      HORIZON_CACHE_DIR: "/data/cache"
-      HORIZON_DB_PATH: "/data/horizon.db"
+      # Everything below is OPTIONAL — the image ships sensible defaults (port
+      # 7777, DB + cache under /config, web UI on). A minimal stack needs only
+      # the two volume mounts. Library folders are picked at runtime in the web
+      # UI; the container only sees what you mount, so the media mount IS the
+      # boundary.
       # Optional — set in .env
       HORIZON_TMDB_TOKEN: "${HORIZON_TMDB_TOKEN:-}"
       # Web UI is served same-origin by the server, so CORS defaults to OFF
@@ -69,8 +66,9 @@ services:
       - "${HORIZON_MEDIA_HOST}:/media:ro"
       # Mount more trees if you like — each is browsable in the UI:
       #   - "${HORIZON_MEDIA_HOST2}:/media2:ro"
-      # Persistent state (SQLite DB + HLS transcode cache)
-      - "${HORIZON_DATA_HOST}:/data"
+      # Config + state (SQLite DB = settings/users/library/auth + transcode
+      # cache). Point this anywhere — Plex-style :config. Must be owned by PUID:PGID.
+      - "${HORIZON_DATA_HOST}:/config"
 
     # Uncomment if you have an Intel iGPU and want QSV hwaccel
     # devices:
