@@ -496,9 +496,20 @@ function ScanStatusBadge({ onToast }: { onToast: (msg: string) => void }) {
   const last = status?.scan.lastResult
   const lastAt = status?.scan.lastFinishedAt
 
+  // Live "scanned X of Y" while a scan runs and totals are known.
+  const processed = cur?.processed ?? 0
+  const total = cur?.total ?? 0
+  const showBar = scanning && total > 0
+  const pct = showBar ? Math.min(100, Math.round((processed / total) * 100)) : 0
+
   let detail: string
   if (scanning) {
-    detail = cur?.scope && cur.scope !== 'full' ? `Scanning ${cur.scope}` : 'Scanning library…'
+    if (total > 0) {
+      const where = cur?.scope && cur.scope !== 'full' ? ` · ${cur.scope}` : ''
+      detail = `Scanning ${processed} of ${total} items${where}`
+    } else {
+      detail = 'Scanning library… (discovering files)'
+    }
   } else if (refreshing) {
     detail = 'Refreshing metadata…'
   } else if (lastAt && last) {
@@ -509,11 +520,24 @@ function ScanStatusBadge({ onToast }: { onToast: (msg: string) => void }) {
 
   return (
     <div className={`settings__scan ${active ? 'is-active' : ''}`}>
-      <span className={`settings__scan-dot ${active ? 'is-active' : ''}`} aria-hidden="true" />
-      <span className="settings__scan-text">{detail}</span>
-      <button className="settings__scan-rescan" type="button" disabled={busy || active} onClick={rescan}>
-        {busy ? 'Starting…' : 'Rescan now'}
-      </button>
+      <div className="settings__scan-row">
+        <span className={`settings__scan-dot ${active ? 'is-active' : ''}`} aria-hidden="true" />
+        <span className="settings__scan-text">{detail}</span>
+        <button className="settings__scan-rescan" type="button" disabled={busy || active} onClick={rescan}>
+          {busy ? 'Starting…' : 'Rescan now'}
+        </button>
+      </div>
+      {showBar && (
+        <div
+          className="settings__scan-bar"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={processed}
+        >
+          <div className="settings__scan-bar-fill" style={{ width: `${pct}%` }} />
+        </div>
+      )}
     </div>
   )
 }

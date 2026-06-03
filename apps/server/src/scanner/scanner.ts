@@ -25,6 +25,17 @@ export interface ScanDeps {
   collections: CollectionsRepo
 }
 
+/** Live progress sink. `addTotal` is called once per scanned path after its
+ *  (cheap) file walk discovers how many probe-able items it holds; `tick` is
+ *  called once per item as it finishes (success or fail). Lets the UI show a
+ *  "scanned X of Y" bar — Y grows as roots are walked, then stabilises. */
+export interface ScanProgressReporter {
+  addTotal(n: number): void
+  tick(): void
+}
+
+const NOOP_PROGRESS: ScanProgressReporter = { addTotal() {}, tick() {} }
+
 export interface ScanCounts {
   /** Ids of media rows touched (movies + shows + episodes). Caller may use
    *  this for soft-delete reconciliation. */
@@ -94,6 +105,7 @@ async function scanMoviesPath(
   pathToScan: string,
   cfg: ScanConfig,
   media: MediaRepo,
+  progress: ScanProgressReporter,
 ): Promise<{ seen: Set<string>; added: number; failed: number }> {
   const seen = new Set<string>()
   let added = 0
@@ -106,12 +118,13 @@ async function scanMoviesPath(
       return m ? { file, base, m } : null
     })
     .filter((x): x is NonNullable<typeof x> => !!x)
+  progress.addTotal(candidates.length)
 
   await pMap(candidates, cfg.scanConcurrency, async ({ file, m }) => {
     const p = await probe(file, cfg.cacheDir).catch(() => null)
-    if (!p) { failed++; return }
+    if (!p) { failed++; progress.tick(); return }
     const st = await stat(file).catch(() => null)
-    if (!st) { failed++; return }
+    if (!st) { failed++; progress.tick(); return }
     const id = hashId(file)
     const existed = media.getById(id) !== null
     const upsert: MovieUpsert = {
@@ -134,6 +147,7 @@ async function scanMoviesPath(
     media.upsertMovie(upsert)
     seen.add(id)
     if (!existed) added++
+    progress.tick()
   })
   return { seen, added, failed }
 }
@@ -142,6 +156,7 @@ async function scanShowsPath(
   pathToScan: string,
   cfg: ScanConfig,
   media: MediaRepo,
+  progress: ScanProgressReporter,
 ): Promise<{ seen: Set<string>; added: number; failed: number }> {
   const seen = new Set<string>()
   let added = 0
@@ -178,12 +193,13 @@ async function scanShowsPath(
         return em ? { file, base, em } : null
       })
       .filter((x): x is NonNullable<typeof x> => !!x)
+    progress.addTotal(epCands.length)
 
     await pMap(epCands, cfg.scanConcurrency, async ({ file, base, em }) => {
       const p = await probe(file, cfg.cacheDir).catch(() => null)
-      if (!p) { failed++; return }
+      if (!p) { failed++; progress.tick(); return }
       const st = await stat(file).catch(() => null)
-      if (!st) { failed++; return }
+      if (!st) { failed++; progress.tick(); return }
       const id = hashId(file)
       const existed = media.getById(id) !== null
       const insert: EpisodeUpsert = {
@@ -208,6 +224,7 @@ async function scanShowsPath(
       media.upsertEpisode(insert)
       seen.add(id)
       if (!existed) added++
+      progress.tick()
     })
   }
   return { seen, added, failed }
@@ -233,6 +250,7 @@ export async function runScan(
   scope: ScanScope,
   cfg: ScanConfig,
   deps: ScanDeps,
+  progress: ScanProgressReporter = NOOP_PROGRESS,
 ): Promise<ScanResult> {
   const t0 = Date.now()
   const seen = new Set<string>()
@@ -240,13 +258,13 @@ export async function runScan(
   let failed = 0
 
   for (const p of scope.moviesPaths) {
-    const r = await scanMoviesPath(p, cfg, deps.media)
+    const r = await scanMoviesPath(p, cfg, deps.media, progress)
     for (const id of r.seen) seen.add(id)
     added += r.added
     failed += r.failed
   }
   for (const p of scope.showsPaths) {
-    const r = await scanShowsPath(p, cfg, deps.media)
+    const r = await scanShowsPath(p, cfg, deps.media, progress)
     for (const id of r.seen) seen.add(id)
     added += r.added
     failed += r.failed

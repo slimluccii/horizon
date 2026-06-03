@@ -354,7 +354,7 @@ export interface ScanHistoryEntry {
 export interface ScanStatusResponse {
   scan: {
     running: boolean
-    current: { trigger: string; scope: string; startedAt: number } | null
+    current: { trigger: string; scope: string; startedAt: number; processed: number; total: number } | null
     pendingPaths: string[]
     lastResult: ScanResultSummary | null
     lastFinishedAt: number | null
