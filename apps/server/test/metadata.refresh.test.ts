@@ -113,6 +113,52 @@ describe('MetadataRefreshWorker', () => {
     expect(item.metadata_fetched_at).not.toBeNull()
   })
 
+  const unfetchedCount = () =>
+    (db.prepare('SELECT COUNT(*) n FROM media_items WHERE metadata_fetched_at IS NULL').get() as any).n
+
+  it('without drain, one run enriches only batchSize items', async () => {
+    for (let i = 0; i < 12; i++) seedMovie(`m${i}`, { tmdbId: 100 + i })
+    const worker = createMetadataRefreshWorker(
+      { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 0 },
+      { media, tmdb: fakeTmdb(), changesCursor: createChangesCursorRepo(db) },
+    )
+    const r = await worker.run({ useChangesFeed: false })
+    expect(r.refreshed).toBe(5)
+    expect(unfetchedCount()).toBe(7)   // 12 − 5 still waiting
+  })
+
+  it('drain enriches the ENTIRE library in one run, not just batchSize', async () => {
+    for (let i = 0; i < 12; i++) seedMovie(`m${i}`, { tmdbId: 100 + i })
+    const worker = createMetadataRefreshWorker(
+      { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 0 },
+      { media, tmdb: fakeTmdb(), changesCursor: createChangesCursorRepo(db) },
+    )
+    const r = await worker.run({ useChangesFeed: false, drain: true })
+    expect(r.refreshed).toBe(12)       // all 12, across 5+5+2 batches
+    expect(unfetchedCount()).toBe(0)
+  })
+
+  it('drain terminates when remaining items all fail (no infinite loop)', async () => {
+    // tmdbId null + all lookups return null → every item marks failed, never fetched.
+    for (let i = 0; i < 8; i++) seedMovie(`f${i}`)
+    const failing = {
+      async movieByTmdbId() { return null }, async movieByImdbId() { return null },
+      async searchMovie() { return null }, async showByTmdbId() { return null },
+      async showByTvdbId() { return null }, async searchShow() { return null },
+      async episode() { return null }, async changedMovieIds() { return [] },
+      async changedShowIds() { return [] },
+    } as any
+    const worker = createMetadataRefreshWorker(
+      { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 0 },
+      { media, tmdb: failing, changesCursor: createChangesCursorRepo(db) },
+    )
+    const r = await worker.run({ useChangesFeed: false, drain: true })
+    // First batch (5) + drain pulls one more batch (remaining 3) then stops
+    // because that batch made zero progress. All 8 attempted, none fetched.
+    expect(r.refreshed).toBe(0)
+    expect(r.failed).toBeGreaterThanOrEqual(8)
+  })
+
   it('changes feed populates extra picks', async () => {
     // Item with tmdb_id=42 — matches the fake changes feed.
     seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })

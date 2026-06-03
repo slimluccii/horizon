@@ -181,7 +181,9 @@ export function registerLibrary(
     if (!workers.refreshWorker.status().configured) {
       return overCapacity(reply, ErrorCodes.TMDB_DISABLED, 'TMDB not configured')
     }
-    void workers.refreshWorker.run({ useChangesFeed: true })
+    // Manual "refresh now" → drain the full queue (changes feed + every stale/
+    // never-fetched item), not just one batch.
+    void workers.refreshWorker.run({ useChangesFeed: true, drain: true })
       .catch(err => app.log.error({ err }, 'Metadata refresh failed'))
     return reply.status(202).send({ status: 'queued' })
   })

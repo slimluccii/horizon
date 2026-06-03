@@ -109,7 +109,10 @@ async function main() {
     collections: collectionsRepo,
     scanRoots: scanRootsRepo,
     scanHistory: scanHistoryRepo,
-    onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false }) },  // newly indexed items get metadata fast
+    // After a scan, drain the whole metadata queue so newly-indexed items get
+    // FULL enrichment in one pass (not batchSize-at-a-time). Serial; the TMDB
+    // provider's concurrency cap + per-item backoff keep it well-behaved.
+    onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false, drain: true }) },
     getRoots,
   })
 
