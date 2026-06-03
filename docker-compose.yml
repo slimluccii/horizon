@@ -1,22 +1,23 @@
 # Horizon — single-host stack (Dockge / TrueNAS Apps friendly).
 #
-# Two ways to use this file:
-#   (A) Build the image on the host:    docker compose build
-#       (requires the source tree on the host, e.g. /opt/horizon-src)
-#   (B) Pull a pre-built image:         comment `build:`, set `image:` to your registry tag.
+# Default: pull the prebuilt multi-arch image from GHCR (private — needs
+# `docker login ghcr.io`). The publish workflow pushes amd64 + arm64 on every
+# push to main and on v* tags. Pin a tag instead of `latest` for reproducible
+# deploys, e.g. ghcr.io/slimluccii/horizon:v1.0.0
+#
+# To BUILD from source on the host instead (no registry), uncomment `build:`
+# below and run `docker compose build`.
 #
 # After deploy, see docs/DEPLOY.md for TrueNAS + Dockge specifics.
 
 services:
   horizon:
     container_name: horizon
-    # --- (A) Build from local source ---
-    build:
-      context: .
-      dockerfile: apps/server/Dockerfile
-    image: horizon:latest
-    # --- (B) Pull instead of build ---
-    # image: ghcr.io/<you>/horizon:latest
+    image: ghcr.io/slimluccii/horizon:latest
+    # --- Build from local source instead of pulling ---
+    # build:
+    #   context: .
+    #   dockerfile: apps/server/Dockerfile
 
     restart: unless-stopped
 
