@@ -76,28 +76,45 @@ sudo mkdir -p /mnt/<pool>/apps/horizon/data
 sudo chown -R 568:568 /mnt/<pool>/apps/horizon/data
 ```
 
-### 3. Build the Docker image
+### 3. Get the image — pull from GHCR (default) or build locally
 
-From the source directory on the NAS:
+#### Option A — pull the prebuilt image from GHCR (recommended)
+
+The publish workflow builds a multi-arch image (amd64 + arm64) on every push to
+`main` and on `v*` tags, pushing it to `ghcr.io/slimluccii/horizon`. Because the
+repo is **private**, the image is private too — the NAS needs a token to pull.
+
+1. Create a GitHub **Personal Access Token (classic)** with the `read:packages`
+   scope: GitHub → Settings → Developer settings → Tokens (classic). Copy it.
+2. On the NAS, log in to GHCR once:
+
+   ```bash
+   echo "<YOUR_PAT>" | docker login ghcr.io -u <your-github-username> --password-stdin
+   ```
+
+3. `docker-compose.yml` already points at `ghcr.io/slimluccii/horizon:latest`, so
+   the stack pulls it. To verify manually:
+
+   ```bash
+   docker pull ghcr.io/slimluccii/horizon:latest
+   ```
+
+> Pin a tag (e.g. `:v1.0.0`) instead of `latest` for reproducible deploys — push
+> a `v*` git tag and the workflow publishes that tag.
+
+#### Option B — build on the NAS from source (no registry)
+
+Uncomment the `build:` block in `docker-compose.yml`, then:
 
 ```bash
 cd /mnt/<pool>/apps/horizon-src
-docker build -f apps/server/Dockerfile -t horizon:latest .
+docker compose build
 ```
 
-> The Dockerfile lives at `apps/server/Dockerfile` but the **build context is the
-> repo root** (the server is an npm workspace that depends on `libs/sdk`). The
-> compose file already points at it, so `docker compose build` does the right
-> thing — you only need the explicit `-f` for a manual `docker build`.
-
-First build pulls Node + ffmpeg layers and compiles `better-sqlite3` — expect 3–8 minutes. Subsequent builds are cached.
-
-Verify:
-
-```bash
-docker images horizon
-docker run --rm horizon:latest ffmpeg -version | head -1
-```
+The build context is the repo root (the server is an npm workspace depending on
+`libs/sdk`). First build pulls Node + ffmpeg layers and compiles native modules
+(better-sqlite3, argon2 fall back to source if no prebuilt for the arch) — expect
+3–8 minutes; subsequent builds are cached.
 
 ### 4. Create the Dockge stack
 
