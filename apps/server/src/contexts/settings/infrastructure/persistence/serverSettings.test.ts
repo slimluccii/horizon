@@ -3,7 +3,7 @@ import { openDatabase } from '../../../../db/index.ts'
 import { migrate } from '../../../../db/migrations.ts'
 import { createServerSettings } from './serverSettings.ts'
 import { createProgressRepo } from '../../../../repos/progress.ts'
-import { createUserRepo } from '../../../../repos/users.ts'
+import { createUserRepo } from '../../../identity/index.ts'
 import { createMediaRepo } from '../../../../repos/media.ts'
 import type { Config } from '../../../../config.ts'
 

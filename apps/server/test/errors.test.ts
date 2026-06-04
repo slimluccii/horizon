@@ -87,7 +87,9 @@ function collectSources(dir: string): string[] {
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry)
     if (statSync(full).isDirectory()) out.push(...collectSources(full))
-    else if (entry.endsWith('.ts')) out.push(full)
+    // Co-located test files legitimately assert on raw error-code strings; this
+    // guard targets production source only.
+    else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full)
   }
   return out
 }

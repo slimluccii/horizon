@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import { resolveCallerRole, requireUser, canAccessSession } from '../src/routes/authz.ts'
-import type { AuthedUser } from '../src/auth/middleware.ts'
+import { resolveCallerRole, requireUser, canAccessSession } from './authz.ts'
+import type { AuthedUser } from '../authMiddleware.ts'
 
 /** Minimal FastifyRequest stub carrying only `req.user` (set by the auth hook). */
 function req(user?: AuthedUser): FastifyRequest {

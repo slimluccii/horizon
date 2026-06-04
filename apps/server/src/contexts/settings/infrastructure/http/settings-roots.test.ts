@@ -6,9 +6,9 @@ import path from 'node:path'
 import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
 import { migrate } from '../../../../db/migrations.ts'
 import { createServerSettings } from '../persistence/serverSettings.ts'
-import { createUserRepo } from '../../../../repos/users.ts'
-import { createSessionRepo } from '../../../../auth/session.ts'
-import { makeRequireAuth } from '../../../../auth/middleware.ts'
+import { createUserRepo } from '../../../identity/index.ts'
+import { createSessionRepo } from '../../../identity/index.ts'
+import { makeRequireAuth } from '../../../identity/index.ts'
 import { registerSettings } from './settings.ts'
 
 /** A directory with two real subdirs (Films, Series). realpathSync defeats the

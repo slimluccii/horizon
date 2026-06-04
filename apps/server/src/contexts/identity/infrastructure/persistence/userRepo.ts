@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { ErrorCodes } from '@horizon/sdk'
-import type { DatabaseSync } from '../db/index.ts'
-import { UserRowSchema } from '../db/rowSchemas.ts'
+import type { DatabaseSync } from '../../../../db/index.ts'
+import { UserRowSchema } from '../../../../db/rowSchemas.ts'
 
 export interface User {
   id: string

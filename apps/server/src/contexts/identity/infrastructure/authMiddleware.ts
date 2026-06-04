@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { ErrorCodes } from '@horizon/sdk'
-import type { SessionRepo } from './session.ts'
-import type { UserRepo } from '../repos/users.ts'
+import type { SessionRepo } from './persistence/sessionRepo.ts'
+import type { UserRepo } from './persistence/userRepo.ts'
 
 /** Name of the httpOnly session cookie set on web logins. */
 export const SESSION_COOKIE = 'hz_session'

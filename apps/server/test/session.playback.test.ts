@@ -9,7 +9,7 @@ import { TranscodeError } from '../src/session/errors.ts'
 import type { Config } from '../src/config.ts'
 import type { HwAccel } from '../src/transcode/hwaccel.ts'
 import type { MediaRepo, MediaItemRow } from '../src/repos/media.ts'
-import type { UserRepo } from '../src/repos/users.ts'
+import type { UserRepo } from '../src/contexts/identity/index.ts'
 import type { ClientCapabilities } from '../src/transcode/plan.ts'
 import type { ServerSettings, ServerSettingsRow } from '../src/contexts/settings/index.ts'
 

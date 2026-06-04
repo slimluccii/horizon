@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { MediaRepo } from '../repos/media.ts'
-import type { UserRepo } from '../repos/users.ts'
+import type { UserRepo } from '../contexts/identity/index.ts'
 import type { ProgressRepo } from '../repos/progress.ts'
 import type { ServerSettings } from '../contexts/settings/index.ts'
 import type { SessionManager } from '../session/manager.ts'
@@ -11,7 +11,7 @@ import type { PlaybackOrchestrator, StartPlaybackInput } from '../session/playba
 import { handleWsMessage, resetWsAuth } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
 import { sendNotFound, overCapacity, badRequest, errorReply, ErrorCodes } from './errors.ts'
-import { resolveCallerRole, canAccessSession } from './authz.ts'
+import { resolveCallerRole, canAccessSession } from '../contexts/identity/index.ts'
 import { requireReconnectToken } from './segments.ts'
 
 const WS_PING_INTERVAL_MS = 15_000

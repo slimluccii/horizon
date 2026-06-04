@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createSessionRepo, type SessionRepo } from '../src/auth/session.ts'
+import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
+import { createSessionRepo, type SessionRepo } from './sessionRepo.ts'
 
 function seedUser(db: DatabaseSync, id: string): void {
   db.prepare('INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')

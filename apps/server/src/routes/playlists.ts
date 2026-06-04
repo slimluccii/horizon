@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import type { SessionManager } from '../session/manager.ts'
-import type { UserRepo } from '../repos/users.ts'
+import type { UserRepo } from '../contexts/identity/index.ts'
 import { buildRenditionPlaylist, buildMasterPlaylist } from '../transcode/playlist.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from './errors.ts'
 import { requireReconnectToken } from './segments.ts'
-import { resolveCallerRole, canAccessSession } from './authz.ts'
+import { resolveCallerRole, canAccessSession } from '../contexts/identity/index.ts'
 
 const HLS_CONTENT_TYPE = 'application/vnd.apple.mpegurl'
 

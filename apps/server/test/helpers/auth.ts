@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { DatabaseSync } from '../../src/db/index.ts'
-import { createUserRepo, type UserRepo, type User } from '../../src/repos/users.ts'
-import { createSessionRepo, type SessionRepo } from '../../src/auth/session.ts'
-import { makeRequireAuth } from '../../src/auth/middleware.ts'
+import { createUserRepo, type UserRepo, type User } from '../../src/contexts/identity/index.ts'
+import { createSessionRepo, type SessionRepo } from '../../src/contexts/identity/index.ts'
+import { makeRequireAuth } from '../../src/contexts/identity/index.ts'
 
 /**
  * Shared test plumbing for the session-based auth cutover. Route tests no longer

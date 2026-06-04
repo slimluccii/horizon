@@ -21,7 +21,7 @@
 import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { MediaRepo, MediaItemRow } from '../repos/media.ts'
-import type { UserRepo } from '../repos/users.ts'
+import type { UserRepo } from '../contexts/identity/index.ts'
 import type { ServerSettings } from '../contexts/settings/index.ts'
 import type { SessionManager } from './manager.ts'
 import type { Session } from './types.ts'

@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import type { AuthedUser } from '../auth/middleware.ts'
-import { badRequest, ErrorCodes } from './errors.ts'
+import type { AuthedUser } from '../authMiddleware.ts'
+import { badRequest, ErrorCodes } from '../../../../routes/errors.ts'
 
 /**
  * Resolve the calling user from the authenticated session. Identity now comes

@@ -2,12 +2,12 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import fastifyCookie from '@fastify/cookie'
 import crypto from 'node:crypto'
-import type { UserRepo } from '../repos/users.ts'
-import type { SessionRepo } from '../auth/session.ts'
-import { SESSION_COOKIE, tokenFromRequest, setSessionCookie } from '../auth/middleware.ts'
-import { hash as hashPassword, verify as verifyPassword } from '../auth/password.ts'
-import { badRequest, errorReply, ErrorCodes } from './errors.ts'
-import { IpRateLimiter } from './rate-limit.ts'
+import type { UserRepo } from '../persistence/userRepo.ts'
+import type { SessionRepo } from '../persistence/sessionRepo.ts'
+import { SESSION_COOKIE, tokenFromRequest, setSessionCookie } from '../authMiddleware.ts'
+import { hash as hashPassword, verify as verifyPassword } from '../password.ts'
+import { badRequest, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
+import { IpRateLimiter } from '../../../../routes/rate-limit.ts'
 
 /**
  * Built-in authentication routes: login/logout/me, self-service + admin

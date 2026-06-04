@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
 import { createMediaRepo, type MediaRepo } from '../src/repos/media.ts'
-import { createUserRepo, type UserRepo } from '../src/repos/users.ts'
+import { createUserRepo, type UserRepo } from '../src/contexts/identity/index.ts'
 import { createProgressRepo, type ProgressRepo } from '../src/repos/progress.ts'
 
 function setup() {

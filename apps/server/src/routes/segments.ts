@@ -6,10 +6,10 @@ import type { HwAccel } from '../transcode/hwaccel.ts'
 import type { Session } from '../session/types.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { MediaRepo } from '../repos/media.ts'
-import type { UserRepo } from '../repos/users.ts'
+import type { UserRepo } from '../contexts/identity/index.ts'
 import { waitForSegment, waitForInit } from '../transcode/ffmpeg.ts'
 import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from './errors.ts'
-import { resolveCallerRole, canAccessSession } from './authz.ts'
+import { resolveCallerRole, canAccessSession } from '../contexts/identity/index.ts'
 
 const INIT_WAIT_MS = 30_000
 const SEGMENT_WAIT_MS = 60_000

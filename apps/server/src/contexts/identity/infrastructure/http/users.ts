@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import type { UserRepo } from '../repos/users.ts'
-import type { SessionRepo } from '../auth/session.ts'
-import { setSessionCookie } from '../auth/middleware.ts'
-import { sendNotFound, badRequest, errorReply, ErrorCodes } from './errors.ts'
+import type { UserRepo } from '../persistence/userRepo.ts'
+import type { SessionRepo } from '../persistence/sessionRepo.ts'
+import { setSessionCookie } from '../authMiddleware.ts'
+import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
 import { resolveCallerRole } from './authz.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
 

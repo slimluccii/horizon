@@ -4,10 +4,10 @@ import path from 'node:path'
 import type { Config } from '../config.ts'
 import type { MediaRepo } from '../repos/media.ts'
 import type { CollectionsRepo } from '../repos/collections.ts'
-import type { UserRepo } from '../repos/users.ts'
+import type { UserRepo } from '../contexts/identity/index.ts'
 import type { ScanWorkers } from '../server.ts'
 import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from './errors.ts'
-import { resolveCallerRole } from './authz.ts'
+import { resolveCallerRole } from '../contexts/identity/index.ts'
 import { streamActivity, sseFrame } from '../contexts/activity/index.ts'
 
 // Re-exported so existing importers (tests) keep working after the move.

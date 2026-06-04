@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createUserRepo, type UserRepo } from '../src/repos/users.ts'
+import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
+import { createUserRepo, type UserRepo } from './userRepo.ts'
 
 function freshRepo(): UserRepo {
   const db: DatabaseSync = openDatabase(':memory:')

@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createUserRepo, type UserRepo } from '../src/repos/users.ts'
-import { createSessionRepo, type SessionRepo } from '../src/auth/session.ts'
+import { openDatabase, type DatabaseSync } from '../../../db/index.ts'
+import { migrate } from '../../../db/migrations.ts'
+import { createUserRepo, type UserRepo } from './persistence/userRepo.ts'
+import { createSessionRepo, type SessionRepo } from './persistence/sessionRepo.ts'
 import {
   makeRequireAuth,
   isAllowlisted,
   tokenFromRequest,
   SESSION_COOKIE,
   AUTH_ALLOWLIST,
-} from '../src/auth/middleware.ts'
+} from './authMiddleware.ts'
 
 function buildApp(sessions: SessionRepo, users: UserRepo): FastifyInstance {
   const app = Fastify()

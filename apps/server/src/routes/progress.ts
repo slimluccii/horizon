@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import type { UserRepo } from '../repos/users.ts'
+import type { UserRepo } from '../contexts/identity/index.ts'
 import type { ProgressRepo } from '../repos/progress.ts'
 import { sendNotFound, badRequest, ErrorCodes } from './errors.ts'
-import { requireUser } from './authz.ts'
+import { requireUser } from '../contexts/identity/index.ts'
 
 const PatchBody = z.object({ watched: z.boolean() })
 
