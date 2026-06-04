@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
-import { tmdbImageUrl } from '@horizon/sdk'
-import type { MediaItem, ShowSummary, MovieMetadata } from '@horizon/sdk'
+import { tmdbImageUrl, mergeMoviesAndCollections } from '@horizon/sdk'
+import type { MediaItem, ShowSummary, MovieMetadata, CollectionSummary } from '@horizon/sdk'
 import LargeTopNav from '../components/chrome/LargeTopNav.tsx'
 import ContinueWatchingRail from '../components/ContinueWatchingRail.tsx'
 import LargePoster from '../components/LargePoster.tsx'
+import CollectionPoster from '../components/CollectionPoster.tsx'
 import Icon from '../components/chrome/Icon.tsx'
 import './Library.css'
 
-type Tab = 'movies' | 'shows' | 'collections'
+type Tab = 'movies' | 'shows'
 
 /** Pick a hero title for the top of the page — prefer something with a
  *  backdrop since the hero is a full-bleed image treatment. */
@@ -28,13 +29,14 @@ export default function Library() {
   const { user, userId } = useActiveUser()
   const canManage = user?.role === 'owner' || user?.role === 'admin'
 
-  const tabFromUrl = (params.get('tab') as Tab | null) ?? 'movies'
+  const raw = params.get('tab')
+  const tabFromUrl: Tab = raw === 'shows' ? 'shows' : 'movies'
   const [tab, setTab] = useState<Tab>(tabFromUrl)
   useEffect(() => { setTab(tabFromUrl) }, [tabFromUrl])
 
   const [movies, setMovies] = useState<MediaItem[]>([])
   const [shows, setShows] = useState<ShowSummary[]>([])
-  const [collections, setCollections] = useState<{ id: string; name: string; movies: MediaItem[] }[]>([])
+  const [collections, setCollections] = useState<CollectionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [noRoots, setNoRoots] = useState(false)
 
@@ -60,8 +62,14 @@ export default function Library() {
   const heroMeta = hero?.metadata?.kind === 'movie' ? (hero.metadata as MovieMetadata) : null
   const heroBackdrop = tmdbImageUrl(heroMeta?.backdropPath, 'w780')
 
-  const activeTab = tab === 'shows' ? 'Series' : tab === 'collections' ? 'Collections' : 'Movies'
-  const sizeByKind = tab === 'shows' ? `${shows.length} titles` : tab === 'collections' ? `${collections.length} sets` : `${movies.length} titles`
+  const collapse = user?.preferences.collapseMovieCollections ?? true
+  const movieGrid = useMemo(
+    () => mergeMoviesAndCollections(movies, collections, collapse),
+    [movies, collections, collapse],
+  )
+
+  const activeTab = tab === 'shows' ? 'Series' : 'Movies'
+  const sizeByKind = tab === 'shows' ? `${shows.length} titles` : `${movieGrid.length} items`
 
   return (
     <div className="lib">
@@ -111,22 +119,19 @@ export default function Library() {
         <div className="lib__section">
           <div className="lib__section-head">
             <h2 className="lib__section-title">
-              {tab === 'movies' ? 'Movies' : tab === 'shows' ? 'Series' : 'Collections'}
+              {tab === 'movies' ? 'Movies' : 'Series'}
             </h2>
             <div className="lib__section-sub">{sizeByKind} · last scan moments ago</div>
           </div>
 
           <div className="lib__tabs">
-            {(['movies', 'shows', 'collections'] as Tab[]).map(t => (
+            {(['movies', 'shows'] as Tab[]).map(t => (
               <button
                 key={t}
                 className={`lib__pill ${tab === t ? 'is-active' : ''}`}
-                onClick={() => {
-                  setTab(t)
-                  navigate(`/?tab=${t}`, { replace: true })
-                }}
+                onClick={() => { setTab(t); navigate(`/?tab=${t}`, { replace: true }) }}
               >
-                {t === 'movies' ? 'Movies' : t === 'shows' ? 'Series' : 'Collections'}
+                {t === 'movies' ? 'Movies' : 'Series'}
               </button>
             ))}
           </div>
@@ -135,8 +140,14 @@ export default function Library() {
 
           {!loading && tab === 'movies' && (
             <div className="lib__grid">
-              {movies.map(m => <LargePoster key={m.id} item={m} width={180} showMeta onClick={() => navigate(`/play/${m.id}`)} />)}
-              {movies.length === 0 && <div className="lib__empty">No movies found.</div>}
+              {movieGrid.map(entry =>
+                entry.kind === 'collection'
+                  ? <CollectionPoster key={`c-${entry.collection.id}`} collection={entry.collection} width={180}
+                      onClick={() => navigate(`/collection/${entry.collection.id}`)} />
+                  : <LargePoster key={entry.movie.id} item={entry.movie} width={180} showMeta
+                      onClick={() => navigate(`/play/${entry.movie.id}`)} />,
+              )}
+              {movieGrid.length === 0 && <div className="lib__empty">No movies found.</div>}
             </div>
           )}
 
@@ -144,22 +155,6 @@ export default function Library() {
             <div className="lib__grid">
               {shows.map(s => <LargePoster key={s.id} item={s} width={180} showMeta onClick={() => navigate(`/show/${s.id}`)} />)}
               {shows.length === 0 && <div className="lib__empty">No shows found.</div>}
-            </div>
-          )}
-
-          {!loading && tab === 'collections' && (
-            <div className="lib__collections">
-              {collections.map(col => (
-                <div key={col.id} className="lib__collection">
-                  <h3 className="lib__collection-title">{col.name}</h3>
-                  <div className="lib__grid">
-                    {col.movies.map(m => (
-                      <LargePoster key={m.id} item={m} width={170} showMeta onClick={() => navigate(`/play/${m.id}`)} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {collections.length === 0 && <div className="lib__empty">No collections detected.</div>}
             </div>
           )}
         </div>
