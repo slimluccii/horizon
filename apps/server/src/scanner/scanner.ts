@@ -8,7 +8,7 @@ import { pMap } from './concurrency.ts'
 import { walkVideoFiles } from './walker.ts'
 import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../repos/media.ts'
 import type { CollectionsRepo, Collection } from '../repos/collections.ts'
-import type { ActivityBus } from '../activity/bus.ts'
+import type { ActivityBus } from '../contexts/activity/index.ts'
 
 export interface ScanConfig {
   /** Library roots. Optional on the base config because they're now runtime-

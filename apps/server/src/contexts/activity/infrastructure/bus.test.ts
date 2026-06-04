@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createActivityBus } from '../src/activity/bus.ts'
+import { createActivityBus } from './bus.ts'
 
 describe('activity bus', () => {
   it('stamps monotonic seq + ts and buffers in order', () => {

@@ -17,7 +17,7 @@ import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
 import { createSessionManager } from './session/manager.ts'
 import { createPlaybackOrchestrator } from './session/playback.ts'
 import { buildServer } from './server.ts'
-import { createActivityBus } from './activity/bus.ts'
+import { createActivityBus } from './contexts/activity/index.ts'
 
 async function main() {
   const cfg = loadConfig()

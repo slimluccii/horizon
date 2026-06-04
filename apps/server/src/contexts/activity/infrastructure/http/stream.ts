@@ -1,4 +1,4 @@
-import type { ActivityBus } from '../activity/bus.ts'
+import type { ActivityBus } from '../bus.ts'
 import type { ActivityEvent } from '@horizon/sdk'
 
 /** Serialize one activity event as an SSE `data:` frame. */

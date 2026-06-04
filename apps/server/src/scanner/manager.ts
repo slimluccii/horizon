@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { runScan, fullScope, classifyPath, type ScanConfig, type ScanDeps, type ScanResult, type ScanScope } from './scanner.ts'
 import type { ScanHistoryRepo, ScanRootsRepo, ScanTrigger } from '../repos/scanState.ts'
-import type { ActivityBus } from '../activity/bus.ts'
+import type { ActivityBus } from '../contexts/activity/index.ts'
 
 export interface ScanManagerDeps extends ScanDeps {
   scanRoots: ScanRootsRepo

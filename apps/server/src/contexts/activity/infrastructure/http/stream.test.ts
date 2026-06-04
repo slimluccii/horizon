@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { streamActivity } from '../src/routes/activityStream.ts'
-import { createActivityBus } from '../src/activity/bus.ts'
+import { streamActivity } from './stream.ts'
+import { createActivityBus } from '../bus.ts'
 
 /** Fake req.raw — captures the 'close' handler so the test can fire it. */
 function fakeClose() {

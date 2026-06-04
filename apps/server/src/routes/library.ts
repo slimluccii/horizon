@@ -8,7 +8,7 @@ import type { UserRepo } from '../repos/users.ts'
 import type { ScanWorkers } from '../server.ts'
 import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
-import { streamActivity, sseFrame } from './activityStream.ts'
+import { streamActivity, sseFrame } from '../contexts/activity/index.ts'
 
 // Re-exported so existing importers (tests) keep working after the move.
 export { sseFrame }
