@@ -1,18 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
-import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createUserRepo } from '../src/repos/users.ts'
-import { createSessionRepo } from '../src/auth/session.ts'
-import { makeRequireAuth } from '../src/auth/middleware.ts'
-import { createServerSettings } from '../src/repos/serverSettings.ts'
-import { createSessionManager } from '../src/session/manager.ts'
-import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../src/metadata/refresh.ts'
-import { createChangesCursorRepo } from '../src/repos/scanState.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
-import { registerSettings } from '../src/routes/settings.ts'
-import type { ServerSettings } from '../src/repos/serverSettings.ts'
-import type { TmdbProvider } from '../src/metadata/tmdb.ts'
+import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
+import { createUserRepo } from '../../../../repos/users.ts'
+import { createSessionRepo } from '../../../../auth/session.ts'
+import { makeRequireAuth } from '../../../../auth/middleware.ts'
+import { createServerSettings } from '../persistence/serverSettings.ts'
+import { createSessionManager } from '../../../../session/manager.ts'
+import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../../../metadata/refresh.ts'
+import { createChangesCursorRepo } from '../../../../repos/scanState.ts'
+import { createMediaRepo } from '../../../../repos/media.ts'
+import { registerSettings } from './settings.ts'
+import type { ServerSettings } from '../persistence/serverSettings.ts'
+import type { TmdbProvider } from '../../../../metadata/tmdb.ts'
 
 function setup() {
   const db = openDatabase(':memory:')
@@ -36,7 +36,7 @@ async function buildApp(
   const app = Fastify({ logger: false })
   // registerSettings needs a cfg object; roots are no longer base-confined, none of the
   // tests in this file patch roots, so a placeholder base is sufficient.
-  const cfg = {} as unknown as import('../src/config.ts').Config
+  const cfg = {} as unknown as import('../../../../config.ts').Config
   app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   registerSettings(app, users, serverSettings, cfg)
   await app.ready()
@@ -297,7 +297,7 @@ describe('serverSettings — bootstrapFromEnv', () => {
       webDir: undefined,
       serveWeb: false,
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
-    } as import('../src/config.ts').Config)
+    } as import('../../../../config.ts').Config)
 
     const row = serverSettings.get()
     expect(row.watchedThresholdPct).toBe(80)
@@ -336,7 +336,7 @@ describe('serverSettings — bootstrapFromEnv', () => {
       webDir: undefined,
       serveWeb: false,
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
-    } as import('../src/config.ts').Config
+    } as import('../../../../config.ts').Config
 
     serverSettings.bootstrapFromEnv(cfg)
     // Now manually change the DB value

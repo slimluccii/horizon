@@ -2,11 +2,11 @@ import type { FastifyInstance } from 'fastify'
 import { statSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import type { UserRepo } from '../repos/users.ts'
-import type { ServerSettings } from '../repos/serverSettings.ts'
-import type { Config } from '../config.ts'
-import { badRequest, errorReply, ErrorCodes } from './errors.ts'
-import { resolveCallerRole } from './authz.ts'
+import type { UserRepo } from '../../../../repos/users.ts'
+import type { ServerSettings } from '../persistence/serverSettings.ts'
+import type { Config } from '../../../../config.ts'
+import { badRequest, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
+import { resolveCallerRole } from '../../../../routes/authz.ts'
 
 /**
  * Zod schema for the writable subset of ServerSettingsRow.

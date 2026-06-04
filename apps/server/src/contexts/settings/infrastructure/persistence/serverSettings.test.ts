@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
-import { openDatabase } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createServerSettings } from '../src/repos/serverSettings.ts'
-import { createProgressRepo } from '../src/repos/progress.ts'
-import { createUserRepo } from '../src/repos/users.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
-import type { Config } from '../src/config.ts'
+import { openDatabase } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
+import { createServerSettings } from './serverSettings.ts'
+import { createProgressRepo } from '../../../../repos/progress.ts'
+import { createUserRepo } from '../../../../repos/users.ts'
+import { createMediaRepo } from '../../../../repos/media.ts'
+import type { Config } from '../../../../config.ts'
 
 function freshDb() {
   const db = openDatabase(':memory:')

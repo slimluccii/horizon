@@ -3,13 +3,13 @@ import Fastify from 'fastify'
 import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createServerSettings } from '../src/repos/serverSettings.ts'
-import { createUserRepo } from '../src/repos/users.ts'
-import { createSessionRepo } from '../src/auth/session.ts'
-import { makeRequireAuth } from '../src/auth/middleware.ts'
-import { registerSettings } from '../src/routes/settings.ts'
+import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
+import { createServerSettings } from '../persistence/serverSettings.ts'
+import { createUserRepo } from '../../../../repos/users.ts'
+import { createSessionRepo } from '../../../../auth/session.ts'
+import { makeRequireAuth } from '../../../../auth/middleware.ts'
+import { registerSettings } from './settings.ts'
 
 /** A directory with two real subdirs (Films, Series). realpathSync defeats the
  *  macOS /var → /private/var symlink so it matches the endpoint's resolution. */
@@ -30,7 +30,7 @@ async function buildApp() {
   const owner = users.create({ name: 'Owner' }) // first user → owner
   const app = Fastify({ logger: false })
   // Roots are no longer base-confined; registerSettings only needs cfg to exist.
-  const cfg = {} as unknown as import('../src/config.ts').Config
+  const cfg = {} as unknown as import('../../../../config.ts').Config
   app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   registerSettings(app, users, serverSettings, cfg)
   await app.ready()

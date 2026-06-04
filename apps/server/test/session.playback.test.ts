@@ -11,7 +11,7 @@ import type { HwAccel } from '../src/transcode/hwaccel.ts'
 import type { MediaRepo, MediaItemRow } from '../src/repos/media.ts'
 import type { UserRepo } from '../src/repos/users.ts'
 import type { ClientCapabilities } from '../src/transcode/plan.ts'
-import type { ServerSettings, ServerSettingsRow } from '../src/repos/serverSettings.ts'
+import type { ServerSettings, ServerSettingsRow } from '../src/contexts/settings/index.ts'
 
 const browserCaps: ClientCapabilities = {
   videoCodecs: ['h264'],

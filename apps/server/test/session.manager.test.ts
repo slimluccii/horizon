@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { openDatabase } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
-import { createServerSettings } from '../src/repos/serverSettings.ts'
+import { createServerSettings } from '../src/contexts/settings/index.ts'
 import { createSessionManager } from '../src/session/manager.ts'
 import type { Session } from '../src/session/types.ts'
 

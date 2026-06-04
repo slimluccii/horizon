@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { ErrorCodes } from '@horizon/sdk'
 import type { Session } from './types.ts'
 import type { SessionRuntime } from './runtime.ts'
-import type { ServerSettings } from '../repos/serverSettings.ts'
+import type { ServerSettings } from '../contexts/settings/index.ts'
 import { cleanupSessionDir, killFfmpeg } from '../transcode/ffmpeg.ts'
 
 export interface SessionManager {

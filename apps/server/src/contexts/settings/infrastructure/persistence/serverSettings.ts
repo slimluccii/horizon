@@ -9,8 +9,8 @@
  * Change events let active knobs (Scheduler, Watcher) react without polling.
  */
 import { EventEmitter } from 'node:events'
-import type { DatabaseSync } from '../db/index.ts'
-import type { Config } from '../config.ts'
+import type { DatabaseSync } from '../../../../db/index.ts'
+import type { Config } from '../../../../config.ts'
 
 export interface ServerSettingsRow {
   // Library
