@@ -15,8 +15,7 @@
  * flag is set with NODE_ENV=production, so these routes can never reach prod.
  */
 import type { FastifyInstance } from 'fastify'
-import type { MediaRepo } from '../repos/media.ts'
-import type { CollectionsRepo } from '../repos/collections.ts'
+import type { MediaRepo, CollectionsRepo } from '../contexts/library/index.ts'
 import type { DatabaseSync } from '../db/index.ts'
 import { applyScenario, isScenarioName, SCENARIO_NAMES } from '../seed/scenarios.ts'
 import { badRequest, ErrorCodes } from './errors.ts'

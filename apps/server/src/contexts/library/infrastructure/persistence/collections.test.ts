@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
-import { createCollectionsRepo, type Collection } from '../src/repos/collections.ts'
+import { openDatabase } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
+import { createMediaRepo } from './media.ts'
+import { createCollectionsRepo, type Collection } from './collections.ts'
 
 function setup() {
   const db = openDatabase(':memory:')

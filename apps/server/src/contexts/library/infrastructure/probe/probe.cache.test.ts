@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { probe } from '../src/scanner/probe.ts'
+import { probe } from './probe.ts'
 
 // Mirror the private cacheKey() in probe.ts so the test can place a cache entry
 // at exactly the path probe() will read. If this drifts, the cache-hit test

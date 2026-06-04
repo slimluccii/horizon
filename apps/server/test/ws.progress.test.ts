@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { openDatabase } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
+import { createMediaRepo } from '../src/contexts/library/index.ts'
 import { createUserRepo } from '../src/contexts/identity/index.ts'
 import { createProgressRepo } from '../src/repos/progress.ts'
 import { createProgressFlusher } from '../src/ws/progress-flusher.ts'

@@ -1,14 +1,14 @@
 import type { FastifyInstance } from 'fastify'
 import { readdirSync } from 'node:fs'
 import path from 'node:path'
-import type { Config } from '../config.ts'
-import type { MediaRepo } from '../repos/media.ts'
-import type { CollectionsRepo } from '../repos/collections.ts'
-import type { UserRepo } from '../contexts/identity/index.ts'
-import type { ScanWorkers } from '../server.ts'
-import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from './errors.ts'
-import { resolveCallerRole } from '../contexts/identity/index.ts'
-import { streamActivity, sseFrame } from '../contexts/activity/index.ts'
+import type { Config } from '../../../../config.ts'
+import type { MediaRepo } from '../persistence/media.ts'
+import type { CollectionsRepo } from '../persistence/collections.ts'
+import type { UserRepo } from '../../../identity/index.ts'
+import type { ScanWorkers } from '../../../../server.ts'
+import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
+import { resolveCallerRole } from '../../../identity/index.ts'
+import { streamActivity, sseFrame } from '../../../activity/index.ts'
 
 // Re-exported so existing importers (tests) keep working after the move.
 export { sseFrame }

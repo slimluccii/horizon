@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
-import type { SubtitleTrack } from '../scanner/probe.ts'
+import type { SubtitleTrack } from '../contexts/library/index.ts'
 import type { Session } from '../session/types.ts'
 
 const EXTRACT_TIMEOUT_MS = 5 * 60_000 // hard cap to avoid hangs on broken streams

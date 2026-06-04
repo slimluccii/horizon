@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseIds, parseIdsFromPath, mergeIds } from '../src/scanner/ids.ts'
+import { parseIds, parseIdsFromPath, mergeIds } from './ids.ts'
 
 describe('parseIds', () => {
   it('returns empty when no tags', () => {

@@ -2,15 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openDatabase } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
-import { createCollectionsRepo } from '../src/repos/collections.ts'
-import { rescan, runScan, fullScope } from '../src/scanner/scanner.ts'
+import { openDatabase } from '../../../db/index.ts'
+import { migrate } from '../../../db/migrations.ts'
+import { createMediaRepo } from '../infrastructure/persistence/media.ts'
+import { createCollectionsRepo } from '../infrastructure/persistence/collections.ts'
+import { rescan, runScan, fullScope } from './runScan.ts'
 
 // Stub probe — scanner is generally backed by ffprobe. We inject a fake via
 // vi.spyOn so these tests don't need ffprobe on PATH.
-import * as probeMod from '../src/scanner/probe.ts'
+import * as probeMod from '../infrastructure/probe/probe.ts'
 
 function fakeProbe(_filePath: string) {
   return {

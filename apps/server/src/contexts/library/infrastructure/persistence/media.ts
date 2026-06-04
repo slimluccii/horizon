@@ -1,4 +1,4 @@
-import type { DatabaseSync } from '../db/index.ts'
+import type { DatabaseSync } from '../../../../db/index.ts'
 
 export interface HdrFlags { dv: boolean; hdr10: boolean; hdr10plus: boolean; dvProfile?: number }
 export interface ExternalIds { tmdb?: number; tvdb?: number; imdb?: string }

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
-import type { MediaItem } from '../repos/media.ts'
-import type { MovieMetadata } from '../contexts/metadata/index.ts'
+import type { MediaItem } from '../infrastructure/persistence/media.ts'
+import type { MovieMetadata } from '../../metadata/index.ts'
 
 export interface BuiltCollection {
   id: string

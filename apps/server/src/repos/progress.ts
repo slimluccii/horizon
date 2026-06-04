@@ -1,5 +1,5 @@
 import type { DatabaseSync } from '../db/index.ts'
-import type { MediaItem, MediaRepo } from './media.ts'
+import type { MediaItem, MediaRepo } from '../contexts/library/index.ts'
 
 export interface WatchProgress {
   mediaId: string

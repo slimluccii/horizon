@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildCollections } from '../src/scanner/collections.ts'
-import type { MediaItem } from '../src/repos/media.ts'
+import { buildCollections } from './collection.ts'
+import type { MediaItem } from '../infrastructure/persistence/media.ts'
 
 function movie(id: string, title: string, year: number, col?: { tmdbId: number; name: string; posterPath?: string; backdropPath?: string }): MediaItem {
   return {

@@ -4,7 +4,7 @@ import { migrate } from '../../../../db/migrations.ts'
 import { createServerSettings } from './serverSettings.ts'
 import { createProgressRepo } from '../../../../repos/progress.ts'
 import { createUserRepo } from '../../../identity/index.ts'
-import { createMediaRepo } from '../../../../repos/media.ts'
+import { createMediaRepo } from '../../../library/index.ts'
 import type { Config } from '../../../../config.ts'
 
 function freshDb() {

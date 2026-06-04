@@ -14,8 +14,7 @@
  *
  * All scenarios are deterministic — same input ⇒ same DB rows.
  */
-import type { MediaRepo } from '../repos/media.ts'
-import type { CollectionsRepo } from '../repos/collections.ts'
+import type { MediaRepo, CollectionsRepo } from '../contexts/library/index.ts'
 import type { MovieMetadata, ShowMetadata, EpisodeMetadata } from '../contexts/metadata/index.ts'
 
 export type ScenarioName = 'empty' | 'tiny' | 'default' | 'huge' | 'mixed-quality' | 'collections-heavy'

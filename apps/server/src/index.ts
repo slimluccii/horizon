@@ -2,15 +2,20 @@ import { loadConfig } from './config.ts'
 import { detectHwAccel } from './transcode/hwaccel.ts'
 import { openDatabase } from './db/index.ts'
 import { migrate } from './db/migrations.ts'
-import { createMediaRepo } from './repos/media.ts'
-import { createCollectionsRepo } from './repos/collections.ts'
 import { createUserRepo, createSessionRepo } from './contexts/identity/index.ts'
 import { createProgressRepo } from './repos/progress.ts'
 import { createServerSettings } from './contexts/settings/index.ts'
-import { createScanRootsRepo, createChangesCursorRepo, createScanHistoryRepo } from './repos/scanState.ts'
 import { createTmdbProvider, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from './contexts/metadata/index.ts'
-import { createScanManager } from './scanner/manager.ts'
-import { startWatcher, type WatcherHandle } from './scanner/watcher.ts'
+import {
+  createMediaRepo,
+  createCollectionsRepo,
+  createScanRootsRepo,
+  createChangesCursorRepo,
+  createScanHistoryRepo,
+  createScanManager,
+  startWatcher,
+  type WatcherHandle,
+} from './contexts/library/index.ts'
 import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
 import { createSessionManager } from './session/manager.ts'
 import { createPlaybackOrchestrator } from './session/playback.ts'

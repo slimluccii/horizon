@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { walkVideoFiles } from '../src/scanner/walker.ts'
+import { walkVideoFiles } from './walker.ts'
 
 describe('walkVideoFiles', () => {
   let dir: string

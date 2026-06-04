@@ -5,7 +5,7 @@ import { migrate } from '../src/db/migrations.ts'
 import { createUserRepo, type UserRepo } from '../src/contexts/identity/index.ts'
 import { createSessionRepo } from '../src/contexts/identity/index.ts'
 import { makeRequireAuth } from '../src/contexts/identity/index.ts'
-import { createMediaRepo, type MediaRepo } from '../src/repos/media.ts'
+import { createMediaRepo, type MediaRepo } from '../src/contexts/library/index.ts'
 import { createProgressRepo, type ProgressRepo } from '../src/repos/progress.ts'
 import { registerProgress } from '../src/routes/progress.ts'
 

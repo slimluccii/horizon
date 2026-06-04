@@ -1,6 +1,6 @@
 import { watch } from 'node:fs'
 import path from 'node:path'
-import type { ScanManager } from './manager.ts'
+import type { ScanManager } from '../../application/scanManager.ts'
 
 const VIDEO_EXT_RE = /\.(mkv|mp4|mov|avi|m4v)$/i
 

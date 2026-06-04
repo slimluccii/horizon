@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildPlan, planWithProfile, planWithAudioTrack, type ClientCapabilities } from '../src/transcode/plan.ts'
-import type { ProbeResult } from '../src/scanner/probe.ts'
+import type { ProbeResult } from '../src/contexts/library/index.ts'
 import type { HwAccel } from '../src/transcode/hwaccel.ts'
 
 const hwAccel: HwAccel = {

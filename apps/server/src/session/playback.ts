@@ -20,12 +20,11 @@
  */
 import type { Config } from '../config.ts'
 import type { HwAccel } from '../transcode/hwaccel.ts'
-import type { MediaRepo, MediaItemRow } from '../repos/media.ts'
+import type { MediaRepo, MediaItemRow, ProbeResult } from '../contexts/library/index.ts'
 import type { UserRepo } from '../contexts/identity/index.ts'
 import type { ServerSettings } from '../contexts/settings/index.ts'
 import type { SessionManager } from './manager.ts'
 import type { Session } from './types.ts'
-import type { ProbeResult } from '../scanner/probe.ts'
 import type { Profile } from '../transcode/profiles.ts'
 import type { PlaybackPlan, ClientCapabilities, PlaybackMethod } from '../transcode/plan.ts'
 import type { RenderContext } from '../transcode/render.ts'

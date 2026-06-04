@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Fastify from 'fastify'
 import { openDatabase } from '../src/db/index.ts'
 import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
-import { createCollectionsRepo } from '../src/repos/collections.ts'
+import { createMediaRepo, createCollectionsRepo } from '../src/contexts/library/index.ts'
 import { registerDev } from '../src/routes/dev.ts'
 
 async function buildApp() {

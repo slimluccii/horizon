@@ -16,7 +16,7 @@
  *
  * See CONTEXT.md → PlaybackPlan / TranscodePolicy.
  */
-import type { ProbeResult } from '../scanner/probe.ts'
+import type { ProbeResult } from '../contexts/library/index.ts'
 import type { HwAccel } from './hwaccel.ts'
 import type { ToneMapConfig } from './tonemap.ts'
 import {

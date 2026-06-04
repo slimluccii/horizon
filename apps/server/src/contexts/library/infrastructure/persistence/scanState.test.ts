@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
+import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
 import {
   createScanRootsRepo,
   createChangesCursorRepo,
   createScanHistoryRepo,
-} from '../src/repos/scanState.ts'
+} from './scanState.ts'
 
 let db: DatabaseSync
 

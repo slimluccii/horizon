@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { parseProbeOutput } from '../src/scanner/probe.ts'
+import { parseProbeOutput } from './probe.ts'
 
 const FAKE_PROBE_OUTPUT = JSON.stringify({
   streams: [

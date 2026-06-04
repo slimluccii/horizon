@@ -1,4 +1,4 @@
-import type { DatabaseSync } from '../db/index.ts'
+import type { DatabaseSync } from '../../../../db/index.ts'
 
 /** Per-root scan bookkeeping — feeds the dir-mtime gate. */
 export interface ScanRootRow {

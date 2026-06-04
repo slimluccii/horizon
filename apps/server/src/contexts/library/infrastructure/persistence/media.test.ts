@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase, type DatabaseSync } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo, type MediaRepo, type MediaItem, type MediaItemRow, type MovieUpsert, type ShowUpsert, type EpisodeUpsert } from '../src/repos/media.ts'
+import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
+import { migrate } from '../../../../db/migrations.ts'
+import { createMediaRepo, type MediaRepo, type MediaItem, type MediaItemRow, type MovieUpsert, type ShowUpsert, type EpisodeUpsert } from './media.ts'
 
 function freshRepo(): { db: DatabaseSync; repo: MediaRepo } {
   const db = openDatabase(':memory:')

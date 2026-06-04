@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { openDatabase } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
-import { createCollectionsRepo } from '../src/repos/collections.ts'
-import { createScanRootsRepo, createScanHistoryRepo } from '../src/repos/scanState.ts'
-import { createScanManager } from '../src/scanner/manager.ts'
-import { classifyPath, type ScanScope } from '../src/scanner/scanner.ts'
+import { openDatabase } from '../../../db/index.ts'
+import { migrate } from '../../../db/migrations.ts'
+import { createMediaRepo } from '../infrastructure/persistence/media.ts'
+import { createCollectionsRepo } from '../infrastructure/persistence/collections.ts'
+import { createScanRootsRepo, createScanHistoryRepo } from '../infrastructure/persistence/scanState.ts'
+import { createScanManager } from './scanManager.ts'
+import { classifyPath, type ScanScope } from './runScan.ts'
 
 const baseCfg = {
   moviesRoots: ['/nonexistent/movies'],

@@ -1,14 +1,14 @@
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { probe } from './probe.ts'
-import { buildCollections } from './collections.ts'
-import { parseIdsFromPath, parseIds, mergeIds } from './ids.ts'
+import { probe } from '../infrastructure/probe/probe.ts'
+import { buildCollections } from '../domain/collection.ts'
+import { parseIdsFromPath, parseIds, mergeIds } from '../domain/ids.ts'
 import { pMap } from './concurrency.ts'
-import { walkVideoFiles } from './walker.ts'
-import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../repos/media.ts'
-import type { CollectionsRepo, Collection } from '../repos/collections.ts'
-import type { ActivityBus } from '../contexts/activity/index.ts'
+import { walkVideoFiles } from '../infrastructure/fs/walker.ts'
+import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../infrastructure/persistence/media.ts'
+import type { CollectionsRepo, Collection } from '../infrastructure/persistence/collections.ts'
+import type { ActivityBus } from '../../activity/index.ts'
 
 export interface ScanConfig {
   /** Library roots. Optional on the base config because they're now runtime-
