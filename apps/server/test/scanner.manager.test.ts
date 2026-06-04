@@ -5,7 +5,7 @@ import { createMediaRepo } from '../src/repos/media.ts'
 import { createCollectionsRepo } from '../src/repos/collections.ts'
 import { createScanRootsRepo, createScanHistoryRepo } from '../src/repos/scanState.ts'
 import { createScanManager } from '../src/scanner/manager.ts'
-import type { ScanScope } from '../src/scanner/scanner.ts'
+import { classifyPath, type ScanScope } from '../src/scanner/scanner.ts'
 
 const baseCfg = {
   moviesRoots: ['/nonexistent/movies'],
@@ -86,6 +86,28 @@ describe('ScanManager', () => {
     expect(recent[0].trigger).toBe('cron')
     expect(recent[0].scope).toBe('full')
     expect(recent[0].finishedAt).not.toBeNull()
+  })
+
+  it('normalizes roots so a trailing-slash root still matches subtree scans', async () => {
+    const deps = setup()
+    const seenScopes: ScanScope[] = []
+    // Configure the shows root WITH a trailing slash. A subtree scan of
+    // '/media/tv/Show' should still classify as a shows path.
+    const mgr = createScanManager(baseCfg, {
+      ...deps,
+      getRoots: () => ({ movies: [], shows: ['/media/tv/'] }),
+      onScanFinished: (r) => { seenScopes.push(r.scope) },
+    })
+    await mgr.request({ trigger: 'watcher', paths: ['/media/tv/Show'] })
+    const scope = seenScopes.at(-1)
+    // Without normalization, '/media/tv/' never matches '/media/tv/Show' via
+    // startsWith('/media/tv//'), so the path is dropped and showsPaths is empty.
+    expect(scope?.showsPaths).toEqual(['/media/tv/Show'])
+
+    // Direct sanity check that classifyPath needs a normalized (no trailing
+    // slash) root to match a subtree path.
+    expect(classifyPath('/media/tv/Show', { showsRoots: ['/media/tv'], moviesRoots: [] }))
+      .toBe('shows')
   })
 
   it('updates scan_roots after a successful run', async () => {
