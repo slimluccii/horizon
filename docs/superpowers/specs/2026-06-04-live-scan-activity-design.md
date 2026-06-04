@@ -90,7 +90,7 @@ export type MetaStep =
 
 export type ActivityEvent =
   | { seq: number; ts: number; kind: 'scan:start'; trigger: string; scope: string; message: string }
-  | { seq: number; ts: number; kind: 'scan:progress'; processed: number; total: number; movies: number; shows: number; episodes: number; message: string }
+  | { seq: number; ts: number; kind: 'scan:progress'; processed: number; total: number; message: string }
   | { seq: number; ts: number; kind: 'scan:detected'; mediaKind: MediaKind; title: string; message: string }
   | { seq: number; ts: number; kind: 'scan:done'; movies: number; shows: number; added: number; removed: number; failed: number; durationMs: number; message: string }
   | { seq: number; ts: number; kind: 'meta:start'; message: string }
@@ -108,12 +108,13 @@ server keeps the raw log consistent and lets the client stay dumb.
 ### Emission points
 
 **Scanner** (`apps/server/src/scanner/scanner.ts`): `runScan` gains an optional
-`bus?: ActivityBus` (via `ScanDeps`). Track per-kind tallies as items are
-upserted:
-- On a newly upserted item (the `!existed` branches already present for movies,
-  shows, episodes): `bus.emit({ kind: 'scan:detected', mediaKind, title })`.
-- Maintain running `{ movies, shows, episodes }` counts; emit
-  `scan:progress` from the progress sink, **throttled to ≤5/sec** (see manager).
+`bus?: ActivityBus` (via `ScanDeps`), and `ScanResult` gains final
+`{ movies, shows, episodes }` counts.
+- Emit `scan:detected { mediaKind, title }` for every **movie** and **show**
+  seen this scan (not episodes — too many). The web reducer tallies these for
+  the live "Movies: X · Series: Y" headline; `scan:done` carries the
+  authoritative final totals as the backstop. Counts are therefore not carried
+  on `scan:progress` (which only drives the bar).
 
 **Scan manager** (`apps/server/src/scanner/manager.ts`): in `executeOne`:
 - Emit `scan:start` at the top (trigger + scope).
@@ -121,13 +122,14 @@ upserted:
   (the manager reads final counts from the `ScanResult`, which `runScan` extends
   to carry `{ movies, shows, episodes }`).
 
-**Ownership split:** `runScan` owns per-kind counts and emits `scan:detected`
-(per new item) and `scan:progress` (it alone knows the running tallies); the
-manager owns `scan:start` and `scan:done`. `scan:progress` is throttled inside
-`runScan` — emit only if ≥200ms since the last `scan:progress` (≤5/sec) — so a
-fast scan can't flood the stream. The existing `progress` sink
-(`tick`/`addTotal`) continues to mutate the `running` snapshot unchanged for the
-polled status; the new emission is additive.
+**Ownership split:** the scanner emits `scan:detected` (per movie/show seen).
+The manager emits `scan:start`, `scan:progress`, and `scan:done`: it already
+owns the `progress` sink (which knows processed/total), so it emits
+`scan:progress` from `tick` — **throttled to ≤5/sec** (emit only if ≥200ms since
+the last `scan:progress`) so a fast scan can't flood the stream — and
+`scan:done` from the `ScanResult` (which now carries final counts). The existing
+sink continues to mutate the polled `running` snapshot unchanged; the emission is
+additive.
 
 **Metadata worker** (`apps/server/src/metadata/refresh.ts`): `refreshOne` gains
 emission at each boundary. Worker gains an optional `bus` dep.
@@ -197,9 +199,10 @@ interface ActivityState {
 }
 ```
 
-  - `scan:start` → phase scanning, reset counts.
-  - `scan:progress` → counts + progress.
-  - `scan:done` → counts final, progress null.
+  - `scan:start` → phase scanning, reset counts to 0.
+  - `scan:detected` → increment `counts.movies`/`counts.shows` by `mediaKind`.
+  - `scan:progress` → progress (processed/total) only.
+  - `scan:done` → counts set to authoritative final totals, progress null.
   - `meta:start` → phase metadata.
   - `meta:item` → current = {step, …}; on `stored`/`failed` keep showing briefly.
   - `meta:done` → phase idle, current null.
