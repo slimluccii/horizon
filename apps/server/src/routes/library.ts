@@ -6,8 +6,14 @@ import type { MediaRepo } from '../repos/media.ts'
 import type { CollectionsRepo } from '../repos/collections.ts'
 import type { UserRepo } from '../repos/users.ts'
 import type { ScanWorkers } from '../server.ts'
+import type { ActivityEvent } from '@horizon/sdk'
 import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
+
+/** Serialize one activity event as an SSE `data:` frame. */
+export function sseFrame(evt: ActivityEvent): string {
+  return `data: ${JSON.stringify(evt)}\n\n`
+}
 
 export function registerLibrary(
   app: FastifyInstance,
@@ -207,5 +213,33 @@ export function registerLibrary(
       metadata: refresh,
       recentRuns: workers.scanHistory.recent(20),
     }
+  })
+
+  /**
+   * Server-Sent-Events stream of the live activity feed (owner/admin only).
+   * Replays the ring buffer, then streams live events; sends a comment ping
+   * every 15s to keep the connection alive through proxies.
+   */
+  app.get('/library/activity/stream', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
+    if (caller.role === 'member') {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can view activity')
+    }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    reply.hijack()
+
+    // Replay the ring buffer, then stream live.
+    for (const evt of workers.activityBus.recent()) reply.raw.write(sseFrame(evt))
+    const unsub = workers.activityBus.subscribe(evt => reply.raw.write(sseFrame(evt)))
+    const ping = setInterval(() => reply.raw.write(': ping\n\n'), 15_000)
+
+    req.raw.on('close', () => { clearInterval(ping); unsub() })
   })
 }

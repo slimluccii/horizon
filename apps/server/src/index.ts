@@ -17,6 +17,7 @@ import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
 import { createSessionManager } from './session/manager.ts'
 import { createPlaybackOrchestrator } from './session/playback.ts'
 import { buildServer } from './server.ts'
+import { createActivityBus } from './activity/bus.ts'
 
 async function main() {
   const cfg = loadConfig()
@@ -80,6 +81,7 @@ async function main() {
   // effect on the next run with no restart (CONTEXT.md → ServerSettings thunk
   // pattern). metadataMaxAge* is stored in days; convert to ms at this edge.
   const DAY_MS = 86_400_000
+  const activityBus = createActivityBus()
   const refreshWorker = createMetadataRefreshWorker(
     () => ({
       ...DEFAULT_REFRESH_CONFIG,
@@ -90,7 +92,7 @@ async function main() {
         episode: serverSettings.get().metadataMaxAgeEpDays * DAY_MS,
       },
     }),
-    { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo },
+    { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo, bus: activityBus },
   )
 
   // Library roots live in serverSettings now (runtime-settable), so the scanner
@@ -114,6 +116,7 @@ async function main() {
     // provider's concurrency cap + per-item backoff keep it well-behaved.
     onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false, drain: true }) },
     getRoots,
+    bus: activityBus,
   })
 
   const sessions = createSessionManager(serverSettings)
@@ -126,7 +129,7 @@ async function main() {
     hwAccel,
     { mediaRepo, collectionsRepo, userRepo, sessionRepo, progressRepo, serverSettings },
     sessions,
-    { scanManager, refreshWorker, scanHistory: scanHistoryRepo },
+    { scanManager, refreshWorker, scanHistory: scanHistoryRepo, activityBus },
     orchestrator,
     db,
   )

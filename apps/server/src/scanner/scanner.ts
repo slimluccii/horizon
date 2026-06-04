@@ -8,6 +8,7 @@ import { pMap } from './concurrency.ts'
 import { walkVideoFiles } from './walker.ts'
 import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../repos/media.ts'
 import type { CollectionsRepo, Collection } from '../repos/collections.ts'
+import type { ActivityBus } from '../activity/bus.ts'
 
 export interface ScanConfig {
   /** Library roots. Optional on the base config because they're now runtime-
@@ -23,6 +24,7 @@ export interface ScanConfig {
 export interface ScanDeps {
   media: MediaRepo
   collections: CollectionsRepo
+  bus?: ActivityBus
 }
 
 /** Live progress sink. `addTotal` is called once per scanned path after its
@@ -120,6 +122,7 @@ async function scanMoviesPath(
   cfg: ScanConfig,
   media: MediaRepo,
   progress: ScanProgressReporter,
+  bus?: ActivityBus,
 ): Promise<{ seen: Set<string>; added: number; failed: number }> {
   const seen = new Set<string>()
   let added = 0
@@ -161,6 +164,7 @@ async function scanMoviesPath(
     media.upsertMovie(upsert)
     seen.add(id)
     if (!existed) added++
+    bus?.emit({ kind: 'scan:detected', mediaKind: 'movie', title: m[1].trim(), message: `Detected movie "${m[1].trim()}"` })
     progress.tick()
   })
   return { seen, added, failed }
@@ -171,7 +175,8 @@ async function scanShowsPath(
   cfg: ScanConfig,
   media: MediaRepo,
   progress: ScanProgressReporter,
-): Promise<{ seen: Set<string>; added: number; failed: number }> {
+  bus?: ActivityBus,
+): Promise<{ seen: Set<string>; added: number; failed: number; shows: number; episodes: number }> {
   const seen = new Set<string>()
   let added = 0
   let failed = 0
@@ -213,6 +218,7 @@ async function scanShowsPath(
     })
     seen.add(showId)
     if (!existedShow) added++
+    bus?.emit({ kind: 'scan:detected', mediaKind: 'show', title: cleanTitle(showName), message: `Detected series "${cleanTitle(showName)}"` })
   }
 
   await pMap(epCands, cfg.scanConcurrency, async ({ file, base, em, showDir }) => {
@@ -249,7 +255,7 @@ async function scanShowsPath(
     progress.tick()
   })
 
-  return { seen, added, failed }
+  return { seen, added, failed, shows: showIdByDir.size, episodes: epCands.length }
 }
 
 export interface ScanResult {
@@ -259,6 +265,9 @@ export interface ScanResult {
   itemsRemoved: number
   itemsFailed: number
   durationMs: number
+  movies: number
+  shows: number
+  episodes: number
 }
 
 /**
@@ -278,18 +287,24 @@ export async function runScan(
   const seen = new Set<string>()
   let added = 0
   let failed = 0
+  let movieCount = 0
+  let showCount = 0
+  let episodeCount = 0
 
   for (const p of scope.moviesPaths) {
-    const r = await scanMoviesPath(p, cfg, deps.media, progress)
+    const r = await scanMoviesPath(p, cfg, deps.media, progress, deps.bus)
     for (const id of r.seen) seen.add(id)
     added += r.added
     failed += r.failed
+    movieCount += r.seen.size
   }
   for (const p of scope.showsPaths) {
-    const r = await scanShowsPath(p, cfg, deps.media, progress)
+    const r = await scanShowsPath(p, cfg, deps.media, progress, deps.bus)
     for (const id of r.seen) seen.add(id)
     added += r.added
     failed += r.failed
+    showCount += r.shows
+    episodeCount += r.episodes
   }
 
   let removed = 0
@@ -322,6 +337,9 @@ export async function runScan(
     itemsRemoved: removed,
     itemsFailed: failed,
     durationMs: Date.now() - t0,
+    movies: movieCount,
+    shows: showCount,
+    episodes: episodeCount,
   }
 }
 
