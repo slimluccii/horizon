@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { PlaybackSession } from '../src/session.ts'
-import type { SessionInfo } from '../src/types.ts'
+import { PlaybackSession } from './session.ts'
+import type { SessionInfo } from './session.ts'
 
 class FakeWebSocket {
   static OPEN = 1

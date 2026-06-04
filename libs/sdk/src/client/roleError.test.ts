@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isRoleChangedError, isProgressNotFoundError } from '../src/client.ts'
+import { isRoleChangedError, isProgressNotFoundError } from './client.ts'
 
 describe('isRoleChangedError', () => {
   it('returns true for an error with code caller-forbidden', () => {

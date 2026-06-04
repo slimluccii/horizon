@@ -1,10 +1,14 @@
-// sdk/src/client.ts
-import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, AuthSession, SetPasswordResult, PairStartResult, PairPollResult, ScanStatusResponse } from './types.ts'
-import type { Preferences } from './preferences.ts'
-import type { CollectionSummary } from './collections.ts'
-import { ErrorCodes } from './types.ts'
-import { detectCapabilities } from './capabilities.ts'
-import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
+// sdk/src/client/client.ts
+import type { SessionInfo } from '../playback/session.ts'
+import type { ClientCapabilities } from '../playback/capabilities.ts'
+import type { MediaItem, ShowSummary, SeasonSummary } from '../library/mediaItem.ts'
+import type { User, AuthSession, SetPasswordResult, PairStartResult, PairPollResult } from '../identity/user.ts'
+import type { WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, ScanStatusResponse } from '../shared/http.ts'
+import type { Preferences } from '../identity/preferences.ts'
+import type { CollectionSummary } from '../library/collections.ts'
+import { ErrorCodes } from '../shared/errors.ts'
+import { detectCapabilities } from '../playback/capabilities.ts'
+import { PlaybackSession, type PlaybackSessionOptions } from '../playback/session.ts'
 
 export interface HorizonClientOptions {
   baseUrl: string

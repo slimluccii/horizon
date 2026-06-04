@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseActivityFrame } from '../src/activity.ts'
+import { parseActivityFrame } from './activity.ts'
 
 describe('parseActivityFrame', () => {
   it('parses a valid event frame', () => {

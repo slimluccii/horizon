@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { mergeMoviesAndCollections } from '../src/collections.ts'
-import type { MediaItem } from '../src/types.ts'
-import type { CollectionSummary } from '../src/collections.ts'
+import { mergeMoviesAndCollections } from './collections.ts'
+import type { MediaItem } from './mediaItem.ts'
+import type { CollectionSummary } from './collections.ts'
 
 const mv = (id: string, title: string): MediaItem => ({ id, kind: 'movie', title } as unknown as MediaItem)
 const col = (id: string, name: string, movies: MediaItem[]): CollectionSummary =>

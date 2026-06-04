@@ -1,4 +1,4 @@
-import type { MediaItem } from './types.ts'
+import type { MediaItem } from './mediaItem.ts'
 
 export interface CollectionSummary {
   id: string

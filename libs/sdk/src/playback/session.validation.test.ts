@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { PlaybackSession, type PlaybackSessionOptions } from '../src/session.ts'
-import { parseServerMessage } from '../src/ws-messages.ts'
-import type { SessionInfo } from '../src/types.ts'
+import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
+import { parseServerMessage } from './ws-messages.ts'
+import type { SessionInfo } from './session.ts'
 
 // Minimal fake WebSocket the session constructor instantiates. Captures the
 // handler assignments so tests can drive onopen/onmessage directly.

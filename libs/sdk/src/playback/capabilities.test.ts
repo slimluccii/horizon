@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { detectCapabilities } from '../src/capabilities.ts'
+import { detectCapabilities } from './capabilities.ts'
 
 describe('detectCapabilities', () => {
   it('returns safe defaults when MediaSource unavailable (non-browser)', () => {

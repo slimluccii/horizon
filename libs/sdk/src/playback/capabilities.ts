@@ -1,4 +1,10 @@
-import type { ClientCapabilities } from './types.ts'
+export interface ClientCapabilities {
+  videoCodecs: string[]
+  audioCodecs: string[]
+  hdr: string[]
+  maxBitrate: number    // kbps; 0 = unlimited
+  container: string[]
+}
 
 const CODEC_TESTS: Array<{ codec: string; mimeType: string }> = [
   { codec: 'hevc', mimeType: 'video/mp4; codecs="hvc1.1.6.L150.90"' },

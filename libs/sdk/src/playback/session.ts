@@ -1,10 +1,47 @@
-// sdk/src/session.ts
-import type {
-  ClientCapabilities, PlaybackMethod, QualityProfile,
-  HorizonError, HorizonWarning, SessionInfo,
-} from './types.ts'
+// sdk/src/playback/session.ts
+import type { HorizonError, HorizonWarning } from '../shared/errors.ts'
+import type { ClientCapabilities } from './capabilities.ts'
 import { BandwidthSampler } from './bandwidth.ts'
 import { parseServerMessage } from './ws-messages.ts'
+
+export type PlaybackMethod = 'direct-play' | 'direct-stream' | 'partial-transcode' | 'transcode'
+
+export interface QualityProfile {
+  name?: string
+  videoBitrate: number
+  audioBitrate: number
+  width?: number
+  height?: number
+  videoCodec?: string   // not included in server Profile; optional for display only
+  audioCodec?: string
+}
+
+export interface SessionInfo {
+  sessionId: string
+  method: PlaybackMethod
+  streamUrl: string
+  wsUrl: string
+  profiles: QualityProfile[]
+  selectedAudioTrack: number
+  selectedSubtitleTrack: number | null
+}
+
+export interface AudioTrack {
+  index: number
+  codec: string
+  channels: number
+  language: string
+  title: string
+  default: boolean
+}
+
+export interface SubtitleTrack {
+  index: number
+  codec: string
+  language: string
+  forced: boolean
+  embeddable: boolean
+}
 
 export type SessionState = 'attaching' | 'active' | 'detached' | 'destroyed'
 

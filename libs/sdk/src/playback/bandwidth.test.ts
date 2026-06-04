@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { BandwidthSampler } from '../src/bandwidth.ts'
+import { BandwidthSampler } from './bandwidth.ts'
 
 describe('BandwidthSampler.record', () => {
   it('computes 10000 kbps for 125KB in 100ms', () => {

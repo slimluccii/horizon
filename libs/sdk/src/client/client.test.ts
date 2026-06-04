@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { HorizonClient, isProgressNotFoundError } from '../src/client.ts'
+import { HorizonClient, isProgressNotFoundError } from './client.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { activityReducer, initialActivityState } from '../src/activityReducer.ts'
-import type { ActivityEvent } from '../src/activity.ts'
+import { activityReducer, initialActivityState } from './activityReducer.ts'
+import type { ActivityEvent } from './activity.ts'
 
 const ev = (e: Partial<ActivityEvent>): ActivityEvent => ({ seq: 0, ts: 0, message: 'm', ...(e as any) })
 
