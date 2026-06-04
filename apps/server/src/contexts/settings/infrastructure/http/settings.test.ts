@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
-import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
-import { migrate } from '../../../../db/migrations.ts'
+import { openDatabase, type DatabaseSync } from '../../../../platform/db/connection.ts'
+import { migrate } from '../../../../platform/db/migrations.ts'
 import { createUserRepo } from '../../../identity/index.ts'
 import { createSessionRepo } from '../../../identity/index.ts'
 import { makeRequireAuth } from '../../../identity/index.ts'
@@ -35,7 +35,7 @@ async function buildApp(
   const app = Fastify({ logger: false })
   // registerSettings needs a cfg object; roots are no longer base-confined, none of the
   // tests in this file patch roots, so a placeholder base is sufficient.
-  const cfg = {} as unknown as import('../../../../config.ts').Config
+  const cfg = {} as unknown as import('../../../../platform/config/config.ts').Config
   app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   registerSettings(app, users, serverSettings, cfg)
   await app.ready()
@@ -296,7 +296,7 @@ describe('serverSettings — bootstrapFromEnv', () => {
       webDir: undefined,
       serveWeb: false,
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
-    } as import('../../../../config.ts').Config)
+    } as import('../../../../platform/config/config.ts').Config)
 
     const row = serverSettings.get()
     expect(row.watchedThresholdPct).toBe(80)
@@ -335,7 +335,7 @@ describe('serverSettings — bootstrapFromEnv', () => {
       webDir: undefined,
       serveWeb: false,
       toneMap: { operator: 'hable', param: undefined, desat: undefined, peak: undefined, postCorrection: true },
-    } as import('../../../../config.ts').Config
+    } as import('../../../../platform/config/config.ts').Config
 
     serverSettings.bootstrapFromEnv(cfg)
     // Now manually change the DB value

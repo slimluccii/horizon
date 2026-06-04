@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
 import { setSessionCookie } from '../authMiddleware.ts'
-import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
+import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole } from './authz.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
 

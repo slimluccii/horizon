@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nextDailyFireAt } from '../src/scheduler.ts'
+import { nextDailyFireAt } from './scheduler.ts'
 
 describe('nextDailyFireAt', () => {
   it('returns today at the target hour when from is earlier', () => {

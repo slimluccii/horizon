@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
-import { migrate } from '../../../../db/migrations.ts'
+import { openDatabase, type DatabaseSync } from '../../../../platform/db/connection.ts'
+import { migrate } from '../../../../platform/db/migrations.ts'
 import { createMediaRepo, type MediaRepo, type MediaItem, type MediaItemRow, type MovieUpsert, type ShowUpsert, type EpisodeUpsert } from './media.ts'
 
 function freshRepo(): { db: DatabaseSync; repo: MediaRepo } {

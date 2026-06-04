@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../../../identity/index.ts'
 import type { ProgressRepo } from '../persistence/progress.ts'
-import { sendNotFound, badRequest, ErrorCodes } from '../../../../routes/errors.ts'
+import { sendNotFound, badRequest, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { requireUser } from '../../../identity/index.ts'
 
 const PatchBody = z.object({ watched: z.boolean() })

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
-import { migrate } from '../../../../db/migrations.ts'
+import { openDatabase, type DatabaseSync } from '../../../../platform/db/connection.ts'
+import { migrate } from '../../../../platform/db/migrations.ts'
 import { createSessionRepo, type SessionRepo } from './sessionRepo.ts'
 
 function seedUser(db: DatabaseSync, id: string): void {

@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import Fastify from 'fastify'
-import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
-import { migrate } from '../../../../db/migrations.ts'
+import { openDatabase, type DatabaseSync } from '../../../../platform/db/connection.ts'
+import { migrate } from '../../../../platform/db/migrations.ts'
 import { createUserRepo } from '../../../identity/index.ts'
 import { createSessionRepo } from '../../../identity/index.ts'
 import { makeRequireAuth } from '../../../identity/index.ts'
 import { createMediaRepo } from '../persistence/media.ts'
 import { createCollectionsRepo } from '../persistence/collections.ts'
 import { registerLibrary } from './library.ts'
-import type { ScanWorkers } from '../../../../server.ts'
-import type { Config } from '../../../../config.ts'
+import type { ScanWorkers } from '../../../../platform/http/server.ts'
+import type { Config } from '../../../../platform/config/config.ts'
 
 /**
  * Authorization tests for the /library/* routes (issues #32, #39, #45, #46).

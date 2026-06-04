@@ -6,7 +6,7 @@ import {
 } from './playback.ts'
 import { createSessionManager, type SessionManager } from './manager.ts'
 import { TranscodeError } from '../domain/errors.ts'
-import type { Config } from '../../../config.ts'
+import type { Config } from '../../../platform/config/config.ts'
 import type { HwAccel } from '../domain/hwaccel.ts'
 import type { MediaRepo, MediaItemRow } from '../../library/index.ts'
 import type { UserRepo } from '../../identity/index.ts'

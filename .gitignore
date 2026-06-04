@@ -9,6 +9,11 @@ media/
 .env
 .env.local
 
+# Stale TypeScript build artifacts (tsc emit; we run via tsx/ts-node, noEmit)
+**/*.test.d.ts
+**/*.test.d.ts.map
+**/*.test.js.map
+
 # Swift build artifacts (location-independent — apps/macos/ today)
 **/.build/
 **/.swiftpm/

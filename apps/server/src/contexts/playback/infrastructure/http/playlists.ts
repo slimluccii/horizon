@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { SessionManager } from '../../application/manager.ts'
 import type { UserRepo } from '../../../identity/index.ts'
 import { buildRenditionPlaylist, buildMasterPlaylist } from '../../domain/playlist.ts'
-import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
+import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { requireReconnectToken } from './segments.ts'
 import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
 

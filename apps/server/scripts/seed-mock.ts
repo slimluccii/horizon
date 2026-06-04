@@ -9,12 +9,11 @@
  *
  * The image proxy renders mock posters via picsum.photos (no TMDB token needed).
  */
-import { loadConfig } from '../src/config.ts'
-import { openDatabase } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
-import { createMediaRepo } from '../src/repos/media.ts'
-import { createCollectionsRepo } from '../src/repos/collections.ts'
-import { applyScenario, isScenarioName, SCENARIO_NAMES, type ScenarioName } from '../src/seed/scenarios.ts'
+import { loadConfig } from '../src/platform/config/config.ts'
+import { openDatabase } from '../src/platform/db/connection.ts'
+import { migrate } from '../src/platform/db/migrations.ts'
+import { createMediaRepo, createCollectionsRepo } from '../src/contexts/library/index.ts'
+import { applyScenario, isScenarioName, SCENARIO_NAMES, type ScenarioName } from '../src/platform/seed/scenarios.ts'
 
 function parseScenario(): ScenarioName {
   for (const arg of process.argv.slice(2)) {

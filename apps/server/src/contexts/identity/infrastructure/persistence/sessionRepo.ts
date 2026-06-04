@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import type { DatabaseSync } from '../../../../db/index.ts'
+import type { DatabaseSync } from '../../../../platform/db/connection.ts'
 
 /** A server-side session row, in domain shape (token_hash never exposed). */
 export interface Session {

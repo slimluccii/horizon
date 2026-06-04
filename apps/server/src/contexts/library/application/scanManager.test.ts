@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { openDatabase } from '../../../db/index.ts'
-import { migrate } from '../../../db/migrations.ts'
+import { openDatabase } from '../../../platform/db/connection.ts'
+import { migrate } from '../../../platform/db/migrations.ts'
 import { createMediaRepo } from '../infrastructure/persistence/media.ts'
 import { createCollectionsRepo } from '../infrastructure/persistence/collections.ts'
 import { createScanRootsRepo, createScanHistoryRepo } from '../infrastructure/persistence/scanState.ts'

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { openDatabase } from '../src/db/index.ts'
-import { migrate } from '../src/db/migrations.ts'
+import { openDatabase } from './connection.ts'
+import { migrate } from './migrations.ts'
 
 // The schema is a single flattened baseline (v1) — this version is unreleased,
 // so there are no deployed DBs to migrate. These tests assert the final schema

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { openDatabase, type DatabaseSync } from '../../../db/index.ts'
-import { migrate } from '../../../db/migrations.ts'
+import { openDatabase, type DatabaseSync } from '../../../platform/db/connection.ts'
+import { migrate } from '../../../platform/db/migrations.ts'
 import { createMediaRepo, type MediaRepo, createChangesCursorRepo } from '../../library/index.ts'
 import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from './refresh.ts'
 import type { TmdbProvider } from '../infrastructure/tmdb/tmdb.ts'

@@ -18,7 +18,7 @@
  *
  * See CONTEXT.md → PlaybackOrchestrator / Spawner / ProbeView.
  */
-import type { Config } from '../../../config.ts'
+import type { Config } from '../../../platform/config/config.ts'
 import type { HwAccel } from '../domain/hwaccel.ts'
 import type { MediaRepo, MediaItemRow, ProbeResult } from '../../library/index.ts'
 import type { UserRepo } from '../../identity/index.ts'

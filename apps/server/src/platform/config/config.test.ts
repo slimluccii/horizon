@@ -13,7 +13,7 @@ describe('config', () => {
   })
 
   it('returns defaults when env vars not set', async () => {
-    const { loadConfig } = await import('../src/config.ts')
+    const { loadConfig } = await import('./config.ts')
     const cfg = loadConfig()
     expect(cfg.port).toBe(7777)
     expect(cfg.maxSessions).toBe(4)
@@ -25,7 +25,7 @@ describe('config', () => {
   it('parses env vars', async () => {
     process.env.HORIZON_PORT = '8888'
     process.env.HORIZON_MAX_SESSIONS = '2'
-    const { loadConfig } = await import('../src/config.ts')
+    const { loadConfig } = await import('./config.ts')
     const cfg = loadConfig()
     expect(cfg.port).toBe(8888)
     expect(cfg.maxSessions).toBe(2)
@@ -36,7 +36,7 @@ describe('loadConfig — database', () => {
   it('defaults dbPath to <cacheDir>/horizon.db and threshold to 90', () => {
     delete process.env.HORIZON_DB_PATH
     delete process.env.HORIZON_WATCHED_THRESHOLD_PCT
-    const { loadConfig } = require('../src/config.ts')
+    const { loadConfig } = require('./config.ts')
     const cfg = loadConfig()
     expect(cfg.dbPath.endsWith('/horizon.db')).toBe(true)
     expect(cfg.watchedThresholdPct).toBe(90)
@@ -45,7 +45,7 @@ describe('loadConfig — database', () => {
   it('respects overrides', () => {
     process.env.HORIZON_DB_PATH = '/tmp/custom.db'
     process.env.HORIZON_WATCHED_THRESHOLD_PCT = '75'
-    const { loadConfig } = require('../src/config.ts')
+    const { loadConfig } = require('./config.ts')
     const cfg = loadConfig()
     expect(cfg.dbPath).toBe('/tmp/custom.db')
     expect(cfg.watchedThresholdPct).toBe(75)

@@ -8,7 +8,7 @@ import type { SessionManager } from '../../application/manager.ts'
 import type { MediaRepo } from '../../../library/index.ts'
 import type { UserRepo } from '../../../identity/index.ts'
 import { waitForSegment, waitForInit } from '../ffmpeg/ffmpeg.ts'
-import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
+import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
 
 const INIT_WAIT_MS = 30_000

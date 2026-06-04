@@ -1,4 +1,4 @@
-import type { DatabaseSync } from '../../../../db/index.ts'
+import type { DatabaseSync } from '../../../../platform/db/connection.ts'
 import type { MediaItem, MediaRepo } from '../../../library/index.ts'
 
 export interface WatchProgress {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { UserRowSchema, MediaItemRowSchema, WatchProgressRowSchema } from '../src/db/rowSchemas.ts'
+import { UserRowSchema, MediaItemRowSchema, WatchProgressRowSchema } from './rowSchemas.ts'
 
 describe('UserRowSchema', () => {
   it('parses a valid row', () => {

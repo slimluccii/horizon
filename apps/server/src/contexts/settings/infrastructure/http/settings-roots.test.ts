@@ -3,8 +3,8 @@ import Fastify from 'fastify'
 import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { openDatabase, type DatabaseSync } from '../../../../db/index.ts'
-import { migrate } from '../../../../db/migrations.ts'
+import { openDatabase, type DatabaseSync } from '../../../../platform/db/connection.ts'
+import { migrate } from '../../../../platform/db/migrations.ts'
 import { createServerSettings } from '../persistence/serverSettings.ts'
 import { createUserRepo } from '../../../identity/index.ts'
 import { createSessionRepo } from '../../../identity/index.ts'
@@ -30,7 +30,7 @@ async function buildApp() {
   const owner = users.create({ name: 'Owner' }) // first user → owner
   const app = Fastify({ logger: false })
   // Roots are no longer base-confined; registerSettings only needs cfg to exist.
-  const cfg = {} as unknown as import('../../../../config.ts').Config
+  const cfg = {} as unknown as import('../../../../platform/config/config.ts').Config
   app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
   registerSettings(app, users, serverSettings, cfg)
   await app.ready()

@@ -1,11 +1,11 @@
-import { loadConfig } from './config.ts'
-import { detectHwAccel } from './contexts/playback/index.ts'
-import { openDatabase } from './db/index.ts'
-import { migrate } from './db/migrations.ts'
-import { createUserRepo, createSessionRepo } from './contexts/identity/index.ts'
-import { createProgressRepo } from './contexts/playback/index.ts'
-import { createServerSettings } from './contexts/settings/index.ts'
-import { createTmdbProvider, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from './contexts/metadata/index.ts'
+import { loadConfig } from '../config/config.ts'
+import { detectHwAccel } from '../../contexts/playback/index.ts'
+import { openDatabase } from '../db/connection.ts'
+import { migrate } from '../db/migrations.ts'
+import { createUserRepo, createSessionRepo } from '../../contexts/identity/index.ts'
+import { createProgressRepo } from '../../contexts/playback/index.ts'
+import { createServerSettings } from '../../contexts/settings/index.ts'
+import { createTmdbProvider, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../contexts/metadata/index.ts'
 import {
   createMediaRepo,
   createCollectionsRepo,
@@ -15,14 +15,19 @@ import {
   createScanManager,
   startWatcher,
   type WatcherHandle,
-} from './contexts/library/index.ts'
-import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
-import { createSessionManager } from './contexts/playback/index.ts'
-import { createPlaybackOrchestrator } from './contexts/playback/index.ts'
-import { buildServer } from './server.ts'
-import { createActivityBus } from './contexts/activity/index.ts'
+} from '../../contexts/library/index.ts'
+import { startDailySchedule, type DailyScheduleHandle } from '../scheduler/scheduler.ts'
+import { createSessionManager } from '../../contexts/playback/index.ts'
+import { createPlaybackOrchestrator } from '../../contexts/playback/index.ts'
+import { buildServer } from '../http/server.ts'
+import { createActivityBus } from '../../contexts/activity/index.ts'
 
-async function main() {
+/**
+ * Composition root: builds repos + workers and wires every context's
+ * infrastructure into application services, then starts the HTTP server.
+ * Invoked by main.ts (the thin process entrypoint).
+ */
+export async function bootstrap() {
   const cfg = loadConfig()
 
   // Hard fail-fast: the dev-seed routes are destructive and unauthenticated.
@@ -260,5 +265,3 @@ async function main() {
     }
   })
 }
-
-main().catch((err) => { console.error(err); process.exit(1) })

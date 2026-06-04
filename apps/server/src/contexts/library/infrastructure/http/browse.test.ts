@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { registerLibrary } from './library.ts'
 import { makeRequireAuth } from '../../../identity/index.ts'
-import type { Config } from '../../../../config.ts'
+import type { Config } from '../../../../platform/config/config.ts'
 import type { MediaRepo } from '../persistence/media.ts'
 import type { CollectionsRepo } from '../persistence/collections.ts'
 import type { UserRepo } from '../../../identity/index.ts'
 import type { SessionRepo } from '../../../identity/index.ts'
-import type { ScanWorkers } from '../../../../server.ts'
+import type { ScanWorkers } from '../../../../platform/http/server.ts'
 
 // Minimal fakes — the browse endpoint only touches the user repo (for the role
 // gate); the media/collections/workers/cfg args are unused by it now (the

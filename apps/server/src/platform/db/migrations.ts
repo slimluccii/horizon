@@ -1,4 +1,4 @@
-import type { DatabaseSync } from './index.ts'
+import type { DatabaseSync } from './connection.ts'
 
 interface Migration { version: number; sql: string }
 

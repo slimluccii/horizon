@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { openDatabase } from '../src/db/index.ts'
+import { openDatabase } from './connection.ts'
 
 describe('openDatabase', () => {
   it('opens an in-memory DB with foreign_keys + WAL configured', () => {

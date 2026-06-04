@@ -3,7 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { registerWeb } from '../src/routes/web.ts'
+import { registerWeb } from './web.ts'
 
 function makeWebDir(): string {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'horizon-web-'))

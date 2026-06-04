@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { handleWsMessage } from './handler.ts'
 import type { Session } from '../../domain/types.ts'
 import type { SessionManager } from '../../application/manager.ts'
-import type { Config } from '../../../../config.ts'
+import type { Config } from '../../../../platform/config/config.ts'
 import type { HwAccel } from '../../domain/hwaccel.ts'
 
 /** Captures frames written to the session's WS socket. */

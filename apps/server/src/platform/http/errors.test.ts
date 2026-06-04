@@ -6,7 +6,7 @@ import { ErrorCodes } from '@horizon/sdk'
 import type { ServerErrorCode } from '@horizon/sdk'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SRC_DIR = path.resolve(__dirname, '../src')
+const SRC_DIR = path.resolve(__dirname, '../../..')
 
 /**
  * Every error code the server is allowed to emit. This is the human-maintained

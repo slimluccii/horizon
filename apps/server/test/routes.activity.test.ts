@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { registerLibrary, sseFrame, type MediaRepo, type CollectionsRepo } from '../src/contexts/library/index.ts'
 import { makeRequireAuth } from '../src/contexts/identity/index.ts'
-import type { Config } from '../src/config.ts'
+import type { Config } from '../src/platform/config/config.ts'
 import type { UserRepo } from '../src/contexts/identity/index.ts'
 import type { SessionRepo } from '../src/contexts/identity/index.ts'
-import type { ScanWorkers } from '../src/server.ts'
+import type { ScanWorkers } from '../src/platform/http/server.ts'
 
 type Role = 'owner' | 'admin' | 'member'
 

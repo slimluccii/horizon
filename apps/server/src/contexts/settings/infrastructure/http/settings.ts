@@ -4,8 +4,8 @@ import path from 'node:path'
 import { z } from 'zod'
 import type { UserRepo } from '../../../identity/index.ts'
 import type { ServerSettings } from '../persistence/serverSettings.ts'
-import type { Config } from '../../../../config.ts'
-import { badRequest, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
+import type { Config } from '../../../../platform/config/config.ts'
+import { badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole } from '../../../identity/index.ts'
 
 /**

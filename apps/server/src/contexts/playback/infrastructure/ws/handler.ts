@@ -1,6 +1,6 @@
 import type { Session } from '../../domain/types.ts'
 import type { SessionManager } from '../../application/manager.ts'
-import type { Config } from '../../../../config.ts'
+import type { Config } from '../../../../platform/config/config.ts'
 import type { HwAccel } from '../../domain/hwaccel.ts'
 import type { Profile } from '../../domain/profiles.ts'
 import type { SessionRuntime, TransitionResult } from '../../application/runtime.ts'

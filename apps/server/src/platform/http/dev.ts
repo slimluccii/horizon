@@ -15,11 +15,11 @@
  * flag is set with NODE_ENV=production, so these routes can never reach prod.
  */
 import type { FastifyInstance } from 'fastify'
-import type { MediaRepo, CollectionsRepo } from '../contexts/library/index.ts'
-import type { DatabaseSync } from '../db/index.ts'
+import type { MediaRepo, CollectionsRepo } from '../../contexts/library/index.ts'
+import type { DatabaseSync } from '../db/connection.ts'
 import { applyScenario, isScenarioName, SCENARIO_NAMES } from '../seed/scenarios.ts'
 import { badRequest, ErrorCodes } from './errors.ts'
-import { IpRateLimiter, rateLimit } from './rate-limit.ts'
+import { IpRateLimiter, rateLimit } from './rateLimit.ts'
 
 const SEED_WINDOW_MS = 5 * 60 * 1000
 // Strict by default (blunt abuse if a DEV_SEED deployment leaks). E2E runs many

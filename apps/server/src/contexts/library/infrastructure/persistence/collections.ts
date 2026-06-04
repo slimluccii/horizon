@@ -1,4 +1,4 @@
-import type { DatabaseSync } from '../../../../db/index.ts'
+import type { DatabaseSync } from '../../../../platform/db/connection.ts'
 
 export interface Collection {
   id: string

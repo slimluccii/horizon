@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
-import { openDatabase } from '../../../../db/index.ts'
-import { migrate } from '../../../../db/migrations.ts'
+import { openDatabase } from '../../../../platform/db/connection.ts'
+import { migrate } from '../../../../platform/db/migrations.ts'
 import { createServerSettings } from './serverSettings.ts'
 import { createProgressRepo } from '../../../playback/index.ts'
 import { createUserRepo } from '../../../identity/index.ts'
 import { createMediaRepo } from '../../../library/index.ts'
-import type { Config } from '../../../../config.ts'
+import type { Config } from '../../../../platform/config/config.ts'
 
 function freshDb() {
   const db = openDatabase(':memory:')

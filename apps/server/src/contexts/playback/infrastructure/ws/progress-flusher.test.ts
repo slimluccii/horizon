@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { openDatabase } from '../../../../db/index.ts'
-import { migrate } from '../../../../db/migrations.ts'
+import { openDatabase } from '../../../../platform/db/connection.ts'
+import { migrate } from '../../../../platform/db/migrations.ts'
 import { createMediaRepo } from '../../../library/index.ts'
 import { createUserRepo } from '../../../identity/index.ts'
 import { createProgressRepo } from '../persistence/progress.ts'

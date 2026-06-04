@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { handleWsMessage, isWsAuthenticated, resetWsAuth } from './handler.ts'
 import type { Session } from '../../domain/types.ts'
 import type { SessionManager } from '../../application/manager.ts'
-import type { Config } from '../../../../config.ts'
+import type { Config } from '../../../../platform/config/config.ts'
 import type { HwAccel } from '../../domain/hwaccel.ts'
 
 /** Minimal Session double with a recording WS socket. */

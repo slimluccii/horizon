@@ -6,8 +6,8 @@ import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
 import { SESSION_COOKIE, tokenFromRequest, setSessionCookie } from '../authMiddleware.ts'
 import { hash as hashPassword, verify as verifyPassword } from '../password.ts'
-import { badRequest, errorReply, ErrorCodes } from '../../../../routes/errors.ts'
-import { IpRateLimiter } from '../../../../routes/rate-limit.ts'
+import { badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
+import { IpRateLimiter } from '../../../../platform/http/rateLimit.ts'
 
 /**
  * Built-in authentication routes: login/logout/me, self-service + admin
