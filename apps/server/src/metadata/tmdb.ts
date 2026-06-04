@@ -252,6 +252,12 @@ interface TmdbMovie {
   poster_path?: string | null
   backdrop_path?: string | null
   credits?: TmdbCredits
+  belongs_to_collection?: {
+    id: number
+    name: string
+    poster_path?: string | null
+    backdrop_path?: string | null
+  } | null
 }
 
 interface TmdbShow {
@@ -304,6 +310,10 @@ function mapMovie(m: TmdbMovie): MovieMetadata {
   const directors = (m.credits?.crew ?? [])
     .filter(c => c.job === 'Director')
     .map(mapCrew)
+  const bc = m.belongs_to_collection
+  const collection = bc
+    ? { tmdbId: bc.id, name: bc.name, posterPath: bc.poster_path ?? null, backdropPath: bc.backdrop_path ?? null }
+    : undefined
   return {
     kind: 'movie',
     tmdbId: m.id,
@@ -321,6 +331,7 @@ function mapMovie(m: TmdbMovie): MovieMetadata {
     backdropPath: m.backdrop_path,
     cast,
     directors,
+    collection,
   }
 }
 

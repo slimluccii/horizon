@@ -143,6 +143,12 @@ export interface MovieMetadata {
   backdropPath?: string | null
   cast?: Person[]
   directors?: Person[]
+  collection?: {
+    tmdbId: number
+    name: string
+    posterPath?: string | null
+    backdropPath?: string | null
+  }
 }
 
 export interface ShowMetadataInfo {
