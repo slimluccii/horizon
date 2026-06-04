@@ -1,10 +1,13 @@
 import path from 'node:path'
 import { runScan, fullScope, classifyPath, type ScanConfig, type ScanDeps, type ScanResult, type ScanScope } from './scanner.ts'
 import type { ScanHistoryRepo, ScanRootsRepo, ScanTrigger } from '../repos/scanState.ts'
+import type { ActivityBus } from '../activity/bus.ts'
 
 export interface ScanManagerDeps extends ScanDeps {
   scanRoots: ScanRootsRepo
   scanHistory: ScanHistoryRepo
+  /** Optional activity bus for live scan/metadata events. */
+  bus?: ActivityBus
   /** Optional metadata-refresh trigger run after each scan finishes. */
   onScanFinished?: (result: ScanResult) => void | Promise<void>
   /** Live library roots, read fresh on every scan so runtime root changes
@@ -140,21 +143,31 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     const scopeLabel = p.full ? 'full' : [...p.paths].sort().join(',')
     const startedAt = Date.now()
     running = { trigger: p.trigger, scope: scopeLabel, startedAt, processed: 0, total: 0 }
+    deps.bus?.emit({ kind: 'scan:start', trigger: p.trigger, scope: scopeLabel, message: `Scan started (${p.trigger}, ${scopeLabel})` })
     // Live progress sink — mutates the `running` snapshot read by status().
+    let lastProgressEmit = 0
     const progress = {
       addTotal(n: number) { if (running) running.total += n },
-      tick() { if (running) running.processed += 1 },
+      tick() {
+        if (running) running.processed += 1
+        const t = Date.now()
+        if (running && t - lastProgressEmit >= 200) {
+          lastProgressEmit = t
+          deps.bus?.emit({ kind: 'scan:progress', processed: running.processed, total: running.total, message: `Scanned ${running.processed}/${running.total}` })
+        }
+      },
     }
     const histId = deps.scanHistory.begin(p.trigger, p.full ? 'full' : scopeLabel, startedAt)
     const errors: string[] = []
     let result: ScanResult
     try {
-      result = await runScan(scope, cfg, deps, progress)
+      result = await runScan(scope, cfg, { media: deps.media, collections: deps.collections, bus: deps.bus }, progress)
     } catch (err) {
       errors.push((err as Error).message)
       result = {
         scope, itemsSeen: 0, itemsAdded: 0, itemsRemoved: 0, itemsFailed: 0,
         durationMs: Date.now() - startedAt,
+        movies: 0, shows: 0, episodes: 0,
       }
       console.error('Scan error:', err)
     }
@@ -186,6 +199,13 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     lastResult = result
     lastFinishedAt = finishedAt
     running = null
+    deps.bus?.emit({
+      kind: 'scan:done',
+      movies: result.movies, shows: result.shows,
+      added: result.itemsAdded, removed: result.itemsRemoved, failed: result.itemsFailed,
+      durationMs: result.durationMs,
+      message: `Scan done · ${result.movies} movies, ${result.shows} series (+${result.itemsAdded} −${result.itemsRemoved})`,
+    })
 
     if (deps.onScanFinished) {
       try { await deps.onScanFinished(result) }

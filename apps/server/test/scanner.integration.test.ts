@@ -122,6 +122,33 @@ describe('rescan (integration)', () => {
     expect(processed).toBe(2)    // each ticked once on completion
   })
 
+  it('emits scan:detected per movie/show and scan:done with counts', async () => {
+    const moviesRoot = path.join(tmpRoot, 'movies')
+    const showsRoot = path.join(tmpRoot, 'tv')
+    const seasonDir = path.join(showsRoot, 'Breaking Bad', 'Season 01')
+    mkdirSync(moviesRoot, { recursive: true })
+    mkdirSync(seasonDir, { recursive: true })
+    writeFileSync(path.join(moviesRoot, 'Inception (2010).mkv'), '')
+    writeFileSync(path.join(seasonDir, 'Breaking Bad - S01E01 - Pilot.mkv'), '')
+
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const media = createMediaRepo(db)
+    const collections = createCollectionsRepo(db)
+
+    const events: any[] = []
+    const bus = { emit: (e: any) => events.push(e), subscribe: () => () => {}, recent: () => [] }
+    const cfg = { moviesRoots: [moviesRoot], showsRoots: [showsRoot], cacheDir: tmpRoot, scanConcurrency: 2 }
+    const res = await runScan(fullScope(cfg), cfg, { media, collections, bus })
+
+    const detected = events.filter(e => e.kind === 'scan:detected')
+    expect(detected.some(e => e.mediaKind === 'movie' && e.title === 'Inception')).toBe(true)
+    expect(detected.some(e => e.mediaKind === 'show' && e.title === 'Breaking Bad')).toBe(true)
+    expect(detected.some(e => e.mediaKind === 'episode')).toBe(false) // episodes not emitted
+    expect(res.movies).toBe(1)
+    expect(res.shows).toBe(1)
+  })
+
   it('counts a probe timeout as a failed item, not a crash (#72)', async () => {
     const moviesRoot = path.join(tmpRoot, 'movies')
     mkdirSync(moviesRoot, { recursive: true })
