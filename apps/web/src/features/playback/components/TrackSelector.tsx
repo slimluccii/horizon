@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { AudioTrack, SubtitleTrack, QualityProfile } from '@horizon/sdk'
-import Icon from './chrome/Icon.tsx'
+import Icon from '../../../shared/ui/chrome/Icon.tsx'
 import './TrackSelector.css'
 
 interface QualityOption {

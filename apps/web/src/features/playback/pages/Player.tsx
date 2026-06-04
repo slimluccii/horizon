@@ -1,12 +1,12 @@
 // app/src/pages/Player.tsx
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { horizon } from '../horizon.ts'
-import { useActiveUser } from '../hooks/useActiveUser.ts'
+import { horizon } from '../../../shared/horizon.ts'
+import { useActiveUser } from '../../identity/hooks/useActiveUser.ts'
 import VideoPlayer from '../components/VideoPlayer.tsx'
 import QualityOverlay from '../components/QualityOverlay.tsx'
 import TrackSelector from '../components/TrackSelector.tsx'
-import Icon from '../components/chrome/Icon.tsx'
+import Icon from '../../../shared/ui/chrome/Icon.tsx'
 import type { PlaybackSession, QualityProfile, MediaItem } from '@horizon/sdk'
 import './Player.css'
 

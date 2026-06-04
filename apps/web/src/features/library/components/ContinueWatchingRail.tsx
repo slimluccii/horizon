@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { horizon } from '../horizon.ts'
+import { horizon } from '../../../shared/horizon.ts'
 import type { ContinueWatchingItem } from '@horizon/sdk'
 import LargeRail from './LargeRail.tsx'
 import LandscapeCard from './LandscapeCard.tsx'

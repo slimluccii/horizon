@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { horizon } from '../horizon.ts'
+import { horizon } from '../../../shared/horizon.ts'
 import { tmdbImageUrl } from '@horizon/sdk'
 import type { ShowSummary, MediaItem, EpisodeMetadata } from '@horizon/sdk'
-import LargeTopNav from '../components/chrome/LargeTopNav.tsx'
-import Icon from '../components/chrome/Icon.tsx'
+import LargeTopNav from '../../../shared/ui/chrome/LargeTopNav.tsx'
+import Icon from '../../../shared/ui/chrome/Icon.tsx'
 import './Show.css'
 
 export default function Show() {

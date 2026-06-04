@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { horizon } from '../horizon.ts'
+import { horizon } from '../../../shared/horizon.ts'
 import type { User } from '@horizon/sdk'
 
 /**

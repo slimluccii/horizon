@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { horizon } from '../horizon.ts'
+import { horizon } from '../../../shared/horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
-import HorizonMark from '../components/chrome/HorizonMark.tsx'
-import Icon from '../components/chrome/Icon.tsx'
+import HorizonMark from '../../../shared/ui/chrome/HorizonMark.tsx'
+import Icon from '../../../shared/ui/chrome/Icon.tsx'
 import type { User } from '@horizon/sdk'
 import './Login.css'
 

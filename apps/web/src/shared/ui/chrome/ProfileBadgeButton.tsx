@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useActiveUser } from '../../hooks/useActiveUser.ts'
+import { useActiveUser } from '../../../features/identity/hooks/useActiveUser.ts'
 import { horizon } from '../../horizon.ts'
 import './ProfileBadgeButton.css'
 
