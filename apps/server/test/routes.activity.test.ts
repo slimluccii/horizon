@@ -64,4 +64,14 @@ describe('GET /library/activity/stream', () => {
     const res = await app.inject({ method: 'GET', url: '/library/activity/stream', headers: tok('member1') })
     expect(res.statusCode).toBe(403)
   })
+
+  it('rejects unauthenticated requests', async () => {
+    const res = await app.inject({ method: 'GET', url: '/library/activity/stream' })
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('rejects an unknown/invalid session token', async () => {
+    const res = await app.inject({ method: 'GET', url: '/library/activity/stream', headers: tok('ghost') })
+    expect(res.statusCode).toBe(401)
+  })
 })
