@@ -124,25 +124,21 @@ import `platform/composition`.
 
 ---
 
-## 5. Path aliases (tsconfig)
+## 5. Imports — relative, barrel-mediated (NO path aliases)
 
-Add per-context aliases so the dependency direction is visible and imports stop
-being `../../../`:
+The runtime is `tsx` / `ts-node/esm` with `module: NodeNext` and **explicit
+`.ts` import extensions**, no bundler, and vitest has no `vite-tsconfig-paths`.
+tsconfig `paths` would typecheck but **fail to resolve at runtime**, so aliases
+are rejected.
 
-```jsonc
-// tsconfig.base.json compilerOptions.paths
-"@identity/*": ["apps/server/src/contexts/identity/*"],
-"@library/*":  ["apps/server/src/contexts/library/*"],
-"@metadata/*": ["apps/server/src/contexts/metadata/*"],
-"@playback/*": ["apps/server/src/contexts/playback/*"],
-"@activity/*": ["apps/server/src/contexts/activity/*"],
-"@settings/*": ["apps/server/src/contexts/settings/*"],
-"@platform/*": ["apps/server/src/platform/*"]
-```
-
-Cross-context imports use a context's `index.ts` only: `import { scanManager }
-from '@library'` (resolve `@library` → `contexts/library/index.ts`). Deep
-imports across contexts are disallowed by convention (and a lint rule if cheap).
+Instead:
+- **Cross-context imports** go through the target context's public barrel:
+  `import { scanManager } from '../library/index.ts'`. Deep imports into another
+  context's internals are disallowed by convention.
+- **Within a context**, local relative imports as today.
+- The barrel (`contexts/<ctx>/index.ts`) is the only legitimate cross-context
+  surface — making the dependency direction reviewable by grepping barrels,
+  without any tooling, and 100% compatible with the existing zero-config runtime.
 
 ---
 
@@ -194,8 +190,8 @@ tests here.
 
 Big-bang, single PR. Steps (detailed in the plan):
 1. Create the target tree; **`git mv`** every file (preserve history).
-2. Rewrite imports mechanically (path aliases + new locations); update
-   `tsconfig.base.json` paths, each package `tsconfig`, and vitest configs.
+2. Rewrite imports mechanically to the new relative locations + barrels
+   (no path aliases — see §5). tsconfigs unchanged.
 3. Split god-files (`sdk types.ts`, `metadata/index.ts`, etc.) into named modules.
 4. Add the web vitest runner.
 5. Remove stale build artifacts (`apps/server/test/config.test.d.ts`,
@@ -210,8 +206,9 @@ Risks & mitigations:
 - **Huge diff / hard review** → history-preserving `git mv`; commit per context
   (still one PR) so the diff reads context-by-context; a `MIGRATION.md` mapping
   table old→new path.
-- **Broken imports** → leaning on `tsc --noEmit` + path aliases as the safety net;
-  CI must be green.
+- **Broken imports** → `tsc --noEmit` is the safety net after each context move;
+  CI must be green. Per-context commits stay green (move + redirect all refs to
+  the new barrel in the same commit), even though it ships as one PR.
 - **Hidden cross-layer deps surfaced** (domain importing infra) → fix by moving
   the offending code or introducing a port; note each in the PR.
 - **e2e/runtime wiring** (the composition root move) is the highest-risk single
