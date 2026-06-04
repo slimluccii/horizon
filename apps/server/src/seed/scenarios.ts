@@ -16,7 +16,7 @@
  */
 import type { MediaRepo } from '../repos/media.ts'
 import type { CollectionsRepo } from '../repos/collections.ts'
-import type { MovieMetadata, ShowMetadata, EpisodeMetadata } from '../metadata/types.ts'
+import type { MovieMetadata, ShowMetadata, EpisodeMetadata } from '../contexts/metadata/index.ts'
 
 export type ScenarioName = 'empty' | 'tiny' | 'default' | 'huge' | 'mixed-quality' | 'collections-heavy'
 

@@ -7,12 +7,12 @@ import { createSessionRepo } from '../../../../auth/session.ts'
 import { makeRequireAuth } from '../../../../auth/middleware.ts'
 import { createServerSettings } from '../persistence/serverSettings.ts'
 import { createSessionManager } from '../../../../session/manager.ts'
-import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../../../metadata/refresh.ts'
+import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../../metadata/index.ts'
 import { createChangesCursorRepo } from '../../../../repos/scanState.ts'
 import { createMediaRepo } from '../../../../repos/media.ts'
 import { registerSettings } from './settings.ts'
 import type { ServerSettings } from '../persistence/serverSettings.ts'
-import type { TmdbProvider } from '../../../../metadata/tmdb.ts'
+import type { TmdbProvider } from '../../../metadata/index.ts'
 
 function setup() {
   const db = openDatabase(':memory:')

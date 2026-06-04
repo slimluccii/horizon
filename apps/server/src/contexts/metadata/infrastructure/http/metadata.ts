@@ -4,9 +4,9 @@ import { mkdir, rename } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import type { Config } from '../config.ts'
-import { imageCachePath, fileExists } from '../metadata/cache.ts'
-import { sendNotFound, badRequest, serverError, ErrorCodes } from './errors.ts'
+import type { Config } from '../../../../config.ts'
+import { imageCachePath, fileExists } from '../tmdb/cache.ts'
+import { sendNotFound, badRequest, serverError, ErrorCodes } from '../../../../routes/errors.ts'
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p'
 

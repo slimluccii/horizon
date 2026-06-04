@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createTmdbProvider } from '../src/metadata/tmdb.ts'
+import { createTmdbProvider } from './tmdb.ts'
 
 // These tests exercise the per-request timeout added in #50. We stub the global
 // `fetch` so no real network is touched. Rather than wait the full 30s, we

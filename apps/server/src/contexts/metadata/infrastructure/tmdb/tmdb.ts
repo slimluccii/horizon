@@ -1,5 +1,5 @@
 import { readMetaCache, writeMetaCache } from './cache.ts'
-import type { MovieMetadata, ShowMetadata, EpisodeMetadata, Person } from './types.ts'
+import type { MovieMetadata, ShowMetadata, EpisodeMetadata, Person } from '../../domain/metadata.ts'
 
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 const NS = 'tmdb'

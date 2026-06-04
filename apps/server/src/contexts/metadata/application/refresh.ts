@@ -1,7 +1,7 @@
-import type { MediaRepo, StaleMetadataPick } from '../repos/media.ts'
-import type { ChangesCursorRepo } from '../repos/scanState.ts'
-import type { TmdbProvider } from './tmdb.ts'
-import type { ActivityBus } from '../contexts/activity/index.ts'
+import type { MediaRepo, StaleMetadataPick } from '../../../repos/media.ts'
+import type { ChangesCursorRepo } from '../../../repos/scanState.ts'
+import type { TmdbProvider } from '../infrastructure/tmdb/tmdb.ts'
+import type { ActivityBus } from '../../activity/index.ts'
 import type { MediaKind } from '@horizon/sdk'
 
 export interface MetadataRefreshConfig {
