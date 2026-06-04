@@ -6,14 +6,12 @@ import type { MediaRepo } from '../repos/media.ts'
 import type { CollectionsRepo } from '../repos/collections.ts'
 import type { UserRepo } from '../repos/users.ts'
 import type { ScanWorkers } from '../server.ts'
-import type { ActivityEvent } from '@horizon/sdk'
 import { sendNotFound, badRequest, overCapacity, errorReply, ErrorCodes } from './errors.ts'
 import { resolveCallerRole } from './authz.ts'
+import { streamActivity, sseFrame } from './activityStream.ts'
 
-/** Serialize one activity event as an SSE `data:` frame. */
-export function sseFrame(evt: ActivityEvent): string {
-  return `data: ${JSON.stringify(evt)}\n\n`
-}
+// Re-exported so existing importers (tests) keep working after the move.
+export { sseFrame }
 
 export function registerLibrary(
   app: FastifyInstance,
@@ -235,11 +233,7 @@ export function registerLibrary(
     })
     reply.hijack()
 
-    // Replay the ring buffer, then stream live.
-    for (const evt of workers.activityBus.recent()) reply.raw.write(sseFrame(evt))
-    const unsub = workers.activityBus.subscribe(evt => reply.raw.write(sseFrame(evt)))
-    const ping = setInterval(() => reply.raw.write(': ping\n\n'), 15_000)
-
-    req.raw.on('close', () => { clearInterval(ping); unsub() })
+    // Replay the ring buffer, then stream live until the client disconnects.
+    streamActivity(workers.activityBus, reply.raw, req.raw)
   })
 }

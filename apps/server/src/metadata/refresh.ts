@@ -386,6 +386,7 @@ export function createMetadataRefreshWorker(
               message,
               firstOccurredAt: errorState?.firstOccurredAt ?? now,
             }
+            bus?.emit({ kind: 'error', code: errorState.code, message: errorState.message })
             console.error(
               `[metadata-refresh] TMDB /changes fetch failed (${message}). ` +
               `Cursor not advanced — window will be retried next run. ` +

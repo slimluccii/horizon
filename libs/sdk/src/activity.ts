@@ -29,3 +29,18 @@ export type ActivityEventInput =
     : never
 
 export const ACTIVITY_STREAM_PATH = '/api/library/activity/stream'
+
+/** Parse one SSE frame payload (the `event.data` string) into an ActivityEvent.
+ *  Returns null for malformed JSON or a payload missing a `kind` — so the
+ *  consumer can drop bad frames without throwing. */
+export function parseActivityFrame(data: string): ActivityEvent | null {
+  try {
+    const obj = JSON.parse(data)
+    if (obj && typeof obj === 'object' && typeof obj.kind === 'string') {
+      return obj as ActivityEvent
+    }
+    return null
+  } catch {
+    return null
+  }
+}

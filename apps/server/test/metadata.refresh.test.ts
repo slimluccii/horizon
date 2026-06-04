@@ -394,6 +394,25 @@ describe('MetadataRefreshWorker', () => {
       expect(r.failed).toBeGreaterThan(0)
       expect(r.errorState).toBeNull()
     })
+
+    it('emits an error activity event when the TMDB changes feed is unreachable', async () => {
+      seedMovie('a', { tmdbId: 42, metadataFetchedAt: 1 })
+      const tmdb = {
+        ...fakeTmdb(),
+        async changedMovieIds() { throw new Error('transient outage') },
+        async changedShowIds() { return [] },
+      } as any
+      const events: any[] = []
+      const bus = { emit: (e: any) => events.push(e), subscribe: () => () => {}, recent: () => [] }
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, batchSize: 5, changesFeedExtraCap: 5 },
+        { media, tmdb, changesCursor: createChangesCursorRepo(db), bus },
+      )
+      await worker.run({ useChangesFeed: true })
+      const err = events.find(e => e.kind === 'error')
+      expect(err).toMatchObject({ kind: 'error', code: 'tmdb-changes-unreachable' })
+      expect(err.message).toContain('changes failed')
+    })
   })
 
   describe('activity bus per-item steps', () => {
@@ -436,6 +455,35 @@ describe('MetadataRefreshWorker', () => {
       await worker.run({ useChangesFeed: false, drain: false })
       const last = events.filter(e => e.kind === 'meta:item').pop()
       expect(last).toMatchObject({ step: 'failed', reason: 'no-match' })
+    })
+
+    it('emits failed(no-file) when the matched movie has no file path', async () => {
+      const pick = { id: 'm1', kind: 'movie', tmdbId: 27205, externalIds: {}, title: 'Inception', sortYear: 2010, parentId: null, season: null, episode: null, metadataFetchedAt: null, metadataFailedCount: 0 }
+      const tmdb = { movieByTmdbId: async () => ({ kind: 'movie', tmdbId: 27205, title: 'Inception' }) } as any
+      const events: any[] = []
+      const bus = { emit: (e: any) => events.push(e), subscribe: () => () => {}, recent: () => [] }
+      // internal row exists but filePath is missing → enrichment can't persist.
+      const noFileInternal = { ...baseInternal, filePath: undefined }
+      const worker = createMetadataRefreshWorker(DEFAULT_REFRESH_CONFIG, { media: fakeMedia(pick, noFileInternal), tmdb, changesCursor: { get: () => null, set: () => {} } as any, bus })
+      await worker.run({ useChangesFeed: false, drain: false })
+      const steps = events.filter(e => e.kind === 'meta:item')
+      // tmdbId known → no 'searching'; fails at the file check.
+      expect(steps.map(e => e.step)).toEqual(['detected', 'matched', 'fetching', 'failed'])
+      expect(steps.pop()).toMatchObject({ step: 'failed', reason: 'no-file' })
+    })
+
+    it('emits detected → resolving-show → failed(no-show) for an episode with no parent TMDB id', async () => {
+      const pick = { id: 'e1', kind: 'episode', tmdbId: null, externalIds: {}, title: 'Pilot', sortYear: null, parentId: 'show1', season: 1, episode: 1, metadataFetchedAt: null, metadataFailedCount: 0 }
+      // getInternalRow(parentId) returns a parent row WITHOUT a tmdb id anywhere.
+      const parent = { ...baseInternal, id: 'show1', tmdbId: null, metadata: null, externalIds: {} }
+      const tmdb = { episode: async () => ({ kind: 'episode', title: 'Pilot' }) } as any
+      const events: any[] = []
+      const bus = { emit: (e: any) => events.push(e), subscribe: () => () => {}, recent: () => [] }
+      const worker = createMetadataRefreshWorker(DEFAULT_REFRESH_CONFIG, { media: fakeMedia(pick, parent), tmdb, changesCursor: { get: () => null, set: () => {} } as any, bus })
+      await worker.run({ useChangesFeed: false, drain: false })
+      const steps = events.filter(e => e.kind === 'meta:item')
+      expect(steps.map(e => e.step)).toEqual(['detected', 'resolving-show', 'failed'])
+      expect(steps.pop()).toMatchObject({ step: 'failed', reason: 'no-show' })
     })
   })
 })
