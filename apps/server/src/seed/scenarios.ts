@@ -117,7 +117,7 @@ function pickShows(scenario: ScenarioName): ShowSeed[] {
   }
 }
 
-function pickCollections(scenario: ScenarioName, movies: MovieSeed[]): { id: string; name: string; movieIds: string[] }[] {
+function pickCollections(scenario: ScenarioName, movies: MovieSeed[]): { id: string; name: string; tmdbId: number | null; posterPath: string | null; backdropPath: string | null; movieIds: string[] }[] {
   if (scenario === 'empty' || scenario === 'tiny') return []
   // Default: derive from MovieSeed.collection.
   const byName = new Map<string, string[]>()
@@ -157,6 +157,9 @@ function pickCollections(scenario: ScenarioName, movies: MovieSeed[]): { id: str
   return [...byName.entries()].map(([name, ids]) => ({
     id: `mock-coll:${slugify(name)}`,
     name,
+    tmdbId: null,
+    posterPath: null,
+    backdropPath: null,
     movieIds: ids,
   }))
 }

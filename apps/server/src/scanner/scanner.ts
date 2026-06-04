@@ -309,6 +309,9 @@ export async function runScan(
   const collections: Collection[] = detected.map(c => ({
     id: hashId(c.name),
     name: c.name,
+    tmdbId: null,
+    posterPath: null,
+    backdropPath: null,
     movieIds: c.movies.map(m => m.id),
   }))
   deps.collections.replaceAll(collections)

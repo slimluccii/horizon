@@ -3,6 +3,9 @@ import type { DatabaseSync } from '../db/index.ts'
 export interface Collection {
   id: string
   name: string
+  tmdbId: number | null
+  posterPath: string | null
+  backdropPath: string | null
   movieIds: string[]
 }
 
@@ -20,12 +23,14 @@ export function createCollectionsRepo(db: DatabaseSync): CollectionsRepo {
       db.exec('BEGIN')
       try {
         db.exec('DELETE FROM collections')   // cascades to collection_items
-        const insCol = db.prepare('INSERT INTO collections (id, name, updated_at) VALUES (?, ?, ?)')
+        const insCol = db.prepare(
+          'INSERT INTO collections (id, name, tmdb_id, poster_path, backdrop_path, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
         const insItem = db.prepare(
           'INSERT INTO collection_items (collection_id, media_id, position) VALUES (?, ?, ?)',
         )
         for (const c of collections) {
-          insCol.run(c.id, c.name, now)
+          insCol.run(c.id, c.name, c.tmdbId, c.posterPath, c.backdropPath, now)
           c.movieIds.forEach((mediaId, pos) => insItem.run(c.id, mediaId, pos))
         }
         db.exec('COMMIT')
@@ -37,8 +42,8 @@ export function createCollectionsRepo(db: DatabaseSync): CollectionsRepo {
 
     list() {
       const cols = db.prepare(
-        'SELECT id, name FROM collections ORDER BY name ASC',
-      ).all() as { id: string; name: string }[]
+        'SELECT id, name, tmdb_id, poster_path, backdrop_path FROM collections ORDER BY name ASC',
+      ).all() as { id: string; name: string; tmdb_id: number | null; poster_path: string | null; backdrop_path: string | null }[]
       const itemsByCollection = new Map<string, string[]>()
       const itemRows = db.prepare(
         `SELECT collection_id, media_id
@@ -53,6 +58,9 @@ export function createCollectionsRepo(db: DatabaseSync): CollectionsRepo {
       return cols.map(c => ({
         id: c.id,
         name: c.name,
+        tmdbId: c.tmdb_id,
+        posterPath: c.poster_path,
+        backdropPath: c.backdrop_path,
         movieIds: itemsByCollection.get(c.id) ?? [],
       }))
     },
