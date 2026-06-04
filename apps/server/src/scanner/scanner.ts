@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { probe } from './probe.ts'
-import { detectCollections } from './collections.ts'
+import { buildCollections } from './collections.ts'
 import { parseIdsFromPath, parseIds, mergeIds } from './ids.ts'
 import { pMap } from './concurrency.ts'
 import { walkVideoFiles } from './walker.ts'
@@ -305,14 +305,13 @@ export async function runScan(
   // a subtree change might add/remove a movie that joins/leaves a collection,
   // but rebuilding is cheap so do it on every scan.
   const movies = deps.media.listMovies()
-  const detected = detectCollections(movies)
-  const collections: Collection[] = detected.map(c => ({
-    id: hashId(c.name),
+  const collections: Collection[] = buildCollections(movies).map(c => ({
+    id: c.id,
     name: c.name,
-    tmdbId: null,
-    posterPath: null,
-    backdropPath: null,
-    movieIds: c.movies.map(m => m.id),
+    tmdbId: c.tmdbId,
+    posterPath: c.posterPath,
+    backdropPath: c.backdropPath,
+    movieIds: c.movieIds,
   }))
   deps.collections.replaceAll(collections)
 

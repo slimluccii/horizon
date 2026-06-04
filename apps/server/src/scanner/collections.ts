@@ -1,54 +1,54 @@
-const ROMAN = /\b(II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)$/i
-const COLLECTION_TOKENS = [
-  /\s+Part\s+\w+(?:\s*[-–—]\s*.+)?$/i,
-  /\s+Chapter\s+\w+(?:\s*[-–—]\s*.+)?$/i,
-  /\s+Vol(?:ume|\.)\s*\w+(?:\s*[-–—]\s*.+)?$/i,
-]
+import crypto from 'node:crypto'
+import type { MediaItem } from '../repos/media.ts'
+import type { MovieMetadata } from '../metadata/types.ts'
 
-export function stripCollectionSuffix(title: string): string {
-  let t = title.replace(/\s*\(\d{4}\)$/, '').trim()
-  for (const pattern of COLLECTION_TOKENS) {
-    t = t.replace(pattern, '').trim()
-  }
-  t = t.replace(ROMAN, '').trim()
-  t = t.replace(/[-–—]+$/, '').trim()
-  return t
-}
-
-export interface CollectionCandidate {
+export interface BuiltCollection {
   id: string
-  title: string
-}
-
-export interface DetectedCollection<T extends CollectionCandidate = CollectionCandidate> {
   name: string
-  movies: T[]
+  tmdbId: number
+  posterPath: string | null
+  backdropPath: string | null
+  movieIds: string[]
 }
 
-export function detectCollections<T extends CollectionCandidate>(movies: T[]): DetectedCollection<T>[] {
-  const groups = new Map<string, T[]>()
+function hashId(input: string): string {
+  return crypto.createHash('sha1').update(input).digest('hex').slice(0, 16)
+}
 
-  for (const movie of movies) {
-    const base = stripCollectionSuffix(movie.title)
-    const existing = groups.get(base) ?? []
-    existing.push(movie)
-    groups.set(base, existing)
+function movieMeta(m: MediaItem): MovieMetadata | null {
+  return (m.metadata as MovieMetadata | undefined)?.kind === 'movie' ? (m.metadata as MovieMetadata) : null
+}
+
+/** Group owned movies into collections using TMDB `belongs_to_collection`.
+ *  Only collections with 2+ owned films are kept; members are year-sorted. */
+export function buildCollections(movies: MediaItem[]): BuiltCollection[] {
+  const groups = new Map<number, MediaItem[]>()
+  const info = new Map<number, { name: string; posterPath: string | null; backdropPath: string | null }>()
+
+  for (const m of movies) {
+    const col = movieMeta(m)?.collection
+    if (!col) continue
+    const arr = groups.get(col.tmdbId) ?? []
+    arr.push(m)
+    groups.set(col.tmdbId, arr)
+    if (!info.has(col.tmdbId)) {
+      info.set(col.tmdbId, { name: col.name, posterPath: col.posterPath ?? null, backdropPath: col.backdropPath ?? null })
+    }
   }
 
-  const collections: DetectedCollection<T>[] = []
-  for (const [base, members] of groups) {
+  const out: BuiltCollection[] = []
+  for (const [tmdbId, members] of groups) {
     if (members.length < 2) continue
-    // Sort by year if available (duck-typed); stable otherwise.
-    const sorted = [...members].sort((a, b) => {
-      const ya = (a as any).year ?? (a as any).sortYear ?? 0
-      const yb = (b as any).year ?? (b as any).sortYear ?? 0
-      return ya - yb
-    })
-    collections.push({
-      name: base,
-      movies: sorted,
+    const meta = info.get(tmdbId)!
+    const sorted = [...members].sort((a, b) => (a.year ?? 0) - (b.year ?? 0))
+    out.push({
+      id: hashId(`tmdb-collection:${tmdbId}`),
+      name: meta.name,
+      tmdbId,
+      posterPath: meta.posterPath,
+      backdropPath: meta.backdropPath,
+      movieIds: sorted.map(m => m.id),
     })
   }
-
-  return collections
+  return out
 }
