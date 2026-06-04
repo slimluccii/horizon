@@ -11,7 +11,7 @@
     "dev:e2e": "concurrently -n server,web -c cyan,magenta --kill-others-on-fail 'HORIZON_DEV_SEED=1 npm -w @horizon/server run dev' 'npm -w @horizon/web run dev'",
     "dev:server": "npm -w @horizon/server run dev",
     "dev:web": "npm -w @horizon/web run dev",
-    "test": "npm -w @horizon/server run test && npm -w @horizon/sdk run test",
+    "test": "npm -w @horizon/server run test && npm -w @horizon/sdk run test && npm -w @horizon/web run test",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui"
   },
