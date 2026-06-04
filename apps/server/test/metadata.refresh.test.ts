@@ -395,4 +395,47 @@ describe('MetadataRefreshWorker', () => {
       expect(r.errorState).toBeNull()
     })
   })
+
+  describe('activity bus per-item steps', () => {
+    function fakeMedia(pick: any, internal: any) {
+      return {
+        findStaleMetadata: (() => { let done = false; return () => done ? [] : (done = true, [pick]) })(),
+        getInternalRow: () => internal,
+        upsertMovie: () => {},
+        markMetadataFetched: () => {},
+        markMetadataFailed: () => {},
+      } as any
+    }
+
+    const baseInternal = {
+      id: 'm1', filePath: '/x.mkv', title: 'Inception', year: 2010, durationSec: 1, resolution: '', videoCodec: '',
+      container: '', hdr: { dv: false, hdr10: false, hdr10plus: false }, audioTracks: [], subtitleTracks: [],
+      mtimeMs: 0, sizeBytes: 0, externalIds: {},
+    }
+
+    it('emits detected → searching → matched → fetching → fetched → stored for a searched movie', async () => {
+      const pick = { id: 'm1', kind: 'movie', tmdbId: null, externalIds: {}, title: 'Inception', sortYear: 2010, parentId: null, season: null, episode: null, metadataFetchedAt: null, metadataFailedCount: 0 }
+      const tmdb = {
+        movieByTmdbId: async () => null, movieByImdbId: async () => null,
+        searchMovie: async () => ({ kind: 'movie', tmdbId: 27205, title: 'Inception' }),
+      } as any
+      const events: any[] = []
+      const bus = { emit: (e: any) => events.push(e), subscribe: () => () => {}, recent: () => [] }
+      const worker = createMetadataRefreshWorker(DEFAULT_REFRESH_CONFIG, { media: fakeMedia(pick, baseInternal), tmdb, changesCursor: { get: () => null, set: () => {} } as any, bus })
+      await worker.run({ useChangesFeed: false, drain: false })
+      const steps = events.filter(e => e.kind === 'meta:item').map(e => e.step)
+      expect(steps).toEqual(['detected', 'searching', 'matched', 'fetching', 'fetched', 'stored'])
+    })
+
+    it('emits failed(no-match) when nothing matches', async () => {
+      const pick = { id: 'm1', kind: 'movie', tmdbId: null, externalIds: {}, title: 'Nope', sortYear: null, parentId: null, season: null, episode: null, metadataFetchedAt: null, metadataFailedCount: 0 }
+      const tmdb = { movieByTmdbId: async () => null, movieByImdbId: async () => null, searchMovie: async () => null } as any
+      const events: any[] = []
+      const bus = { emit: (e: any) => events.push(e), subscribe: () => () => {}, recent: () => [] }
+      const worker = createMetadataRefreshWorker(DEFAULT_REFRESH_CONFIG, { media: fakeMedia(pick, baseInternal), tmdb, changesCursor: { get: () => null, set: () => {} } as any, bus })
+      await worker.run({ useChangesFeed: false, drain: false })
+      const last = events.filter(e => e.kind === 'meta:item').pop()
+      expect(last).toMatchObject({ step: 'failed', reason: 'no-match' })
+    })
+  })
 })

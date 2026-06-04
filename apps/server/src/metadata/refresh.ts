@@ -1,6 +1,8 @@
 import type { MediaRepo, StaleMetadataPick } from '../repos/media.ts'
 import type { ChangesCursorRepo } from '../repos/scanState.ts'
 import type { TmdbProvider } from './tmdb.ts'
+import type { ActivityBus } from '../activity/bus.ts'
+import type { MediaKind } from '@horizon/sdk'
 
 export interface MetadataRefreshConfig {
   /** Per-kind max age before an item is eligible for re-fetch. */
@@ -34,6 +36,7 @@ export interface MetadataRefreshDeps {
   media: MediaRepo
   tmdb: TmdbProvider | null
   changesCursor: ChangesCursorRepo
+  bus?: ActivityBus
 }
 
 /**
@@ -96,6 +99,22 @@ export function createMetadataRefreshWorker(
   // maxAgeMs) apply on the next run without restart. Accepts a plain config
   // object for back-compat (wrapped in a constant thunk).
   const getConfig = toConfigGetter(cfgOrGetter)
+
+  const bus = deps.bus
+  function step(s: import('@horizon/sdk').MetaStep, kind: MediaKind, title: string, extra?: { tmdbId?: number; reason?: string }) {
+    if (!bus) return
+    const labels: Record<string, string> = {
+      detected: `Detected ${kind} "${title}"`,
+      'resolving-show': `Resolving show for "${title}"`,
+      searching: `Searching TMDB for "${title}"`,
+      matched: `Matched "${title}"${extra?.tmdbId ? ` #${extra.tmdbId}` : ''}`,
+      fetching: `Fetching metadata for "${title}"`,
+      fetched: `Fetched metadata for "${title}"`,
+      stored: `Stored "${title}"`,
+      failed: `Failed "${title}"${extra?.reason ? ` (${extra.reason})` : ''}`,
+    }
+    bus.emit({ kind: 'meta:item', step: s, mediaKind: kind, title, tmdbId: extra?.tmdbId, reason: extra?.reason, message: labels[s] })
+  }
 
   // Mutable reference so `setTmdb` can hot-swap the client on token change.
   let tmdb: TmdbProvider | null = deps.tmdb
@@ -186,17 +205,22 @@ export function createMetadataRefreshWorker(
     const now = Date.now()
     if (!tmdb) return false
     if (pick.kind === 'movie') {
+      step('detected', 'movie', pick.title)
       let m = pick.tmdbId ? await tmdb.movieByTmdbId(pick.tmdbId) : null
       if (!m && pick.externalIds.tmdb) m = await tmdb.movieByTmdbId(pick.externalIds.tmdb)
       if (!m && pick.externalIds.imdb) m = await tmdb.movieByImdbId(pick.externalIds.imdb)
-      if (!m) m = await tmdb.searchMovie(pick.title, pick.sortYear ?? undefined)
-      if (!m) { deps.media.markMetadataFailed(pick.id, now); return false }
+      if (!m) { step('searching', 'movie', pick.title); m = await tmdb.searchMovie(pick.title, pick.sortYear ?? undefined) }
+      if (!m) { step('failed', 'movie', pick.title, { reason: 'no-match' }); deps.media.markMetadataFailed(pick.id, now); return false }
+      step('matched', 'movie', pick.title, { tmdbId: m.tmdbId })
+      step('fetching', 'movie', pick.title, { tmdbId: m.tmdbId })
 
       const existing = deps.media.getInternalRow(pick.id)
       if (!existing || !existing.filePath) {
+        step('failed', 'movie', pick.title, { reason: 'no-file' })
         deps.media.markMetadataFailed(pick.id, now)
         return false
       }
+      step('fetched', 'movie', pick.title, { tmdbId: m.tmdbId })
       deps.media.upsertMovie({
         id: existing.id,
         filePath: existing.filePath,
@@ -215,18 +239,23 @@ export function createMetadataRefreshWorker(
         metadata: m,
       })
       deps.media.markMetadataFetched(pick.id, m.tmdbId ?? null, now)
+      step('stored', 'movie', pick.title, { tmdbId: m.tmdbId })
       return true
     }
 
     if (pick.kind === 'show') {
+      step('detected', 'show', pick.title)
       let s = pick.tmdbId ? await tmdb.showByTmdbId(pick.tmdbId) : null
       if (!s && pick.externalIds.tmdb) s = await tmdb.showByTmdbId(pick.externalIds.tmdb)
       if (!s && pick.externalIds.tvdb) s = await tmdb.showByTvdbId(pick.externalIds.tvdb)
-      if (!s) s = await tmdb.searchShow(pick.title)
-      if (!s) { deps.media.markMetadataFailed(pick.id, now); return false }
+      if (!s) { step('searching', 'show', pick.title); s = await tmdb.searchShow(pick.title) }
+      if (!s) { step('failed', 'show', pick.title, { reason: 'no-match' }); deps.media.markMetadataFailed(pick.id, now); return false }
+      step('matched', 'show', pick.title, { tmdbId: s.tmdbId })
+      step('fetching', 'show', pick.title, { tmdbId: s.tmdbId })
 
       const existing = deps.media.getInternalRow(pick.id)
-      if (!existing) { deps.media.markMetadataFailed(pick.id, now); return false }
+      if (!existing) { step('failed', 'show', pick.title, { reason: 'no-file' }); deps.media.markMetadataFailed(pick.id, now); return false }
+      step('fetched', 'show', pick.title, { tmdbId: s.tmdbId })
       deps.media.upsertShow({
         id: existing.id,
         title: existing.title,
@@ -235,14 +264,18 @@ export function createMetadataRefreshWorker(
         metadata: s,
       })
       deps.media.markMetadataFetched(pick.id, s.tmdbId ?? null, now)
+      step('stored', 'show', pick.title, { tmdbId: s.tmdbId })
       return true
     }
 
     // episode
+    step('detected', 'episode', pick.title)
     if (pick.parentId == null || pick.season == null || pick.episode == null) {
+      step('failed', 'episode', pick.title, { reason: 'no-show' })
       deps.media.markMetadataFailed(pick.id, now)
       return false
     }
+    step('resolving-show', 'episode', pick.title)
     const parent = deps.media.getInternalRow(pick.parentId)
     const parentMeta = parent?.metadata as { tmdbId?: number } | null | undefined
     const showTmdbId: number | undefined =
@@ -250,17 +283,22 @@ export function createMetadataRefreshWorker(
       ?? parentMeta?.tmdbId
       ?? parent?.externalIds.tmdb
     if (!showTmdbId) {
+      step('failed', 'episode', pick.title, { reason: 'no-show' })
       deps.media.markMetadataFailed(pick.id, now)
       return false
     }
+    step('matched', 'episode', pick.title, { tmdbId: showTmdbId })
+    step('fetching', 'episode', pick.title, { tmdbId: showTmdbId })
     const ep = await tmdb.episode(showTmdbId, pick.season, pick.episode)
-    if (!ep) { deps.media.markMetadataFailed(pick.id, now); return false }
+    if (!ep) { step('failed', 'episode', pick.title, { reason: 'no-match' }); deps.media.markMetadataFailed(pick.id, now); return false }
 
     const existing = deps.media.getInternalRow(pick.id)
     if (!existing || !existing.filePath) {
+      step('failed', 'episode', pick.title, { reason: 'no-file' })
       deps.media.markMetadataFailed(pick.id, now)
       return false
     }
+    step('fetched', 'episode', pick.title, { tmdbId: showTmdbId })
     deps.media.upsertEpisode({
       id: existing.id,
       parentId: existing.parentId!,
@@ -281,6 +319,7 @@ export function createMetadataRefreshWorker(
       metadata: ep,
     })
     deps.media.markMetadataFetched(pick.id, ep.tmdbId ?? null, now)
+    step('stored', 'episode', pick.title, { tmdbId: showTmdbId })
     return true
   }
 
@@ -377,6 +416,8 @@ export function createMetadataRefreshWorker(
           work.push(p)
         }
 
+        if (work.length > 0) bus?.emit({ kind: 'meta:start', message: 'Metadata refresh started' })
+
         for (const pick of work) {
           const ok = await refreshOne(pick).catch(() => false)
           if (ok) refreshed++ ; else failed++
@@ -412,6 +453,7 @@ export function createMetadataRefreshWorker(
         const result = { refreshed, failed, changesFeedHits, durationMs: Date.now() - t0, errorState }
         lastResult = result
         running = false
+        bus?.emit({ kind: 'meta:done', refreshed, failed, durationMs: result.durationMs, message: `Metadata refresh done · ${refreshed} ok, ${failed} failed` })
       }
       return lastResult!
     },
