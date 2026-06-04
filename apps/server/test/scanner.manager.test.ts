@@ -106,7 +106,7 @@ describe('ScanManager', () => {
 
     // Direct sanity check that classifyPath needs a normalized (no trailing
     // slash) root to match a subtree path.
-    expect(classifyPath('/media/tv/Show', { showsRoots: ['/media/tv'], moviesRoots: [] }))
+    expect(classifyPath('/media/tv/Show', { showsRoots: ['/media/tv'], moviesRoots: [], cacheDir: '/tmp', scanConcurrency: 1 }))
       .toBe('shows')
   })
 
