@@ -14,6 +14,7 @@ import type { SessionManager } from './session/manager.ts'
 import type { ScanManager } from './scanner/manager.ts'
 import type { MetadataRefreshWorker } from './metadata/refresh.ts'
 import type { PlaybackOrchestrator } from './session/playback.ts'
+import type { ActivityBus } from './activity/bus.ts'
 import { registerAuth } from './routes/auth.ts'
 import { makeRequireAuth } from './auth/middleware.ts'
 import { registerHealth } from './routes/health.ts'
@@ -43,6 +44,7 @@ export interface ScanWorkers {
   scanManager: ScanManager
   refreshWorker: MetadataRefreshWorker
   scanHistory: ScanHistoryRepo
+  activityBus: ActivityBus
 }
 
 export async function buildServer(
