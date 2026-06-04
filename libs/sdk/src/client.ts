@@ -1,6 +1,7 @@
 // sdk/src/client.ts
 import type { ClientCapabilities, MediaItem, SessionInfo, ShowSummary, SeasonSummary, User, WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, AuthSession, SetPasswordResult, PairStartResult, PairPollResult, ScanStatusResponse } from './types.ts'
 import type { Preferences } from './preferences.ts'
+import type { CollectionSummary } from './collections.ts'
 import { ErrorCodes } from './types.ts'
 import { detectCapabilities } from './capabilities.ts'
 import { PlaybackSession, type PlaybackSessionOptions } from './session.ts'
@@ -142,7 +143,8 @@ export class HorizonClient {
         path === undefined ? '/library/browse' : `/library/browse?path=${encodeURIComponent(path)}`,
       ),
     listMovies: () => this.fetch<MediaItem[]>('/library/movies'),
-    listCollections: () => this.fetch<{ id: string; name: string; movies: MediaItem[] }[]>('/library/movies/collections'),
+    listCollections: () => this.fetch<CollectionSummary[]>('/library/movies/collections'),
+    getCollection: (id: string) => this.fetch<CollectionSummary>(`/library/movies/collections/${id}`),
     listShows: () => this.fetch<ShowSummary[]>('/library/shows'),
     getShow: (showId: string) => this.fetch<ShowSummary>(`/library/shows/${showId}`),
     listSeasons: (showId: string) => this.fetch<SeasonSummary[]>(`/library/shows/${showId}/seasons`),

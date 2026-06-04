@@ -22,3 +22,4 @@ export type {
 export { tmdbImageUrl } from './metadata.ts'
 export { PreferencesSchema, SUPPORTED_LANGUAGES } from './preferences.ts'
 export type { Preferences } from './preferences.ts'
+export * from './collections.ts'
