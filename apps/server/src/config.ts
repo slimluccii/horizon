@@ -1,5 +1,9 @@
 import os from 'node:os'
-import { isToneMapOperator, type ToneMapOperator, type ToneMapConfig } from './transcode/tonemap.ts'
+// Direct domain import (not the playback barrel): config is a foundational
+// platform module loaded via `require()` under node's strip-only TS loader,
+// and the barrel transitively pulls in a class with a TS parameter-property
+// constructor that strip-only mode rejects. tonemap is pure, leaf domain.
+import { isToneMapOperator, type ToneMapOperator, type ToneMapConfig } from './contexts/playback/domain/tonemap.ts'
 
 export interface Config {
   port: number

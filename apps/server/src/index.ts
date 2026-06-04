@@ -1,9 +1,9 @@
 import { loadConfig } from './config.ts'
-import { detectHwAccel } from './transcode/hwaccel.ts'
+import { detectHwAccel } from './contexts/playback/index.ts'
 import { openDatabase } from './db/index.ts'
 import { migrate } from './db/migrations.ts'
 import { createUserRepo, createSessionRepo } from './contexts/identity/index.ts'
-import { createProgressRepo } from './repos/progress.ts'
+import { createProgressRepo } from './contexts/playback/index.ts'
 import { createServerSettings } from './contexts/settings/index.ts'
 import { createTmdbProvider, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from './contexts/metadata/index.ts'
 import {
@@ -17,8 +17,8 @@ import {
   type WatcherHandle,
 } from './contexts/library/index.ts'
 import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
-import { createSessionManager } from './session/manager.ts'
-import { createPlaybackOrchestrator } from './session/playback.ts'
+import { createSessionManager } from './contexts/playback/index.ts'
+import { createPlaybackOrchestrator } from './contexts/playback/index.ts'
 import { buildServer } from './server.ts'
 import { createActivityBus } from './contexts/activity/index.ts'
 
