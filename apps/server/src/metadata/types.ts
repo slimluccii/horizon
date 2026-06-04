@@ -29,6 +29,13 @@ export interface MovieMetadata {
   backdropPath?: string | null
   cast?: Person[]
   directors?: Person[]
+  /** TMDB belongs_to_collection, when the film is part of a franchise. */
+  collection?: {
+    tmdbId: number
+    name: string
+    posterPath?: string | null
+    backdropPath?: string | null
+  }
 }
 
 export interface ShowMetadata {

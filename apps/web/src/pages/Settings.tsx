@@ -1025,6 +1025,7 @@ const DEFAULT_FORM: Required<Preferences> = {
   subtitleLanguage: 'en',
   subtitlesEnabled: false,
   preferredQuality: 'auto',
+  collapseMovieCollections: true,
 }
 
 function mergeWithDefaults(prefs: Preferences): Required<Preferences> {
@@ -1034,6 +1035,7 @@ function mergeWithDefaults(prefs: Preferences): Required<Preferences> {
     subtitleLanguage: prefs.subtitleLanguage ?? DEFAULT_FORM.subtitleLanguage,
     subtitlesEnabled: prefs.subtitlesEnabled ?? DEFAULT_FORM.subtitlesEnabled,
     preferredQuality: prefs.preferredQuality ?? DEFAULT_FORM.preferredQuality,
+    collapseMovieCollections: prefs.collapseMovieCollections ?? DEFAULT_FORM.collapseMovieCollections,
   }
 }
 
@@ -1215,6 +1217,23 @@ export default function Settings() {
                   <option key={q} value={q}>{q === 'auto' ? 'Auto' : q}</option>
                 ))}
               </select>
+            </div>
+
+            <p className="settings__section-title">Library</p>
+
+            <div className="settings__field">
+              <div className="settings__toggle-row">
+                <label className="settings__toggle-label" htmlFor="settings-collapse-collections">
+                  Collapse movie collections into one item
+                </label>
+                <input
+                  id="settings-collapse-collections"
+                  type="checkbox"
+                  className="settings__toggle-input"
+                  checked={form.collapseMovieCollections}
+                  onChange={e => set('collapseMovieCollections', e.target.checked)}
+                />
+              </div>
             </div>
 
             {error && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{error}</p>}

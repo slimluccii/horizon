@@ -80,3 +80,32 @@ describe('TmdbProvider fetch timeout (#50)', () => {
     expect(networkLogged).toBe(true)
   })
 })
+
+describe('TmdbProvider mapMovie collection', () => {
+  it('maps belongs_to_collection into MovieMetadata.collection', async () => {
+    const payload = {
+      id: 671,
+      title: 'Harry Potter',
+      belongs_to_collection: {
+        id: 1241,
+        name: 'Harry Potter Collection',
+        poster_path: '/p.jpg',
+        backdrop_path: '/b.jpg',
+      },
+    }
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+    const provider = createTmdbProvider('token', cacheDir)!
+    const meta = await provider.movieByTmdbId(671)
+    expect(meta?.collection).toEqual({
+      tmdbId: 1241,
+      name: 'Harry Potter Collection',
+      posterPath: '/p.jpg',
+      backdropPath: '/b.jpg',
+    })
+  })
+})

@@ -31,6 +31,7 @@ export const PreferencesSchema = z.object({
   subtitleLanguage: z.enum(languageCodes).optional(),
   subtitlesEnabled: z.boolean().optional(),
   preferredQuality: z.enum(['auto', '1080p', '720p', '480p']).optional(),
+  collapseMovieCollections: z.boolean().optional(),
 }).strict()
 
 export type Preferences = z.infer<typeof PreferencesSchema>

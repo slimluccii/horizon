@@ -72,9 +72,12 @@ CREATE INDEX idx_media_tmdb_id  ON media_items(tmdb_id)                    WHERE
 CREATE INDEX idx_media_meta_age ON media_items(metadata_fetched_at)        WHERE deleted_at IS NULL;
 
 CREATE TABLE collections (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  tmdb_id      INTEGER,
+  poster_path  TEXT,
+  backdrop_path TEXT,
+  updated_at   INTEGER NOT NULL
 );
 CREATE TABLE collection_items (
   collection_id TEXT NOT NULL REFERENCES collections(id)  ON DELETE CASCADE,

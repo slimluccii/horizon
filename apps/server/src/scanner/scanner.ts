@@ -1,8 +1,8 @@
-import { readdir, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { probe } from './probe.ts'
-import { detectCollections } from './collections.ts'
+import { buildCollections } from './collections.ts'
 import { parseIdsFromPath, parseIds, mergeIds } from './ids.ts'
 import { pMap } from './concurrency.ts'
 import { walkVideoFiles } from './walker.ts'
@@ -72,6 +72,20 @@ function episodeTitle(basename: string): string {
   const m = /S\d{2}E\d{2}\s*-\s*([^[]+?)(?:\s*\[|\s*-\s*\[|$)/i.exec(stripped)
   if (m) return m[1].trim()
   return cleanTitle(stripped)
+}
+
+/** Season-folder names to skip when inferring a show directory:
+ *  "Season 01", "Season 1", "Series 1", "Specials", "S01", "S1". */
+const SEASON_DIR_RE = /^(?:season|series|specials)\b|^s\d{1,2}$/i
+
+/** Infer the show directory for an episode file. The show is the file's parent
+ *  unless that parent is a season folder, in which case it's the grandparent.
+ *  This is independent of how deep the show sits below the library root, so
+ *  category/wrapper folders (tv/, anime/, A-D/) never become shows. */
+function showDirForEpisode(file: string): string {
+  const parent = path.dirname(file)
+  if (SEASON_DIR_RE.test(path.basename(parent))) return path.dirname(parent)
+  return parent
 }
 
 export interface ScanScope {
@@ -162,18 +176,33 @@ async function scanShowsPath(
   let added = 0
   let failed = 0
 
-  // A show subtree is either a *root* (containing many show dirs) or a single
-  // show directory. Detect by checking if the path itself is one of cfg.showsRoots.
-  const isRoot = (cfg.showsRoots ?? []).includes(pathToScan)
-  const showDirs = isRoot
-    ? (await readdir(pathToScan, { withFileTypes: true }).catch(() => []))
-        .filter(e => e.isDirectory())
-        .map(e => path.join(pathToScan, e.name))
-    : [pathToScan]
+  // Walk every episode file under the path, then group by inferred show dir.
+  // No fixed-depth assumption: works whether pathToScan is a library root, a
+  // category folder, or a single show directory, and for arbitrary nesting.
+  const roots = new Set(cfg.showsRoots ?? [])
+  const { files } = await walkVideoFiles(pathToScan).catch(() => ({ files: [], dirsSeen: 0 }))
 
-  for (const showDirAbs of showDirs) {
-    const showName = path.basename(showDirAbs)
-    const showId = hashId(showDirAbs)
+  type EpCand = { file: string; base: string; em: RegExpExecArray; showDir: string }
+  const epCands: EpCand[] = []
+  for (const file of files) {
+    const base = path.basename(file)
+    const em = EPISODE_RE.exec(base)
+    if (!em) continue
+    const showDir = showDirForEpisode(file)
+    // A loose episode sitting directly in a configured root has no real show
+    // folder — skip it rather than naming a show after the root.
+    if (roots.has(showDir)) { failed++; continue }
+    epCands.push({ file, base, em, showDir })
+  }
+  progress.addTotal(epCands.length)
+
+  // Upsert one show per distinct showDir before its episodes.
+  const showIdByDir = new Map<string, string>()
+  for (const { showDir } of epCands) {
+    if (showIdByDir.has(showDir)) continue
+    const showName = path.basename(showDir)
+    const showId = hashId(showDir)
+    showIdByDir.set(showDir, showId)
     const existedShow = media.getById(showId) !== null
     media.upsertShow({
       id: showId,
@@ -184,49 +213,42 @@ async function scanShowsPath(
     })
     seen.add(showId)
     if (!existedShow) added++
-
-    const { files } = await walkVideoFiles(showDirAbs).catch(() => ({ files: [], dirsSeen: 0 }))
-    const epCands = files
-      .map(file => {
-        const base = path.basename(file)
-        const em = EPISODE_RE.exec(base)
-        return em ? { file, base, em } : null
-      })
-      .filter((x): x is NonNullable<typeof x> => !!x)
-    progress.addTotal(epCands.length)
-
-    await pMap(epCands, cfg.scanConcurrency, async ({ file, base, em }) => {
-      const p = await probe(file, cfg.cacheDir).catch(() => null)
-      if (!p) { failed++; progress.tick(); return }
-      const st = await stat(file).catch(() => null)
-      if (!st) { failed++; progress.tick(); return }
-      const id = hashId(file)
-      const existed = media.getById(id) !== null
-      const insert: EpisodeUpsert = {
-        id,
-        parentId: showId,
-        filePath: file,
-        title: episodeTitle(base),
-        season: parseInt(em[1], 10),
-        episode: parseInt(em[2], 10),
-        durationSec: p.duration,
-        resolution: p.resolution,
-        videoCodec: p.videoCodec,
-        container: p.container,
-        hdr: p.hdr,
-        audioTracks: p.audioTracks,
-        subtitleTracks: p.subtitleTracks,
-        mtimeMs: st.mtimeMs,
-        sizeBytes: st.size,
-        externalIds: mergeIds(parseIds(showName), parseIds(base)),
-        metadata: null,
-      }
-      media.upsertEpisode(insert)
-      seen.add(id)
-      if (!existed) added++
-      progress.tick()
-    })
   }
+
+  await pMap(epCands, cfg.scanConcurrency, async ({ file, base, em, showDir }) => {
+    const showId = showIdByDir.get(showDir)!
+    const showName = path.basename(showDir)
+    const p = await probe(file, cfg.cacheDir).catch(() => null)
+    if (!p) { failed++; progress.tick(); return }
+    const st = await stat(file).catch(() => null)
+    if (!st) { failed++; progress.tick(); return }
+    const id = hashId(file)
+    const existed = media.getById(id) !== null
+    const insert: EpisodeUpsert = {
+      id,
+      parentId: showId,
+      filePath: file,
+      title: episodeTitle(base),
+      season: parseInt(em[1], 10),
+      episode: parseInt(em[2], 10),
+      durationSec: p.duration,
+      resolution: p.resolution,
+      videoCodec: p.videoCodec,
+      container: p.container,
+      hdr: p.hdr,
+      audioTracks: p.audioTracks,
+      subtitleTracks: p.subtitleTracks,
+      mtimeMs: st.mtimeMs,
+      sizeBytes: st.size,
+      externalIds: mergeIds(parseIds(showName), parseIds(base)),
+      metadata: null,
+    }
+    media.upsertEpisode(insert)
+    seen.add(id)
+    if (!existed) added++
+    progress.tick()
+  })
+
   return { seen, added, failed }
 }
 
@@ -283,11 +305,13 @@ export async function runScan(
   // a subtree change might add/remove a movie that joins/leaves a collection,
   // but rebuilding is cheap so do it on every scan.
   const movies = deps.media.listMovies()
-  const detected = detectCollections(movies)
-  const collections: Collection[] = detected.map(c => ({
-    id: hashId(c.name),
+  const collections: Collection[] = buildCollections(movies).map(c => ({
+    id: c.id,
     name: c.name,
-    movieIds: c.movies.map(m => m.id),
+    tmdbId: c.tmdbId,
+    posterPath: c.posterPath,
+    backdropPath: c.backdropPath,
+    movieIds: c.movieIds,
   }))
   deps.collections.replaceAll(collections)
 

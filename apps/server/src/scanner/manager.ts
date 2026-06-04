@@ -71,7 +71,8 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
   // through this rather than cfg.moviesRoots/cfg.showsRoots directly.
   function liveCfg(): ScanConfig {
     const { movies, shows } = deps.getRoots()
-    return { ...cfg, moviesRoots: movies, showsRoots: shows }
+    const norm = (r: string) => path.resolve(r).replace(/\/+$/, '')
+    return { ...cfg, moviesRoots: movies.map(norm), showsRoots: shows.map(norm) }
   }
 
   let running: { trigger: ScanTrigger; scope: 'full' | string; startedAt: number; processed: number; total: number } | null = null

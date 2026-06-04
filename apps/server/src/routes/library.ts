@@ -79,6 +79,9 @@ export function registerLibrary(
     return cols.map(c => ({
       id: c.id,
       name: c.name,
+      tmdbId: c.tmdbId,
+      posterPath: c.posterPath,
+      backdropPath: c.backdropPath,
       movies: c.movieIds.map(id => media.getById(id)).filter((m): m is NonNullable<typeof m> => !!m),
     }))
   })
@@ -93,6 +96,9 @@ export function registerLibrary(
       return {
         id: col.id,
         name: col.name,
+        tmdbId: col.tmdbId,
+        posterPath: col.posterPath,
+        backdropPath: col.backdropPath,
         movies: col.movieIds.map(id => media.getById(id)).filter((m): m is NonNullable<typeof m> => !!m),
       }
     },

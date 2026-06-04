@@ -33,7 +33,8 @@ describe('collectionsRepo.replaceAll', () => {
   it('stores collections with items in position order', () => {
     const { repo } = setup()
     repo.replaceAll([
-      { id: 'c1', name: 'Lord of the Rings', movieIds: ['m1', 'm2'] },
+      { id: 'c1', name: 'Lord of the Rings', tmdbId: null,
+        posterPath: null, backdropPath: null, movieIds: ['m1', 'm2'] },
     ])
     const list = repo.list()
     expect(list).toHaveLength(1)
@@ -43,9 +44,22 @@ describe('collectionsRepo.replaceAll', () => {
 
   it('replaces existing collections wholesale', () => {
     const { repo } = setup()
-    repo.replaceAll([{ id: 'c1', name: 'A', movieIds: ['m1'] }])
-    repo.replaceAll([{ id: 'c2', name: 'B', movieIds: ['m2'] }])
+    repo.replaceAll([{ id: 'c1', name: 'A', tmdbId: null, posterPath: null, backdropPath: null, movieIds: ['m1'] }])
+    repo.replaceAll([{ id: 'c2', name: 'B', tmdbId: null, posterPath: null, backdropPath: null, movieIds: ['m2'] }])
     const list = repo.list()
     expect(list.map(c => c.id)).toEqual(['c2'])
+  })
+
+  it('round-trips tmdbId, posterPath, backdropPath', () => {
+    const { repo } = setup()
+    repo.replaceAll([
+      { id: 'c1', name: 'Harry Potter Collection', tmdbId: 1241,
+        posterPath: '/p.jpg', backdropPath: '/b.jpg', movieIds: ['m1', 'm2'] },
+    ])
+    const [c] = repo.list()
+    expect(c).toMatchObject({
+      id: 'c1', name: 'Harry Potter Collection', tmdbId: 1241,
+      posterPath: '/p.jpg', backdropPath: '/b.jpg', movieIds: ['m1', 'm2'],
+    })
   })
 })

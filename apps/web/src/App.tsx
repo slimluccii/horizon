@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Library from './pages/Library.tsx'
 import Player from './pages/Player.tsx'
 import Show from './pages/Show.tsx'
+import Collection from './pages/Collection.tsx'
 import Setup from './pages/Setup.tsx'
 import Login from './pages/Login.tsx'
 import Link from './pages/Link.tsx'
@@ -44,6 +45,7 @@ export default function App() {
       <Route path="/link" element={<Guard><Link /></Guard>} />
       <Route path="/" element={<Guard><Library /></Guard>} />
       <Route path="/show/:showId" element={<Guard><Show /></Guard>} />
+      <Route path="/collection/:collectionId" element={<Guard><Collection /></Guard>} />
       <Route path="/play/:mediaId" element={<Guard><Player /></Guard>} />
       <Route path="/settings" element={<Guard><Settings /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />

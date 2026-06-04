@@ -72,7 +72,31 @@ describe('rescan (integration)', () => {
       cacheDir: tmpRoot,
       scanConcurrency: 2,
     }, { media, collections, tmdb: null })
-    expect(media.getEpisodes(media.listShows()[0].id)).toHaveLength(0)
+    // Content-based detection: a show is defined by its episode files. With the
+    // only episode removed, the show folder holds no episodes, so the show row
+    // is soft-deleted along with the episode.
+    expect(media.listShows()).toHaveLength(0)
+  })
+
+  it('detects shows nested below a category folder, not the wrapper', async () => {
+    // root/anime/Frieren/Season 01/S01E01.mkv  +  root/Breaking Bad/S01E02.mkv
+    const root = path.join(tmpRoot, 'shows')
+    mkdirSync(path.join(root, 'anime', 'Frieren', 'Season 01'), { recursive: true })
+    mkdirSync(path.join(root, 'Breaking Bad'), { recursive: true })
+    writeFileSync(path.join(root, 'anime', 'Frieren', 'Season 01', 'S01E01.mkv'), 'x')
+    writeFileSync(path.join(root, 'Breaking Bad', 'S01E02.mkv'), 'x')
+
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const media = createMediaRepo(db)
+    const collections = createCollectionsRepo(db)
+
+    const cfg = { showsRoots: [root], moviesRoots: [], cacheDir: tmpRoot, scanConcurrency: 2 }
+    await runScan(fullScope(cfg), cfg, { media, collections })
+
+    const titles = media.listShows().map(s => s.title).sort()
+    expect(titles).toEqual(['Breaking Bad', 'Frieren'])
+    expect(titles).not.toContain('anime')
   })
 
   it('reports live progress (addTotal + tick per item)', async () => {
