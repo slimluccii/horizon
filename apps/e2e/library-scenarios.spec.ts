@@ -8,12 +8,27 @@
  * Each test seeds a scenario via /dev/seed, authenticates the browser as the
  * owner (session cookie), navigates to the library and asserts its state.
  * Scenarios live in apps/server/src/seed/scenarios.ts.
+ *
+ * Movie collections are collapsed inline in the Movies grid behind the per-user
+ * `collapseMovieCollections` preference (default on). Tests that assert a flat
+ * movie count set the preference off first; tests that assert collection cards
+ * set it on.
  */
-import { test, expect, type Page } from '@playwright/test'
-import { APP, ensureOwner, authBrowser, seed, type SessionUser } from './helpers/auth.ts'
+import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { APP, API, bearer, ensureOwner, authBrowser, seed, type SessionUser } from './helpers/auth.ts'
 
-async function gotoLibrary(page: Page, tab?: 'movies' | 'shows' | 'collections') {
+async function gotoLibrary(page: Page, tab?: 'movies' | 'shows') {
   await page.goto(tab ? `${APP}/?tab=${tab}` : `${APP}/`)
+}
+
+/** Set the owner's collapse-collections preference. Must run before page.goto —
+ *  the web reads preferences from auth.me() at page load. */
+async function setCollapse(request: APIRequestContext, owner: SessionUser, value: boolean) {
+  const res = await request.patch(`${API}/users/${owner.id}`, {
+    headers: bearer(owner),
+    data: { preferences: { collapseMovieCollections: value } },
+  })
+  expect(res.ok(), `set collapseMovieCollections=${value} → ${res.status()}`).toBe(true)
 }
 
 test.describe('mock scenarios', () => {
@@ -35,9 +50,6 @@ test.describe('mock scenarios', () => {
 
     await page.locator('.lib__pill', { hasText: /^Series$/ }).click()
     await expect(page.getByText(/No shows found/i)).toBeVisible()
-
-    await page.locator('.lib__pill', { hasText: /^Collections$/ }).click()
-    await expect(page.getByText(/No collections detected/i)).toBeVisible()
   })
 
   test('tiny: renders one movie + one show', async ({ page, request }) => {
@@ -56,6 +68,8 @@ test.describe('mock scenarios', () => {
     expect(result).toMatchObject({ movies: 24, shows: 10 })
     expect(result.collections).toBeGreaterThan(0)
 
+    // Flat view (collapse off): all 24 movies render individually.
+    await setCollapse(request, owner, false)
     await gotoLibrary(page, 'movies')
     await expect(page.locator('[data-testid="movie-card"]')).toHaveCount(24, { timeout: 15_000 })
     await expect(page.getByText('Featured · Just added')).toBeVisible()
@@ -63,8 +77,18 @@ test.describe('mock scenarios', () => {
     await page.locator('.lib__pill', { hasText: /^Series$/ }).click()
     await expect(page.locator('[data-testid="show-card"]')).toHaveCount(10)
 
-    await page.locator('.lib__pill', { hasText: /^Collections$/ }).click()
-    await expect(page.getByText('Reyes Trilogy')).toBeVisible()
+    // Collapsed view (collapse on): the "Reyes Trilogy" set shows as one card in
+    // the Movies grid, and its 3 films no longer appear standalone.
+    await setCollapse(request, owner, true)
+    await gotoLibrary(page, 'movies')
+    const collectionCard = page.getByRole('button', { name: 'Reyes Trilogy' })
+    await expect(collectionCard).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('[data-testid="movie-card"]')).toHaveCount(21)
+
+    // Clicking the collection opens its detail page with all 3 member films.
+    await collectionCard.click()
+    await expect(page).toHaveURL(/\/collection\//)
+    await expect(page.locator('[data-testid="movie-card"]')).toHaveCount(3)
   })
 
   test('huge: 200 movies render without breaking the grid', async ({ page, request }) => {
@@ -73,6 +97,8 @@ test.describe('mock scenarios', () => {
     expect(result.movies).toBe(200)
     expect(result.shows).toBe(30)
 
+    // Perf test of the flat grid — collapse off so the count is exactly 200.
+    await setCollapse(request, owner, false)
     await gotoLibrary(page, 'movies')
     await expect(page.locator('[data-testid="movie-card"]').first()).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('[data-testid="movie-card"]')).toHaveCount(200, { timeout: 30_000 })
@@ -95,14 +121,16 @@ test.describe('mock scenarios', () => {
     }
   })
 
-  test('collections-heavy: many collection rails render', async ({ page, request }) => {
+  test('collections-heavy: many collection cards render inline', async ({ page, request }) => {
     const result = await seed(request, 'collections-heavy')
     expect(result.collections).toBeGreaterThan(5)
 
-    await gotoLibrary(page, 'collections')
-    const headings = page.locator('.lib__collection-title')
-    await expect(headings.first()).toBeVisible({ timeout: 10_000 })
-    expect(await headings.count()).toBeGreaterThan(5)
+    // Collapse on (default): collections render as cards inside the Movies grid.
+    await setCollapse(request, owner, true)
+    await gotoLibrary(page, 'movies')
+    const cards = page.locator('[data-testid="collection-card"]')
+    await expect(cards.first()).toBeVisible({ timeout: 10_000 })
+    expect(await cards.count()).toBeGreaterThan(5)
   })
 
   test('image proxy: mock poster returns a real image', async ({ request }) => {
