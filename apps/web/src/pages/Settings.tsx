@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { horizon } from '../horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
+import { useActivityStream } from '../hooks/useActivityStream.ts'
+import ActivityLogPanel from '../components/ActivityLogPanel.tsx'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
 import type { Preferences, User, ServerSettings, ScanStatusResponse } from '@horizon/sdk'
 import { FolderBrowser, type LibraryTag } from '../components/FolderBrowser/FolderBrowser.tsx'
@@ -462,6 +464,8 @@ function timeAgo(ms: number): string {
 function ScanStatusBadge({ onToast }: { onToast: (msg: string) => void }) {
   const [status, setStatus] = useState<ScanStatusResponse | null>(null)
   const [busy, setBusy] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+  const activity = useActivityStream(true)
 
   useEffect(() => {
     let alive = true
@@ -538,6 +542,21 @@ function ScanStatusBadge({ onToast }: { onToast: (msg: string) => void }) {
           <div className="settings__scan-bar-fill" style={{ width: `${pct}%` }} />
         </div>
       )}
+      {active && (
+        <div className="settings__scan-live">
+          <span>Movies: {activity.counts.movies} · Series: {activity.counts.shows}</span>
+          {activity.current && (
+            <span className="settings__scan-current">
+              {' · '}{activity.current.step} — “{activity.current.title}”
+              {activity.current.tmdbId ? ` #${activity.current.tmdbId}` : ''}
+            </span>
+          )}
+        </div>
+      )}
+      <button type="button" className="settings__scan-logtoggle" onClick={() => setShowLog(v => !v)}>
+        {showLog ? 'Hide raw log' : 'Show raw log'}
+      </button>
+      {showLog && <ActivityLogPanel lines={activity.rawLines} />}
     </div>
   )
 }

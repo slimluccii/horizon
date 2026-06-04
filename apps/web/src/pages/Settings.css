@@ -482,6 +482,9 @@
   border-radius: 2px;
   transition: width var(--dur-fast) var(--ease-out);
 }
+.settings__scan-live { font-size: 12px; opacity: 0.85; margin-top: 6px; }
+.settings__scan-current { opacity: 0.7; }
+.settings__scan-logtoggle { margin-top: 8px; background: none; border: 1px solid var(--border, #2a2a2a); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; color: inherit; }
 .settings__scan-dot {
   width: 8px;
   height: 8px;
