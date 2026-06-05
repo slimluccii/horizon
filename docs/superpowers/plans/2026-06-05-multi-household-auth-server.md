@@ -322,20 +322,33 @@ git commit -m "feat(server): household repo"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `userRepo.test.ts`:
+Append to `userRepo.test.ts`. **Note:** `users.household_id` has a FK to `households(id)` and `PRAGMA foreign_keys = ON` is global, so the test must seed real households (via `createHouseholdRepo`) before assigning users to them — fake ids would raise a FK violation. Add the import `import { createHouseholdRepo } from './householdRepo.ts'` at the top of the test file.
 
 ```typescript
 it('assigns and reads household_id; lists by household', () => {
-  const a = repo.create({ name: 'A', householdId: 'h1' })
-  const b = repo.create({ name: 'B', householdId: 'h1' })
-  repo.create({ name: 'C', householdId: 'h2' })
-  expect(a.householdId).toBe('h1')
-  expect(repo.listByHousehold('h1').map(u => u.name).sort()).toEqual(['A', 'B'])
-  repo.setHousehold(b.id, 'h2')
-  expect(repo.get(b.id)?.householdId).toBe('h2')
-  expect(repo.listByHousehold('h1').map(u => u.name)).toEqual(['A'])
+  // The test's `repo` comes from the file's existing freshRepo(); build a
+  // household repo on the SAME db so the FK is satisfied. If freshRepo() does
+  // not expose its db, switch this test to its own setup:
+  //   const db = openDatabase(':memory:'); migrate(db)
+  //   const repo = createUserRepo(db); const households = createHouseholdRepo(db)
+  const db = openDatabase(':memory:'); migrate(db)
+  const repo = createUserRepo(db)
+  const households = createHouseholdRepo(db)
+  const h1 = households.create('H1', null).id
+  const h2 = households.create('H2', null).id
+
+  const a = repo.create({ name: 'A', householdId: h1 })
+  const b = repo.create({ name: 'B', householdId: h1 })
+  repo.create({ name: 'C', householdId: h2 })
+  expect(a.householdId).toBe(h1)
+  expect(repo.listByHousehold(h1).map(u => u.name).sort()).toEqual(['A', 'B'])
+  repo.setHousehold(b.id, h2)
+  expect(repo.get(b.id)?.householdId).toBe(h2)
+  expect(repo.listByHousehold(h1).map(u => u.name)).toEqual(['A'])
 })
 ```
+
+(Ensure `openDatabase`, `migrate`, and `createUserRepo` are imported in the test file — they already are from the existing tests; add `createHouseholdRepo`.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
