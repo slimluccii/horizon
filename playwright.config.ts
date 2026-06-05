@@ -54,7 +54,7 @@ export default defineConfig({
   // The backend owns :7777; Vite proxies /auth, /users, /library, /settings… to it.
   webServer: [
     {
-      command: 'node --import tsx apps/server/src/index.ts',
+      command: 'node --import tsx apps/server/src/platform/main.ts',
       url: 'http://localhost:7777/api/health',
       reuseExistingServer: false,
       timeout: 60_000,

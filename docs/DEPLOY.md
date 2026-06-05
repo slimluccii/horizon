@@ -245,7 +245,7 @@ HORIZON_RESET_OWNER_PASSWORD=1
 ```
 
 > ℹ️ **Implementation note:** this escape hatch is wired into the server's boot
-> path (`apps/server/src/index.ts`) — on startup, when
+> path (`apps/server/src/platform/main.ts`) — on startup, when
 > `HORIZON_RESET_OWNER_PASSWORD=1`, it clears the owner's `password_hash`,
 > `password_set_at`, `failed_attempts`, and `locked_until`, and logs which owner
 > was reset. The reset itself lives in `userRepo.resetOwnerPassword()`.

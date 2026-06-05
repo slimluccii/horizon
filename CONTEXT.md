@@ -21,7 +21,7 @@ role is immutable — `PATCH /users/:id` with a different role rejects with
 `role-immutable` (403). The owner row cannot be deleted — `DELETE /users/:id`
 rejects with `owner-protected` (403). The web UI hides the "Delete profile"
 button in the badge menu when the active user is the owner. See
-[apps/server/src/repos/users.ts](apps/server/src/repos/users.ts).
+[apps/server/src/contexts/identity/infrastructure/persistence/userRepo.ts](apps/server/src/contexts/identity/infrastructure/persistence/userRepo.ts).
 
 ## Configuration
 
@@ -38,7 +38,7 @@ The `metadata_max_age_*_days` columns are stored in **days** (matching the `HORI
 
 Future schema additions (v5+) get only their hardcoded column defaults on existing rows — `seeded_from_env` will already be 1, so the bootstrap pass does not apply. A v5+ migration that adds a column should run its own targeted overlay for that column's env var.
 
-See [apps/server/src/serverSettings.ts](apps/server/src/serverSettings.ts).
+See [apps/server/src/contexts/settings/infrastructure/persistence/serverSettings.ts](apps/server/src/contexts/settings/infrastructure/persistence/serverSettings.ts).
 
 ## Library
 
@@ -50,7 +50,7 @@ NO `filePath`, NO DB bookkeeping (firstSeenAt/lastSeenAt/deletedAt/mtimeMs/
 sizeBytes), NO metadata-refresh state (tmdbId, metadataFetched*, etc) — those
 live on MediaItemRow. Wire-safe by construction; routes can serialize
 MediaItem directly without leaking server internals. See
-[apps/server/src/repos/media.ts](apps/server/src/repos/media.ts).
+[apps/server/src/contexts/library/infrastructure/persistence/media.ts](apps/server/src/contexts/library/infrastructure/persistence/media.ts).
 
 ### MediaItemRow
 Full DB row — MediaItem plus filesystem (`filePath`, `mtimeMs`, `sizeBytes`)
@@ -118,7 +118,7 @@ needsToneMap, toneMap, renditions, audioTrackIndex, audioStrategy,
 videoStrategy }`. Built by `buildPlan(probe, capabilities, hwAccel, ...)` at
 session create; rebuilt via `planWithProfile` / `planWithAudioTrack` when the
 user picks a new profile or audio track. Stable across seeks + segment-driven
-restarts. See [apps/server/src/transcode/plan.ts](apps/server/src/transcode/plan.ts).
+restarts. See [apps/server/src/contexts/playback/domain/plan.ts](apps/server/src/contexts/playback/domain/plan.ts).
 
 ### RenderContext
 Per-spawn runtime context for ffmpeg arg rendering: `{ sourceFilePath,
@@ -126,7 +126,7 @@ sessionDir, startSegment, seekPositionMs }`. Built fresh each spawn by the
 restart actuator (or the orchestrator on first spawn). The Renderer
 (`transcode/render.ts`) consumes a PlaybackPlan + RenderContext + HwAccel and
 emits ffmpeg argv. Pure function — no Session reads, no IO. See
-[apps/server/src/transcode/render.ts](apps/server/src/transcode/render.ts).
+[apps/server/src/contexts/playback/application/render.ts](apps/server/src/contexts/playback/application/render.ts).
 
 ### PlaybackMethod
 `direct-play | direct-stream | partial-transcode | transcode`. Drives whether
@@ -207,7 +207,7 @@ the `X-Reconnect-Token` header (hls.js playlist/segment loads + the teardown
 `fetch`) or a `token` query param for transports that cannot set headers — a
 browser `<video src>` (direct-play) or `<track src>` (subtitles). Treat the
 `sessionId` as opaque and the `reconnectToken` as the secret. See
-[apps/server/src/routes/segments.ts](apps/server/src/routes/segments.ts)
+[apps/server/src/contexts/playback/infrastructure/http/segments.ts](apps/server/src/contexts/playback/infrastructure/http/segments.ts)
 (`requireReconnectToken`).
 
 ### WS attach handshake
@@ -222,4 +222,4 @@ so the first connection cannot echo it). This gate prevents a party who guessed
 the session id from driving playback or mutating session state before the
 legitimate client's `hello` arrives. Each new socket (including reconnects)
 must re-handshake — auth state is reset on attach. See
-[apps/server/src/ws/handler.ts](apps/server/src/ws/handler.ts).
+[apps/server/src/contexts/playback/infrastructure/ws/handler.ts](apps/server/src/contexts/playback/infrastructure/ws/handler.ts).

@@ -38,7 +38,7 @@ jobs:
       - name: Typecheck (server)
         run: npm run -w apps/server typecheck
 
-      - name: Unit tests (server + sdk)
+      - name: Unit tests (server + sdk + web)
         run: npm test
 
       - name: Web build
