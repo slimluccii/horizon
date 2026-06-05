@@ -28,7 +28,7 @@ import network.luuk.horizontv.api.User
 import network.luuk.horizontv.app.LocalAppState
 
 @Composable
-fun ProfileListScreen(onUserPicked: () -> Unit) {
+fun ProfileListScreen(onUserPicked: () -> Unit, onSwitchServer: () -> Unit) {
     val state = LocalAppState.current
     val scope = rememberCoroutineScope()
 
@@ -74,6 +74,13 @@ fun ProfileListScreen(onUserPicked: () -> Unit) {
                         selected = false,
                         onClick = { showAdd = true },
                         headlineContent = { Text("+ Add profile") },
+                    )
+                }
+                item(key = "switch_server") {
+                    ListItem(
+                        selected = false,
+                        onClick = onSwitchServer,
+                        headlineContent = { Text("Switch server") },
                     )
                 }
             }

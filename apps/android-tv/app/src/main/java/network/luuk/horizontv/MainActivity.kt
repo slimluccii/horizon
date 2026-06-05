@@ -10,10 +10,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import network.luuk.horizontv.app.LocalAppState
+import network.luuk.horizontv.ui.BootScreen
 import network.luuk.horizontv.ui.LibraryScreen
 import network.luuk.horizontv.ui.PlayerScreen
 import network.luuk.horizontv.ui.ProfileListScreen
 import network.luuk.horizontv.ui.Routes
+import network.luuk.horizontv.ui.ServerPickerScreen
 import network.luuk.horizontv.ui.ShowDetailScreen
 
 class MainActivity : ComponentActivity() {
@@ -23,13 +25,37 @@ class MainActivity : ComponentActivity() {
         setContent {
             CompositionLocalProvider(LocalAppState provides state) {
                 val nav = rememberNavController()
-                NavHost(nav, startDestination = Routes.PROFILE_LIST) {
-                    composable(Routes.PROFILE_LIST) {
-                        ProfileListScreen(onUserPicked = {
-                            nav.navigate(Routes.LIBRARY) {
-                                popUpTo(Routes.PROFILE_LIST) { inclusive = true }
+                NavHost(nav, startDestination = Routes.BOOT) {
+                    composable(Routes.BOOT) {
+                        BootScreen(
+                            onConnected = {
+                                nav.navigate(Routes.PROFILE_LIST) {
+                                    popUpTo(Routes.BOOT) { inclusive = true }
+                                }
+                            },
+                            onNeedPicker = {
+                                nav.navigate(Routes.SERVER_PICKER) {
+                                    popUpTo(Routes.BOOT) { inclusive = true }
+                                }
+                            },
+                        )
+                    }
+                    composable(Routes.SERVER_PICKER) {
+                        ServerPickerScreen(onPicked = {
+                            nav.navigate(Routes.PROFILE_LIST) {
+                                popUpTo(Routes.SERVER_PICKER) { inclusive = true }
                             }
                         })
+                    }
+                    composable(Routes.PROFILE_LIST) {
+                        ProfileListScreen(
+                            onUserPicked = {
+                                nav.navigate(Routes.LIBRARY) {
+                                    popUpTo(Routes.PROFILE_LIST) { inclusive = true }
+                                }
+                            },
+                            onSwitchServer = { nav.navigate(Routes.SERVER_PICKER) },
+                        )
                     }
                     composable(Routes.LIBRARY) {
                         LibraryScreen(
