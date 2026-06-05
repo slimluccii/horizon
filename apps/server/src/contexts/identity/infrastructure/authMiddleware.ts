@@ -42,6 +42,8 @@ declare module 'fastify' {
     /** Set by `makeRequireAuth` after a session resolves; undefined on
      *  allowlisted (unauthenticated) routes. */
     user?: AuthedUser
+    /** Active profile (X-Horizon-Profile), validated against the session grant. */
+    profileUserId?: string
   }
 }
 
@@ -59,6 +61,7 @@ export const AUTH_ALLOWLIST: ReadonlyArray<string> = [
   '/auth/login',
   '/auth/pair/start',
   '/auth/pair/poll',
+  '/invites/redeem',
 ]
 
 /** Prefixes under which every path is unauthenticated.
@@ -170,5 +173,33 @@ export function makeRequireAuth(sessionRepo: SessionRepo, userRepo: UserRepo) {
       return
     }
     req.user = { id: user.id, role: user.role }
+  }
+}
+
+/** Header carrying the active profile (act-as target) for a request. */
+export const PROFILE_HEADER = 'x-horizon-profile'
+
+/**
+ * Build a preHandler (runs after requireAuth) that resolves the ACTIVE PROFILE.
+ * Reads X-Horizon-Profile; with no header the active profile is the principal.
+ * Otherwise the target must be in the session's grant, else 403. The session is
+ * re-resolved by token to read its grant (the principal is already known from
+ * requireAuth, but the grant lives on the session).
+ */
+export function makeResolveProfile(sessionRepo: SessionRepo, userRepo: UserRepo) {
+  return async function resolveProfile(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+    if (!req.user) return // allowlisted routes never set req.user; nothing to resolve
+    const raw = req.headers[PROFILE_HEADER]
+    const target = Array.isArray(raw) ? raw[0] : raw
+    if (!target) { req.profileUserId = req.user.id; return }
+
+    const token = tokenFromRequest(req)
+    const session = token ? sessionRepo.resolve(token) : null
+    const grant = session?.grant ?? [req.user.id]
+    if (!grant.includes(target)) {
+      await reply.status(403).send({ error: 'Profile not granted', code: ErrorCodes.PROFILE_NOT_GRANTED })
+      return
+    }
+    req.profileUserId = target
   }
 }

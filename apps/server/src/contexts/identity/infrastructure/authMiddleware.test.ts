@@ -6,6 +6,7 @@ import { createUserRepo, type UserRepo } from './persistence/userRepo.ts'
 import { createSessionRepo, type SessionRepo } from './persistence/sessionRepo.ts'
 import {
   makeRequireAuth,
+  makeResolveProfile,
   isAllowlisted,
   tokenFromRequest,
   SESSION_COOKIE,
@@ -113,6 +114,46 @@ describe('auth/middleware', () => {
       db.prepare('DELETE FROM users').run() // cascades to sessions, but token resolve handles miss
       const res = await app.inject({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${token}` } })
       expect(res.statusCode).toBe(401)
+    })
+  })
+
+  describe('resolveProfile', () => {
+    // Minimal fakes — resolveProfile only needs req.user, the profile header, and
+    // a way to fetch the session grant for the principal's current token.
+    function reqWith(profileHeader: string | undefined, grant: string[]) {
+      return {
+        user: { id: 'principal', role: 'member' as const },
+        headers: profileHeader ? { 'x-horizon-profile': profileHeader, authorization: 'Bearer t' } : { authorization: 'Bearer t' },
+        // resolveProfile resolves the session by token to read its grant:
+        __grant: grant,
+      } as any
+    }
+    const sessionRepo = { resolve: (_t: string) => ({ userId: 'principal', grant: ['principal', 'partner'] }) } as any
+    const userRepo = { get: (id: string) => ({ id, role: 'member' }) } as any
+    const hook = makeResolveProfile(sessionRepo, userRepo)
+
+    it('defaults profileUserId to the principal when no header', async () => {
+      const req = reqWith(undefined, ['principal'])
+      const reply = { code: () => reply, send: () => reply } as any
+      await hook(req, reply)
+      expect(req.profileUserId).toBe('principal')
+    })
+
+    it('accepts a profile in the grant', async () => {
+      const req = reqWith('partner', ['principal', 'partner'])
+      const reply = { code: () => reply, send: () => reply } as any
+      await hook(req, reply)
+      expect(req.profileUserId).toBe('partner')
+    })
+
+    it('rejects a profile not in the grant with 403 profile-not-granted', async () => {
+      const req = reqWith('stranger', ['principal', 'partner'])
+      let status = 0; let body: any
+      const reply = { status: (c: number) => { status = c; return reply }, send: (b: any) => { body = b; return reply } } as any
+      await hook(req, reply)
+      expect(status).toBe(403)
+      expect(body.code).toBe('profile-not-granted')
+      expect(req.profileUserId).toBeUndefined()
     })
   })
 })
