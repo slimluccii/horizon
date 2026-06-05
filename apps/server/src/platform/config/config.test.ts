@@ -53,3 +53,23 @@ describe('loadConfig — database', () => {
     delete process.env.HORIZON_WATCHED_THRESHOLD_PCT
   })
 })
+
+describe('loadConfig — discovery', () => {
+  const { loadConfig } = require('./config.ts')
+
+  it('reads HORIZON_SERVER_NAME (undefined when unset)', () => {
+    delete process.env.HORIZON_SERVER_NAME
+    expect(loadConfig().serverName).toBeUndefined()
+    process.env.HORIZON_SERVER_NAME = 'Living Room'
+    expect(loadConfig().serverName).toBe('Living Room')
+    delete process.env.HORIZON_SERVER_NAME
+  })
+
+  it('defaults mdnsEnabled to true, HORIZON_MDNS=0 disables', () => {
+    delete process.env.HORIZON_MDNS
+    expect(loadConfig().mdnsEnabled).toBe(true)
+    process.env.HORIZON_MDNS = '0'
+    expect(loadConfig().mdnsEnabled).toBe(false)
+    delete process.env.HORIZON_MDNS
+  })
+})

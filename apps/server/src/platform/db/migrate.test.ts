@@ -6,11 +6,11 @@ import { migrate } from './migrations.ts'
 // so there are no deployed DBs to migrate. These tests assert the final schema
 // applies cleanly and enforces its constraints.
 describe('migrate', () => {
-  it('applies the baseline schema to an empty DB (user_version = 1)', () => {
+  it('applies the baseline schema to an empty DB (user_version = 2)', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(1)
+    expect(ver).toBe(2)
   })
 
   it('is idempotent — re-running leaves version + history unchanged', () => {
@@ -18,9 +18,20 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(1)
+    expect(ver).toBe(2)
     const rows = db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]
-    expect(rows.map(r => r.version)).toEqual([1])
+    expect(rows.map(r => r.version)).toEqual([1, 2])
+  })
+
+  it('migrates to v2 and creates server_meta', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+    expect(ver).toBe(2)
+    const names = (db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).all() as { name: string }[]).map(r => r.name)
+    expect(names).toContain('server_meta')
   })
 
   it('creates all tables', () => {

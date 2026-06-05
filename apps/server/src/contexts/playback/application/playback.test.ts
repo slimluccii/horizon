@@ -50,6 +50,8 @@ function baseCfg(overrides: Partial<Config> = {}): Config {
     nodeEnv: 'development',
     webDir: undefined,
     serveWeb: false,
+    serverName: undefined,
+    mdnsEnabled: true,
     ...overrides,
   }
 }

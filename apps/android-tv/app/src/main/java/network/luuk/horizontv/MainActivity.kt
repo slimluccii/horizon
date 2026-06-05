@@ -3,17 +3,23 @@ package network.luuk.horizontv
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import network.luuk.horizontv.app.AppState
 import network.luuk.horizontv.app.LocalAppState
+import network.luuk.horizontv.ui.BootScreen
 import network.luuk.horizontv.ui.LibraryScreen
 import network.luuk.horizontv.ui.PlayerScreen
 import network.luuk.horizontv.ui.ProfileListScreen
 import network.luuk.horizontv.ui.Routes
+import network.luuk.horizontv.ui.ServerPickerScreen
 import network.luuk.horizontv.ui.ShowDetailScreen
 
 class MainActivity : ComponentActivity() {
@@ -23,15 +29,41 @@ class MainActivity : ComponentActivity() {
         setContent {
             CompositionLocalProvider(LocalAppState provides state) {
                 val nav = rememberNavController()
-                NavHost(nav, startDestination = Routes.PROFILE_LIST) {
-                    composable(Routes.PROFILE_LIST) {
-                        ProfileListScreen(onUserPicked = {
-                            nav.navigate(Routes.LIBRARY) {
-                                popUpTo(Routes.PROFILE_LIST) { inclusive = true }
+                NavHost(nav, startDestination = Routes.BOOT) {
+                    composable(Routes.BOOT) {
+                        BootScreen(
+                            onConnected = {
+                                nav.navigate(Routes.PROFILE_LIST) {
+                                    popUpTo(Routes.BOOT) { inclusive = true }
+                                }
+                            },
+                            onNeedPicker = {
+                                nav.navigate(Routes.SERVER_PICKER) {
+                                    popUpTo(Routes.BOOT) { inclusive = true }
+                                }
+                            },
+                        )
+                    }
+                    composable(Routes.SERVER_PICKER) {
+                        ServerPickerScreen(onPicked = {
+                            nav.navigate(Routes.PROFILE_LIST) {
+                                popUpTo(Routes.SERVER_PICKER) { inclusive = true }
                             }
                         })
                     }
+                    composable(Routes.PROFILE_LIST) {
+                        if (!connectedGuard(state, nav)) return@composable
+                        ProfileListScreen(
+                            onUserPicked = {
+                                nav.navigate(Routes.LIBRARY) {
+                                    popUpTo(Routes.PROFILE_LIST) { inclusive = true }
+                                }
+                            },
+                            onSwitchServer = { nav.navigate(Routes.SERVER_PICKER) },
+                        )
+                    }
                     composable(Routes.LIBRARY) {
+                        if (!connectedGuard(state, nav)) return@composable
                         LibraryScreen(
                             onShowClick  = { id -> nav.navigate(Routes.showDetail(id)) },
                             onMovieClick = { id, resume -> nav.navigate(Routes.player(id, resume)) },
@@ -41,6 +73,7 @@ class MainActivity : ComponentActivity() {
                         Routes.SHOW_DETAIL,
                         arguments = listOf(navArgument("showId") { type = NavType.StringType }),
                     ) { entry ->
+                        if (!connectedGuard(state, nav)) return@composable
                         val id = entry.arguments?.getString("showId") ?: run {
                             nav.navigate(Routes.LIBRARY) {
                                 popUpTo(Routes.SHOW_DETAIL) { inclusive = true }
@@ -62,6 +95,7 @@ class MainActivity : ComponentActivity() {
                             },
                         ),
                     ) { entry ->
+                        if (!connectedGuard(state, nav)) return@composable
                         val id = entry.arguments?.getString("mediaId") ?: run {
                             nav.navigate(Routes.LIBRARY) {
                                 popUpTo(Routes.PLAYER) { inclusive = true }
@@ -79,4 +113,25 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/**
+ * Gate for screens that require a connected [AppState.api]. Returns true when the
+ * API is ready; otherwise redirects to [Routes.BOOT] and returns false so the
+ * caller bails before composing a screen that would dereference a null api.
+ *
+ * This is the safety net for process-death restore: the OS rebuilds the
+ * Application (and AppState, with api = null) and the NavController restores its
+ * back stack to the last route — past BOOT — so the boot/connect step would
+ * otherwise be skipped and the restored screen would crash.
+ */
+@Composable
+private fun connectedGuard(state: AppState, nav: NavHostController): Boolean {
+    if (state.api == null) {
+        LaunchedEffect(Unit) {
+            nav.navigate(Routes.BOOT) { popUpTo(0) { inclusive = true } }
+        }
+        return false
+    }
+    return true
 }

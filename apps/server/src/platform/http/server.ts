@@ -14,6 +14,7 @@ import type { ActivityBus } from '../../contexts/activity/index.ts'
 import type { UserRepo, SessionRepo } from '../../contexts/identity/index.ts'
 import { registerAuth, makeRequireAuth, registerUsers } from '../../contexts/identity/index.ts'
 import { registerHealth } from './health.ts'
+import type { Identity } from '../identity/identity.ts'
 import { registerSessions } from '../../contexts/playback/index.ts'
 import { registerPlaylists } from '../../contexts/playback/index.ts'
 import { registerSegments } from '../../contexts/playback/index.ts'
@@ -48,6 +49,7 @@ export async function buildServer(
   sessions: SessionManager,
   workers: ScanWorkers,
   orchestrator: PlaybackOrchestrator,
+  identity: Identity,
   db?: DatabaseSync,
 ) {
   const app = Fastify({ logger: true })
@@ -81,7 +83,7 @@ export async function buildServer(
       return requireAuth(req, reply)
     })
 
-    registerHealth(api, hwAccel)
+    registerHealth(api, hwAccel, identity)
     registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
     registerSessions(api, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
     registerPlaylists(api, sessions, repos.userRepo)

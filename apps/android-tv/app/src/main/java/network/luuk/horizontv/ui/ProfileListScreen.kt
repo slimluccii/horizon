@@ -28,7 +28,7 @@ import network.luuk.horizontv.api.User
 import network.luuk.horizontv.app.LocalAppState
 
 @Composable
-fun ProfileListScreen(onUserPicked: () -> Unit) {
+fun ProfileListScreen(onUserPicked: () -> Unit, onSwitchServer: () -> Unit) {
     val state = LocalAppState.current
     val scope = rememberCoroutineScope()
 
@@ -41,7 +41,7 @@ fun ProfileListScreen(onUserPicked: () -> Unit) {
 
     suspend fun reload() {
         loading = true
-        try { users = state.api.listUsers(); error = null }
+        try { users = state.api!!.listUsers(); error = null }
         catch (e: Throwable) { error = e.message }
         finally { loading = false }
     }
@@ -76,6 +76,13 @@ fun ProfileListScreen(onUserPicked: () -> Unit) {
                         headlineContent = { Text("+ Add profile") },
                     )
                 }
+                item(key = "switch_server") {
+                    ListItem(
+                        selected = false,
+                        onClick = onSwitchServer,
+                        headlineContent = { Text("Switch server") },
+                    )
+                }
             }
         }
     }
@@ -86,7 +93,7 @@ fun ProfileListScreen(onUserPicked: () -> Unit) {
             onSubmit = { name ->
                 showAdd = false
                 scope.launch {
-                    try { state.api.createUser(CreateUserBody(name)); reload() }
+                    try { state.api!!.createUser(CreateUserBody(name)); reload() }
                     catch (e: Throwable) { error = e.message }
                 }
             },
@@ -101,7 +108,7 @@ fun ProfileListScreen(onUserPicked: () -> Unit) {
                 TextButton(onClick = {
                     showDelete = null
                     scope.launch {
-                        try { state.api.deleteUser(toDelete.id); reload() }
+                        try { state.api!!.deleteUser(toDelete.id); reload() }
                         catch (e: Throwable) { error = e.message }
                     }
                 }) { Text("Delete") }

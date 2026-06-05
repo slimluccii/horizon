@@ -35,7 +35,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import network.luuk.horizontv.BuildConfig
 import network.luuk.horizontv.api.CreateSessionBody
 import network.luuk.horizontv.api.ProgressSocket
 import network.luuk.horizontv.api.SessionInfo
@@ -65,7 +64,7 @@ fun PlayerScreen(
         val userId = state.activeUser?.id
         if (userId == null) { phase = Phase.Starting; return@LaunchedEffect }
         try {
-            val p = state.api.getProgress(userId, mediaId)
+            val p = state.api!!.getProgress(userId, mediaId)
             if (p != null && p.positionMs > RESUME_THRESHOLD_MS && !p.watched) {
                 progress = p
                 if (resumeDefault) { startMs = p.positionMs; phase = Phase.Starting }
@@ -82,7 +81,7 @@ fun PlayerScreen(
     LaunchedEffect(phase) {
         if (phase != Phase.Starting) return@LaunchedEffect
         try {
-            session = state.api.createSession(
+            session = state.api!!.createSession(
                 CreateSessionBody(
                     mediaId = mediaId,
                     capabilities = state.capabilities,
@@ -116,14 +115,14 @@ fun PlayerScreen(
             .build()
     }
 
-    val socket = remember { ProgressSocket(state.api.okHttp, BuildConfig.SERVER_URL) }
+    val socket = remember { ProgressSocket(state.api!!.okHttp, state.serverUrl!!) }
 
     val sess = session
     LaunchedEffect(sess, phase) {
         if (phase != Phase.Ready) return@LaunchedEffect
         if (sess == null) return@LaunchedEffect
         val streamUrl = if (sess.streamUrl.startsWith("http")) sess.streamUrl
-                        else BuildConfig.SERVER_URL + sess.streamUrl
+                        else state.serverUrl!! + sess.streamUrl
         player.setMediaItem(MediaItem.fromUri(streamUrl))
         player.prepare()
         player.playWhenReady = true
@@ -177,7 +176,7 @@ fun PlayerScreen(
             socket.disconnect()
             val id = session?.sessionId
             if (id != null) {
-                scope.launch { runCatching { state.api.destroySession(id) } }
+                scope.launch { runCatching { state.api!!.destroySession(id) } }
             }
         }
     }

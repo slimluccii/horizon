@@ -70,6 +70,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.androidx.datastore.preferences)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
@@ -97,4 +98,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.serialization.json)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.androidx.datastore.preferences.core)
 }

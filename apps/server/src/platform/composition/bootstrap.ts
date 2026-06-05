@@ -21,6 +21,8 @@ import { createSessionManager } from '../../contexts/playback/index.ts'
 import { createPlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import { buildServer } from '../http/server.ts'
 import { createActivityBus } from '../../contexts/activity/index.ts'
+import { loadIdentity } from '../identity/identity.ts'
+import { startMdns } from '../identity/mdns.ts'
 
 /**
  * Composition root: builds repos + workers and wires every context's
@@ -41,6 +43,7 @@ export async function bootstrap() {
 
   const db = openDatabase(cfg.dbPath)
   migrate(db)
+  const identity = loadIdentity(db, { serverName: cfg.serverName })
   const mediaRepo = createMediaRepo(db)
   const collectionsRepo = createCollectionsRepo(db)
   const userRepo = createUserRepo(db)
@@ -139,10 +142,33 @@ export async function bootstrap() {
     sessions,
     { scanManager, refreshWorker, scanHistory: scanHistoryRepo, activityBus },
     orchestrator,
+    identity,
     db,
   )
   await app.listen({ port: cfg.port, host: '0.0.0.0' })
   console.log(`Horizon listening on :${cfg.port}`)
+
+  // Advertise on the LAN via mDNS so TV/native clients can auto-discover this
+  // server. Best-effort: multicast may be unavailable (bridged Docker), so a
+  // failure is logged, not fatal — clients fall back to subnet scan / manual.
+  const mdns = cfg.mdnsEnabled
+    ? (() => {
+        try {
+          const h = startMdns(identity, cfg.port)
+          console.log(`mDNS: advertising "${identity.serverName}" as _horizon._tcp`)
+          return h
+        } catch (err) {
+          console.warn('mDNS: advertise failed (multicast unavailable?):', err)
+          return null
+        }
+      })()
+    : null
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(sig, () => {
+      mdns?.stop()
+      void app.close().then(() => process.exit(0))
+    })
+  }
 
   // Boot scan: kick after server is accepting traffic so library API doesn't
   // block on first-time indexing of large libraries.
