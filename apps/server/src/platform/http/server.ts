@@ -11,7 +11,7 @@ import { registerLibrary } from '../../contexts/library/index.ts'
 import type { MetadataRefreshWorker } from '../../contexts/metadata/index.ts'
 import type { PlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import type { ActivityBus } from '../../contexts/activity/index.ts'
-import type { UserRepo, SessionRepo } from '../../contexts/identity/index.ts'
+import type { UserRepo, SessionRepo, HouseholdRepo } from '../../contexts/identity/index.ts'
 import { registerAuth, makeRequireAuth, registerUsers } from '../../contexts/identity/index.ts'
 import { registerHealth } from './health.ts'
 import type { Identity } from '../identity/identity.ts'
@@ -31,6 +31,7 @@ export interface Repos {
   collectionsRepo: CollectionsRepo
   userRepo: UserRepo
   sessionRepo: SessionRepo
+  householdRepo: HouseholdRepo
   progressRepo: ProgressRepo
   serverSettings: ServerSettings
 }
@@ -70,7 +71,7 @@ export async function buildServer(
   await app.register(async (api) => {
     // Auth routes also register @fastify/cookie so `req.cookies` is populated
     // before the guard reads the session cookie.
-    await registerAuth(api, repos.userRepo, repos.sessionRepo)
+    await registerAuth(api, repos.userRepo, repos.sessionRepo, repos.householdRepo)
 
     const requireAuth = makeRequireAuth(repos.sessionRepo, repos.userRepo)
     api.addHook('onRequest', async (req, reply) => {

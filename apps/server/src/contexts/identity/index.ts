@@ -15,6 +15,10 @@ export {
   type PairingCode,
 } from './infrastructure/persistence/sessionRepo.ts'
 export { ensureHouseholds, type Household } from './domain/household.ts'
+export {
+  createHouseholdRepo,
+  type HouseholdRepo,
+} from './infrastructure/persistence/householdRepo.ts'
 export { hash, verify } from './infrastructure/password.ts'
 export {
   makeRequireAuth,

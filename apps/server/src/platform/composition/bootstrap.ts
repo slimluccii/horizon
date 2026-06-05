@@ -2,7 +2,7 @@ import { loadConfig } from '../config/config.ts'
 import { detectHwAccel } from '../../contexts/playback/index.ts'
 import { openDatabase } from '../db/connection.ts'
 import { migrate } from '../db/migrations.ts'
-import { createUserRepo, createSessionRepo, ensureHouseholds } from '../../contexts/identity/index.ts'
+import { createUserRepo, createSessionRepo, createHouseholdRepo, ensureHouseholds } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
 import { createTmdbProvider, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../contexts/metadata/index.ts'
@@ -74,6 +74,7 @@ export async function bootstrap() {
   }
 
   const sessionRepo = createSessionRepo(db)
+  const householdRepo = createHouseholdRepo(db)
   // Boot sweep of expired sessions (incremental cleanup also happens on resolve).
   sessionRepo.sweepExpired()
   const serverSettings = createServerSettings(db)
@@ -144,7 +145,7 @@ export async function bootstrap() {
   const app = await buildServer(
     cfg,
     hwAccel,
-    { mediaRepo, collectionsRepo, userRepo, sessionRepo, progressRepo, serverSettings },
+    { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, progressRepo, serverSettings },
     sessions,
     { scanManager, refreshWorker, scanHistory: scanHistoryRepo, activityBus },
     orchestrator,

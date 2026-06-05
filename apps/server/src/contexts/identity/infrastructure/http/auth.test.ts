@@ -4,8 +4,9 @@ import { openDatabase, type DatabaseSync } from '../../../../platform/db/connect
 import { migrate } from '../../../../platform/db/migrations.ts'
 import { createUserRepo, type UserRepo } from '../persistence/userRepo.ts'
 import { createSessionRepo, type SessionRepo } from '../persistence/sessionRepo.ts'
+import { createHouseholdRepo, type HouseholdRepo } from '../persistence/householdRepo.ts'
 import { makeRequireAuth, SESSION_COOKIE } from '../authMiddleware.ts'
-import { registerAuth } from './auth.ts'
+import { registerAuth, validateGrant } from './auth.ts'
 import { registerUsers } from './users.ts'
 import { hash } from '../password.ts'
 
@@ -14,9 +15,9 @@ import { hash } from '../password.ts'
  * is installed (so authenticated endpoints behave exactly as in production) and
  * sessions are minted by the login/set-password/pairing flows themselves.
  */
-async function buildApp(db: DatabaseSync, users: UserRepo, sessions: SessionRepo): Promise<FastifyInstance> {
+async function buildApp(db: DatabaseSync, users: UserRepo, sessions: SessionRepo, households: HouseholdRepo): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
-  await registerAuth(app, users, sessions)
+  await registerAuth(app, users, sessions, households)
   app.addHook('onRequest', makeRequireAuth(sessions, users))
   // A trivial protected route to exercise cookie/bearer auth end-to-end.
   app.get('/protected', async req => ({ id: req.user?.id }))
@@ -35,6 +36,7 @@ describe('auth routes', () => {
   let db: DatabaseSync
   let users: UserRepo
   let sessions: SessionRepo
+  let households: HouseholdRepo
   let app: FastifyInstance
 
   beforeEach(async () => {
@@ -42,7 +44,8 @@ describe('auth routes', () => {
     migrate(db)
     users = createUserRepo(db)
     sessions = createSessionRepo(db)
-    app = await buildApp(db, users, sessions)
+    households = createHouseholdRepo(db)
+    app = await buildApp(db, users, sessions, households)
   })
 
   describe('POST /auth/login', () => {
@@ -247,6 +250,8 @@ describe('auth routes', () => {
   describe('pairing flow', () => {
     it('start → approve → poll issues a session for the approver, then 410 on re-poll', async () => {
       const owner = await makeUserWithPassword(users, 'Owner', 'owner password')
+      const home = households.create('Home', owner.id)
+      users.setHousehold(owner.id, home.id)
       const ownerToken = sessions.issue(owner.id).token
 
       // TV starts pairing (unauthenticated).
@@ -279,6 +284,67 @@ describe('auth routes', () => {
       const rePoll = await app.inject({ method: 'POST', url: '/auth/pair/poll', payload: { code } })
       expect(rePoll.statusCode).toBe(410)
       expect(rePoll.json().code).toBe('pairing-expired')
+    })
+
+    it('owner approve with an explicit grant → poll returns the granted profiles', async () => {
+      const owner = await makeUserWithPassword(users, 'Owner', 'owner password')
+      const home = households.create('Home', owner.id)
+      users.setHousehold(owner.id, home.id)
+      const partner = users.create({ name: 'Partner', householdId: home.id })
+      const ownerToken = sessions.issue(owner.id).token
+
+      const { code } = (await app.inject({ method: 'POST', url: '/auth/pair/start' })).json()
+      const approve = await app.inject({
+        method: 'POST', url: '/auth/pair/approve',
+        headers: { authorization: `Bearer ${ownerToken}` },
+        payload: { code, grant: [owner.id, partner.id] },
+      })
+      expect(approve.statusCode).toBe(200)
+
+      const poll = await app.inject({ method: 'POST', url: '/auth/pair/poll', payload: { code } })
+      expect(poll.statusCode).toBe(200)
+      const body = poll.json()
+      expect(body.grant).toEqual([owner.id, partner.id])
+      expect(body.profiles.map((p: { id: string }) => p.id)).toEqual([owner.id, partner.id])
+      expect(body.profiles.map((p: { name: string }) => p.name)).toEqual(['Owner', 'Partner'])
+
+      // The minted session can read its grant back via GET /auth/grant.
+      const grant = await app.inject({
+        method: 'GET', url: '/auth/grant',
+        headers: { authorization: `Bearer ${body.token}` },
+      })
+      expect(grant.statusCode).toBe(200)
+      expect(grant.json().profiles.map((p: { id: string }) => p.id)).toEqual([owner.id, partner.id])
+    })
+
+    it('member approver cannot grant another profile (403 grant-forbidden)', async () => {
+      const owner = await makeUserWithPassword(users, 'Owner', 'owner password')
+      const home = households.create('Home', owner.id)
+      users.setHousehold(owner.id, home.id)
+      const member = users.create({ name: 'Member', householdId: home.id })
+      const memberToken = sessions.issue(member.id).token
+
+      const { code } = (await app.inject({ method: 'POST', url: '/auth/pair/start' })).json()
+      const approve = await app.inject({
+        method: 'POST', url: '/auth/pair/approve',
+        headers: { authorization: `Bearer ${memberToken}` },
+        payload: { code, grant: [owner.id] },
+      })
+      expect(approve.statusCode).toBe(403)
+      expect(approve.json().code).toBe('grant-forbidden')
+    })
+
+    it('approver without a household is rejected (403 caller-forbidden)', async () => {
+      const loner = await makeUserWithPassword(users, 'Loner', 'loner password')
+      const lonerToken = sessions.issue(loner.id).token
+      const { code } = (await app.inject({ method: 'POST', url: '/auth/pair/start' })).json()
+      const approve = await app.inject({
+        method: 'POST', url: '/auth/pair/approve',
+        headers: { authorization: `Bearer ${lonerToken}` },
+        payload: { code },
+      })
+      expect(approve.statusCode).toBe(403)
+      expect(approve.json().code).toBe('caller-forbidden')
     })
 
     it('approve requires authentication (401)', async () => {
@@ -319,7 +385,7 @@ describe('auth routes', () => {
   describe('first-boot setup flow', () => {
     async function buildSetupApp(): Promise<FastifyInstance> {
       const app = Fastify({ logger: false })
-      await registerAuth(app, users, sessions)
+      await registerAuth(app, users, sessions, households)
       // Mirror server.ts: first-boot POST /users (empty household) bypasses the guard.
       const requireAuth = makeRequireAuth(sessions, users)
       app.addHook('onRequest', async (req, reply) => {
@@ -392,5 +458,27 @@ describe('auth routes', () => {
       expect(res.statusCode).toBe(401)
       expect(res.json().code).toBe('unauthorized')
     })
+  })
+})
+
+describe('validateGrant', () => {
+  const members = ['owner', 'partner', 'kid']
+  it('owner: omitted grant fills to all household members', () => {
+    expect(validateGrant({ approverId: 'owner', isHouseholdOwner: true, householdMemberIds: members, requested: undefined }))
+      .toEqual({ ok: true, grant: members })
+  })
+  it('owner: explicit subset allowed', () => {
+    expect(validateGrant({ approverId: 'owner', isHouseholdOwner: true, householdMemberIds: members, requested: ['owner', 'partner'] }))
+      .toEqual({ ok: true, grant: ['owner', 'partner'] })
+  })
+  it('owner: id outside the household rejected', () => {
+    expect(validateGrant({ approverId: 'owner', isHouseholdOwner: true, householdMemberIds: members, requested: ['owner', 'stranger'] }).ok)
+      .toBe(false)
+  })
+  it('member: only self allowed; omitted → self', () => {
+    expect(validateGrant({ approverId: 'partner', isHouseholdOwner: false, householdMemberIds: members, requested: undefined }))
+      .toEqual({ ok: true, grant: ['partner'] })
+    expect(validateGrant({ approverId: 'partner', isHouseholdOwner: false, householdMemberIds: members, requested: ['owner'] }).ok)
+      .toBe(false)
   })
 })

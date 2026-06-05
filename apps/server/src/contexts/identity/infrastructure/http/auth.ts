@@ -4,6 +4,7 @@ import fastifyCookie from '@fastify/cookie'
 import crypto from 'node:crypto'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
+import type { HouseholdRepo } from '../persistence/householdRepo.ts'
 import { SESSION_COOKIE, tokenFromRequest, setSessionCookie } from '../authMiddleware.ts'
 import { hash as hashPassword, verify as verifyPassword } from '../password.ts'
 import { badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
@@ -69,7 +70,10 @@ const SetPasswordBody = z.object({
   newPassword: z.string().min(MIN_PASSWORD_LEN).max(1024),
 }).strict()
 
-const PairApproveBody = z.object({ code: z.string().min(1).max(32) }).strict()
+const PairApproveBody = z.object({
+  code: z.string().min(1).max(32),
+  grant: z.array(z.string()).optional(),
+}).strict()
 const PairPollBody = z.object({ code: z.string().min(1).max(32) }).strict()
 
 // --- Helpers ----------------------------------------------------------------
@@ -93,6 +97,26 @@ function genericLoginFailure(reply: FastifyReply): FastifyReply {
   return errorReply(reply, 401, ErrorCodes.INVALID_CREDENTIALS, 'Invalid name or password')
 }
 
+export interface GrantCheck {
+  approverId: string
+  isHouseholdOwner: boolean
+  householdMemberIds: string[]
+  requested: string[] | undefined
+}
+
+/** Validate/normalize the act-as grant an approver may attach to a device. */
+export function validateGrant(c: GrantCheck): { ok: true; grant: string[] } | { ok: false } {
+  if (!c.isHouseholdOwner) {
+    // Members may grant only themselves.
+    if (c.requested && !(c.requested.length === 1 && c.requested[0] === c.approverId)) return { ok: false }
+    return { ok: true, grant: [c.approverId] }
+  }
+  // Household owner: default to the whole household; any explicit id must be in it.
+  if (c.requested === undefined) return { ok: true, grant: c.householdMemberIds }
+  if (c.requested.some(id => !c.householdMemberIds.includes(id))) return { ok: false }
+  return { ok: true, grant: c.requested }
+}
+
 /** Short, human-friendly pairing code (e.g. "ABCD-1234"). Avoids ambiguous
  *  characters (no 0/O/1/I) so it reads cleanly off a TV screen. */
 const PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -108,6 +132,7 @@ export async function registerAuth(
   app: FastifyInstance,
   users: UserRepo,
   sessions: SessionRepo,
+  households: HouseholdRepo,
 ): Promise<void> {
   await app.register(fastifyCookie)
 
@@ -151,7 +176,7 @@ export async function registerAuth(
 
     users.clearLockout(auth.id)
     const ua = req.headers['user-agent']
-    const { token } = sessions.issue(auth.id, typeof ua === 'string' ? ua : null)
+    const { token } = sessions.issue(auth.id, typeof ua === 'string' ? ua : null, [auth.id])
     setSessionCookie(reply, req, token)
     const user = users.get(auth.id)
     return { token, user }
@@ -277,7 +302,18 @@ export async function registerAuth(
     if (pc.consumed || pc.expiresAt <= Date.now()) {
       return errorReply(reply, 410, ErrorCodes.PAIRING_EXPIRED, 'Pairing code expired')
     }
-    sessions.approvePairingCode(parse.data.code, caller.id)
+    const approver = users.get(caller.id)
+    if (!approver?.householdId) return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'No household')
+    const household = households.get(approver.householdId)
+    const memberIds = users.listByHousehold(approver.householdId).map(u => u.id)
+    const check = validateGrant({
+      approverId: caller.id,
+      isHouseholdOwner: household?.ownerUserId === caller.id,
+      householdMemberIds: memberIds,
+      requested: parse.data.grant,
+    })
+    if (!check.ok) return errorReply(reply, 403, ErrorCodes.GRANT_FORBIDDEN, 'Cannot grant those profiles')
+    sessions.approvePairingCode(parse.data.code, caller.id, check.grant)
     return { ok: true }
   })
 
@@ -299,9 +335,29 @@ export async function registerAuth(
       // Still waiting for the phone to approve.
       return reply.status(202).send({ status: 'pending' })
     }
+    const grant = pc.grantedUserIds ?? [pc.approvedUserId]
     const ua = req.headers['user-agent']
-    const { token, session } = sessions.issue(pc.approvedUserId, typeof ua === 'string' ? ua : null)
+    const { token, session } = sessions.issue(pc.approvedUserId, typeof ua === 'string' ? ua : null, grant)
     sessions.consumePairingCode(parse.data.code, session.id)
-    return { token, user: users.get(pc.approvedUserId) }
+    const profiles = grant.map(id => users.get(id)).filter(Boolean).map(u => ({ id: u!.id, name: u!.name, avatar: u!.avatar }))
+    return { token, user: users.get(pc.approvedUserId), grant, profiles }
+  })
+
+  // GET /auth/grant — authenticated. Returns the caller's granted profiles,
+  // intersected with their current household (a grant id that has since left the
+  // household, or no longer exists, is dropped).
+  app.get('/auth/grant', async (req, reply) => {
+    const caller = req.user
+    if (!caller) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    const token = tokenFromRequest(req)
+    const session = token ? sessions.resolve(token) : null
+    const grant = session?.grant ?? [caller.id]
+    const me = users.get(caller.id)
+    const householdId = me?.householdId
+    const profiles = grant
+      .map(id => users.get(id))
+      .filter((u): u is NonNullable<typeof u> => !!u && u.householdId === householdId)
+      .map(u => ({ id: u.id, name: u.name, avatar: u.avatar }))
+    return { profiles }
   })
 }

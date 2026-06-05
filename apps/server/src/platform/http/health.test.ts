@@ -5,7 +5,7 @@ import { buildServer } from './server.ts'
 import { openDatabase } from '../db/connection.ts'
 import { migrate } from '../db/migrations.ts'
 import { createMediaRepo, createCollectionsRepo, createScanHistoryRepo } from '../../contexts/library/index.ts'
-import { createUserRepo, createSessionRepo } from '../../contexts/identity/index.ts'
+import { createUserRepo, createSessionRepo, createHouseholdRepo } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
 import { createActivityBus } from '../../contexts/activity/index.ts'
@@ -43,6 +43,7 @@ describe('buildServer wiring → /health', () => {
     const collectionsRepo = createCollectionsRepo(db)
     const userRepo = createUserRepo(db)
     const sessionRepo = createSessionRepo(db)
+    const householdRepo = createHouseholdRepo(db)
     const serverSettings = createServerSettings(db)
     const progressRepo = createProgressRepo(db, mediaRepo, {
       getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct,
@@ -62,7 +63,7 @@ describe('buildServer wiring → /health', () => {
     return buildServer(
       cfg,
       fakeHw,
-      { mediaRepo, collectionsRepo, userRepo, sessionRepo, progressRepo, serverSettings },
+      { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, progressRepo, serverSettings },
       {} as any,
       { scanManager: {} as any, refreshWorker: {} as any, scanHistory, activityBus: createActivityBus() },
       {} as any,
