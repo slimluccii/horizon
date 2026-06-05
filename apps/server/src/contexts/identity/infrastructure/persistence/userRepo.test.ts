@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { openDatabase, type DatabaseSync } from '../../../../platform/db/connection.ts'
 import { migrate } from '../../../../platform/db/migrations.ts'
 import { createUserRepo, type UserRepo } from './userRepo.ts'
+import { createHouseholdRepo } from './householdRepo.ts'
 
 function freshRepo(): UserRepo {
   const db: DatabaseSync = openDatabase(':memory:')
@@ -189,5 +190,26 @@ describe('userRepo', () => {
     const next = repo.create({ name: 'B' })
     expect(next.role).toBe('member')
     expect(repo.list()).toHaveLength(2)
+  })
+
+  it('assigns and reads household_id; lists by household', () => {
+    // users.household_id has a FK to households(id) and PRAGMA foreign_keys = ON
+    // is global, so seed real households (via createHouseholdRepo) on the SAME db
+    // before assigning users — fake ids would raise a FK violation.
+    const db: DatabaseSync = openDatabase(':memory:')
+    migrate(db)
+    const repo = createUserRepo(db)
+    const households = createHouseholdRepo(db)
+    const h1 = households.create('H1', null).id
+    const h2 = households.create('H2', null).id
+
+    const a = repo.create({ name: 'A', householdId: h1 })
+    const b = repo.create({ name: 'B', householdId: h1 })
+    repo.create({ name: 'C', householdId: h2 })
+    expect(a.householdId).toBe(h1)
+    expect(repo.listByHousehold(h1).map(u => u.name).sort()).toEqual(['A', 'B'])
+    repo.setHousehold(b.id, h2)
+    expect(repo.get(b.id)?.householdId).toBe(h2)
+    expect(repo.listByHousehold(h1).map(u => u.name)).toEqual(['A'])
   })
 })

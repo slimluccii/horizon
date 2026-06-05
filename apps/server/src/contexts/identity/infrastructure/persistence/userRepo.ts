@@ -15,6 +15,7 @@ export interface User {
   /** When the user last set a password (ms epoch), or null if never set. A null
    *  value flags a forced first-boot set-password (migrated owner / new member). */
   passwordSetAt: number | null
+  householdId: string | null
   createdAt: number
   updatedAt: number
 }
@@ -39,6 +40,7 @@ export interface UserInsert {
   name: string
   avatar?: string | null
   preferences?: Record<string, unknown>
+  householdId?: string | null
 }
 
 export interface UserPatch {
@@ -73,6 +75,10 @@ export interface UserRepo {
    *  forced back through the set-password flow (like first boot). Returns the
    *  owner's name if a reset happened, or null if there is no owner row. */
   resetOwnerPassword(): string | null
+  /** Users in a household, in insertion order. */
+  listByHousehold(householdId: string): User[]
+  /** Move a user into a household. Returns false if no such user. */
+  setHousehold(id: string, householdId: string): boolean
 }
 
 function rowToUser(raw: unknown): User {
@@ -85,6 +91,7 @@ function rowToUser(raw: unknown): User {
     role: row.role,
     hasPassword: row.password_hash != null,
     passwordSetAt: row.password_set_at,
+    householdId: row.household_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -135,9 +142,9 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
         const isFirst = (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n === 0
         const role = isFirst ? 'owner' : 'member'
         db.prepare(
-          `INSERT INTO users (id, name, avatar, preferences, role, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).run(id, input.name, input.avatar ?? null, prefsJson, role, now, now)
+          `INSERT INTO users (id, name, avatar, preferences, role, household_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(id, input.name, input.avatar ?? null, prefsJson, role, input.householdId ?? null, now, now)
         db.exec('COMMIT')
       } catch (err) {
         db.exec('ROLLBACK')
@@ -149,6 +156,16 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
     list() {
       const rows = db.prepare('SELECT * FROM users ORDER BY created_at ASC').all()
       return rows.map(rowToUser)
+    },
+
+    listByHousehold(householdId) {
+      const rows = db.prepare('SELECT * FROM users WHERE household_id = ? ORDER BY created_at, rowid').all(householdId)
+      return rows.map(rowToUser)
+    },
+
+    setHousehold(id, householdId) {
+      return db.prepare('UPDATE users SET household_id = ?, updated_at = ? WHERE id = ?')
+        .run(householdId, Date.now(), id).changes > 0
     },
 
     get(id) {
