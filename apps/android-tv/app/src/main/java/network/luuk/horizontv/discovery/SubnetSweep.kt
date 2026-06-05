@@ -1,5 +1,9 @@
 package network.luuk.horizontv.discovery
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+
 /**
  * Enumerate sweepable host IPs for [selfIp] on a /[prefix] network. Returns null
  * when the prefix is wider than /24 (too many hosts to brute-force) or outside the
@@ -26,4 +30,23 @@ fun hostsForSweep(selfIp: String, prefix: Int): List<String>? {
     return ((network + 1)..(broadcast - 1))
         .filter { it != selfLast }
         .map { "$base.$it" }
+}
+
+/**
+ * Probe every host concurrently via [probe] and return the positive hits. The
+ * caller supplies [probe] (normally a `/health` call with a short timeout
+ * client); injection keeps this unit-testable without real sockets.
+ *
+ * Each probe is isolated with [runCatching]: a throwing probe is treated as a
+ * miss for that host rather than aborting the whole sweep. This keeps a single
+ * flaky host (DNS failure, socket reset, unexpected exception) from cancelling
+ * its siblings via [awaitAll].
+ */
+suspend fun sweepHosts(
+    hosts: List<String>,
+    probe: suspend (ip: String) -> DiscoveredServer?,
+): List<DiscoveredServer> = coroutineScope {
+    hosts.map { ip -> async { runCatching { probe(ip) }.getOrNull() } }
+        .awaitAll()
+        .filterNotNull()
 }
