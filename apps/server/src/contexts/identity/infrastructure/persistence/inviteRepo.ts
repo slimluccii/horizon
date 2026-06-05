@@ -28,6 +28,12 @@ export interface InviteRepo {
   get(code: string): Invite | null
   /** Mark an invite consumed at [now]. Returns false if already consumed/unknown. */
   consume(code: string, now: number): boolean
+  /** Reopen an invite this request just consumed (clear `consumed_at`) so a guest
+   *  can retry after a *recoverable* redeem failure — e.g. a globally-taken name.
+   *  Used only on the failure path right after a successful {@link consume}, so
+   *  it never resurrects a code another request legitimately claimed. Returns
+   *  false if no such code. */
+  release(code: string): boolean
 }
 
 function rowToInvite(raw: unknown): Invite {
@@ -58,6 +64,9 @@ export function createInviteRepo(db: DatabaseSync): InviteRepo {
     consume(code, now) {
       return db.prepare('UPDATE invites SET consumed_at = ? WHERE code = ? AND consumed_at IS NULL')
         .run(now, code).changes > 0
+    },
+    release(code) {
+      return db.prepare('UPDATE invites SET consumed_at = NULL WHERE code = ?').run(code).changes > 0
     },
   }
 }

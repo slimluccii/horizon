@@ -30,4 +30,5 @@ export {
 } from './infrastructure/authMiddleware.ts'
 export { registerAuth } from './infrastructure/http/auth.ts'
 export { registerUsers } from './infrastructure/http/users.ts'
+export { registerInvites, type InviteDeps } from './infrastructure/http/invites.ts'
 export { resolveCallerRole, requireUser, canAccessSession } from './infrastructure/http/authz.ts'

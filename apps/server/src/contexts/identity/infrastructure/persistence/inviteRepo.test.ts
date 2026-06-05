@@ -48,4 +48,18 @@ describe('inviteRepo', () => {
   it('get returns null for unknown code', () => {
     expect(repo.get('nope')).toBeNull()
   })
+
+  it('release reopens a consumed invite so it can be consumed again', () => {
+    const now = Date.now()
+    repo.create({ code: 'REL-1', kind: 'new_household', householdId: null, createdBy: userId, createdAt: now, expiresAt: now + 1000 })
+    expect(repo.consume('REL-1', now)).toBe(true)
+    expect(repo.release('REL-1')).toBe(true)
+    expect(repo.get('REL-1')?.consumedAt).toBeNull()
+    // Reopened: a subsequent consume succeeds again.
+    expect(repo.consume('REL-1', now)).toBe(true)
+  })
+
+  it('release returns false for an unknown code', () => {
+    expect(repo.release('nope')).toBe(false)
+  })
 })
