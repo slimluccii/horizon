@@ -1,4 +1,4 @@
-import { Bonjour } from 'bonjour-service'
+import Bonjour from 'bonjour-service'
 import type { Identity } from './identity.ts'
 
 export interface MdnsHandle {

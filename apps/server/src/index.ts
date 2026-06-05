@@ -17,6 +17,7 @@ import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
 import { createSessionManager } from './session/manager.ts'
 import { createPlaybackOrchestrator } from './session/playback.ts'
 import { loadIdentity } from './identity.ts'
+import { startMdns } from './mdns.ts'
 import { buildServer } from './server.ts'
 
 async function main() {
@@ -122,7 +123,7 @@ async function main() {
     cfg, hwAccel, media: mediaRepo, users: userRepo, sessions, serverSettings,
   })
 
-  const identity = loadIdentity(db, cfg)
+  const identity = loadIdentity(db, { serverName: cfg.serverName })
 
   const app = await buildServer(
     cfg,
@@ -136,6 +137,26 @@ async function main() {
   )
   await app.listen({ port: cfg.port, host: '0.0.0.0' })
   console.log(`Horizon listening on :${cfg.port}`)
+
+  const mdns = cfg.mdnsEnabled
+    ? (() => {
+        try {
+          const h = startMdns(identity, cfg.port)
+          console.log(`mDNS: advertising "${identity.serverName}" as _horizon._tcp`)
+          return h
+        } catch (err) {
+          console.warn('mDNS: advertise failed (multicast unavailable?):', err)
+          return null
+        }
+      })()
+    : null
+
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(sig, () => {
+      mdns?.stop()
+      void app.close().then(() => process.exit(0))
+    })
+  }
 
   // Boot scan: kick after server is accepting traffic so library API doesn't
   // block on first-time indexing of large libraries.
