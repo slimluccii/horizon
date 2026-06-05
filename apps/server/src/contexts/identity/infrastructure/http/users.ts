@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
-import { setSessionCookie } from '../authMiddleware.ts'
+import { setSessionCookie, tokenFromRequest } from '../authMiddleware.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole } from './authz.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
@@ -63,7 +63,19 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
     }
   })
 
-  app.get('/users', async () => users.list())
+  app.get('/users', async (req) => {
+    // GET /users is auth-allowlisted (the pre-login profile picker), so the
+    // requireAuth hook never sets req.user here. Resolve the caller from the
+    // session token ourselves: an authenticated caller sees only their own
+    // household's members; the unauthenticated login picker keeps the full list.
+    const token = tokenFromRequest(req)
+    if (token) {
+      const session = sessions.resolve(token)
+      const me = session ? users.get(session.userId) : null
+      if (me?.householdId) return users.listByHousehold(me.householdId)
+    }
+    return users.list()
+  })
 
   app.get<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
     const u = users.get(req.params.id)
