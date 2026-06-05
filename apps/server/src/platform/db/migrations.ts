@@ -197,9 +197,33 @@ CREATE TABLE server_meta (
 );
 `
 
+const V3_SQL = `
+CREATE TABLE households (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  owner_user_id TEXT REFERENCES users(id),
+  created_at    INTEGER NOT NULL
+);
+
+ALTER TABLE users         ADD COLUMN household_id TEXT REFERENCES households(id);
+ALTER TABLE sessions      ADD COLUMN grant_user_ids TEXT;     -- JSON array; null = [user_id]
+ALTER TABLE pairing_codes ADD COLUMN granted_user_ids TEXT;   -- JSON array
+
+CREATE TABLE invites (
+  code         TEXT PRIMARY KEY,
+  kind         TEXT NOT NULL CHECK(kind IN ('join','new_household')),
+  household_id TEXT REFERENCES households(id),
+  created_by   TEXT NOT NULL REFERENCES users(id),
+  created_at   INTEGER NOT NULL,
+  expires_at   INTEGER NOT NULL,
+  consumed_at  INTEGER
+);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
+  { version: 3, sql: V3_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.
