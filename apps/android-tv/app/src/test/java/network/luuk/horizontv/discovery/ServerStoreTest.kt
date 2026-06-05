@@ -44,9 +44,29 @@ class ServerStoreTest {
         assertEquals(server, store.read())
     }
 
-    @Test fun `read returns null when instance_id is missing`() = runBlocking {
+    @Test fun `read yields a null-id server when instance_id is missing`() = runBlocking {
+        // A server is keyed by URL; the instanceId is optional (e.g. a manual
+        // entry saved while the server was unreachable).
         prefs.edit { it[stringPreferencesKey("last_url")] = "http://1.1.1.1:7777" }
-        assertNull(store.read())
+        assertEquals(
+            SavedServer(instanceId = null, lastUrl = "http://1.1.1.1:7777", name = "http://1.1.1.1:7777"),
+            store.read(),
+        )
+    }
+
+    @Test fun `save with null id then read round-trips null id`() = runBlocking {
+        val server = SavedServer(instanceId = null, lastUrl = "http://9.9.9.9:7777", name = "Manual")
+        store.save(server)
+        assertEquals(server, store.read())
+    }
+
+    @Test fun `save with null id clears a previously stored id`() = runBlocking {
+        store.save(SavedServer(instanceId = "old", lastUrl = "http://9.9.9.9:7777", name = "Manual"))
+        store.save(SavedServer(instanceId = null, lastUrl = "http://9.9.9.9:7777", name = "Manual"))
+        assertEquals(
+            SavedServer(instanceId = null, lastUrl = "http://9.9.9.9:7777", name = "Manual"),
+            store.read(),
+        )
     }
 
     @Test fun `read returns null when last_url is missing`() = runBlocking {

@@ -20,15 +20,16 @@ class ServerStore internal constructor(private val store: DataStore<Preferences>
 
     suspend fun read(): SavedServer? {
         val prefs = store.data.first()
-        val id = prefs[idKey] ?: return null
+        // A saved server is keyed by its URL; the instanceId is optional.
         val url = prefs[urlKey] ?: return null
         val name = prefs[nameKey] ?: url
-        return SavedServer(id, url, name)
+        return SavedServer(prefs[idKey], url, name)
     }
 
     suspend fun save(server: SavedServer) {
         store.edit { prefs ->
-            prefs[idKey] = server.instanceId
+            val id = server.instanceId
+            if (id != null) prefs[idKey] = id else prefs.remove(idKey)
             prefs[urlKey] = server.lastUrl
             prefs[nameKey] = server.name
         }

@@ -18,12 +18,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.ListItem
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import network.luuk.horizontv.app.LocalAppState
@@ -55,7 +53,7 @@ fun ServerPickerScreen(onPicked: () -> Unit) {
             state.connect(server.url)
             state.store.save(
                 SavedServer(
-                    instanceId = server.instanceId ?: server.url,
+                    instanceId = server.instanceId,
                     lastUrl = server.url,
                     name = server.name,
                 )
@@ -72,10 +70,15 @@ fun ServerPickerScreen(onPicked: () -> Unit) {
             .readTimeout(800, TimeUnit.MILLISECONDS)
             .build()
 
-        // mDNS — collect up to ~4s into a snapshot list.
-        val mdnsHits = withTimeoutOrNull(4_000) {
-            state.mdns.discover().toList()
-        } ?: emptyList()
+        // mDNS — collect into a list over a ~4s window. discover() is a
+        // callbackFlow that never completes on its own, so toList() would hang
+        // until the timeout cancels it and discards everything. Collect
+        // incrementally instead so partial results survive the timeout.
+        val mdnsHits = buildList {
+            withTimeoutOrNull(4_000) {
+                state.mdns.discover().collect { add(it) }
+            }
+        }
 
         // Sweep — own /24 only.
         val (ip, prefix) = localIpv4AndPrefix(context) ?: (null to 0)
@@ -98,7 +101,7 @@ fun ServerPickerScreen(onPicked: () -> Unit) {
         else if (servers.isEmpty()) Text("No servers found. Enter an address manually.")
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(servers, key = { it.url }) { server ->
+            items(servers, key = { "${it.source}:${it.url}" }) { server ->
                 ListItem(
                     selected = false,
                     onClick = { choose(server) },

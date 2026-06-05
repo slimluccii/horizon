@@ -16,6 +16,12 @@ fun normalizeServerUrl(input: String): String? {
         "http://$trimmed"
     }
     val schemeEnd = withScheme.indexOf("://") + 3
-    val authority = withScheme.substring(schemeEnd)
-    return if (authority.contains(':')) withScheme else "$withScheme:$DEFAULT_PORT"
+    val rest = withScheme.substring(schemeEnd)
+    // Only the host[:port] segment matters for the port check — a path/query
+    // after the first '/' must not be mistaken for (or fused onto) the port.
+    val hostEnd = rest.indexOfFirst { it == '/' || it == '?' }.let { if (it == -1) rest.length else it }
+    val host = rest.substring(0, hostEnd)
+    if (host.contains(':')) return withScheme
+    // Insert the default port right after the host, before any path/query.
+    return withScheme.substring(0, schemeEnd) + host + ":$DEFAULT_PORT" + rest.substring(hostEnd)
 }

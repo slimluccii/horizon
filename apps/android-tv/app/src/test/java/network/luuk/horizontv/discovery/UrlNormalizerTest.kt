@@ -17,4 +17,10 @@ class UrlNormalizerTest {
     @Test fun `blank is rejected`() {
         assertNull(normalizeServerUrl("   "))
     }
+    @Test fun `bare host with a path inserts port before the path`() {
+        assertEquals("http://192.168.1.10:7777/horizon", normalizeServerUrl("192.168.1.10/horizon"))
+    }
+    @Test fun `host with port and path keeps both`() {
+        assertEquals("http://192.168.1.10:8000/base", normalizeServerUrl("192.168.1.10:8000/base"))
+    }
 }

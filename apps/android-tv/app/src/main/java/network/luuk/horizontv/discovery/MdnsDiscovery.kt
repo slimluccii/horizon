@@ -56,17 +56,24 @@ class MdnsDiscovery(context: Context) {
             runCatching { acquire() }
         }
 
-        // Serialize resolves: NsdManager rejects concurrent resolveService calls.
+        // Serialize resolves: NsdManager rejects concurrent resolveService calls,
+        // and its callbacks are not guaranteed to share a thread across API
+        // levels. Guard the queue + the in-flight flag under a single lock so an
+        // enqueue can never race a completing resolve into a stalled pump.
         val pending = ConcurrentLinkedQueue<NsdServiceInfo>()
+        val gate = Any()
         var resolving = false
 
         fun resolveNext() {
-            if (resolving) return
-            val info = pending.poll() ?: return
-            resolving = true
+            val info: NsdServiceInfo
+            synchronized(gate) {
+                if (resolving) return
+                info = pending.poll() ?: return
+                resolving = true
+            }
             nsd.resolveService(info, object : NsdManager.ResolveListener {
                 override fun onResolveFailed(s: NsdServiceInfo, code: Int) {
-                    resolving = false
+                    synchronized(gate) { resolving = false }
                     resolveNext()
                 }
                 override fun onServiceResolved(s: NsdServiceInfo) {
@@ -76,7 +83,7 @@ class MdnsDiscovery(context: Context) {
                         serviceName = s.serviceName,
                         attributes = s.attributes,
                     )?.let { trySend(it) }
-                    resolving = false
+                    synchronized(gate) { resolving = false }
                     resolveNext()
                 }
             })
