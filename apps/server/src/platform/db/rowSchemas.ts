@@ -17,6 +17,7 @@ export const UserRowSchema = z.object({
   password_set_at: z.number().int().nullable(),
   failed_attempts: z.number().int(),
   locked_until: z.number().int().nullable(),
+  household_id: z.string().nullable(),
   created_at: z.number().int(),
   updated_at: z.number().int(),
 })
@@ -71,3 +72,22 @@ export const CollectionRowSchema = z.object({
   updated_at: z.number().int(),
 })
 export type CollectionRow = z.infer<typeof CollectionRowSchema>
+
+export const HouseholdRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  owner_user_id: z.string().nullable(),
+  created_at: z.number(),
+})
+export type HouseholdRow = z.infer<typeof HouseholdRowSchema>
+
+export const InviteRowSchema = z.object({
+  code: z.string(),
+  kind: z.enum(['join', 'new_household']),
+  household_id: z.string().nullable(),
+  created_by: z.string(),
+  created_at: z.number(),
+  expires_at: z.number(),
+  consumed_at: z.number().nullable(),
+})
+export type InviteRow = z.infer<typeof InviteRowSchema>
