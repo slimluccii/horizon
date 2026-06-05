@@ -52,6 +52,10 @@ export interface Config {
   /** Whether to serve the bundled web UI. True by default when webDir is set;
    *  set HORIZON_SERVE_WEB=0 to run the server headless even with a dist on disk. */
   serveWeb: boolean
+  /** Human-friendly server name advertised to clients. Undefined → hostname. */
+  serverName: string | undefined
+  /** Advertise the server over mDNS. Off in host setups without multicast. */
+  mdnsEnabled: boolean
 }
 
 /** Parse env var as positive integer, falling back to default on missing/NaN. */
@@ -104,6 +108,8 @@ export function loadConfig(): Config {
     nodeEnv: process.env.NODE_ENV || 'development',
     webDir,
     serveWeb: webDir ? envBool('HORIZON_SERVE_WEB', true) : false,
+    serverName: process.env.HORIZON_SERVER_NAME || undefined,
+    mdnsEnabled: envBool('HORIZON_MDNS', true),
   }
 }
 
