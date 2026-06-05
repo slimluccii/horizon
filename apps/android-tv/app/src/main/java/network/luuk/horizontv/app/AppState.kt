@@ -13,7 +13,7 @@ import network.luuk.horizontv.discovery.MdnsDiscovery
 /**
  * Top-of-process singleton. Built in [network.luuk.horizontv.HorizonApp.onCreate]
  * and published to the Compose tree via [LocalAppState]. Holds:
- *  - `api`           — the [HorizonApi] with the configured base URL
+ *  - `api`           — the [HorizonApi]; null until [connect] is called with a chosen server
  *  - `capabilities`  — the probed device caps; immutable for the process lifetime
  *  - `activeUser`    — the profile the user picked; null until they pick one
  */
