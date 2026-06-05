@@ -187,8 +187,16 @@ CREATE TABLE pairing_codes (
 );
 `
 
+const V2_SQL = `
+CREATE TABLE server_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
+  { version: 2, sql: V2_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.
