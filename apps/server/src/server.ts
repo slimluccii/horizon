@@ -14,6 +14,7 @@ import type { SessionManager } from './session/manager.ts'
 import type { ScanManager } from './scanner/manager.ts'
 import type { MetadataRefreshWorker } from './metadata/refresh.ts'
 import type { PlaybackOrchestrator } from './session/playback.ts'
+import type { Identity } from './identity.ts'
 import { registerAuth } from './routes/auth.ts'
 import { makeRequireAuth } from './auth/middleware.ts'
 import { registerHealth } from './routes/health.ts'
@@ -52,6 +53,7 @@ export async function buildServer(
   sessions: SessionManager,
   workers: ScanWorkers,
   orchestrator: PlaybackOrchestrator,
+  identity: Identity,
   db?: DatabaseSync,
 ) {
   const app = Fastify({ logger: true })
@@ -85,7 +87,7 @@ export async function buildServer(
       return requireAuth(req, reply)
     })
 
-    registerHealth(api, hwAccel)
+    registerHealth(api, hwAccel, identity)
     registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
     registerSessions(api, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
     registerPlaylists(api, sessions, repos.userRepo)

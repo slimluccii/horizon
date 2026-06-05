@@ -16,6 +16,7 @@ import { startWatcher, type WatcherHandle } from './scanner/watcher.ts'
 import { startDailySchedule, type DailyScheduleHandle } from './scheduler.ts'
 import { createSessionManager } from './session/manager.ts'
 import { createPlaybackOrchestrator } from './session/playback.ts'
+import { loadIdentity } from './identity.ts'
 import { buildServer } from './server.ts'
 
 async function main() {
@@ -121,6 +122,8 @@ async function main() {
     cfg, hwAccel, media: mediaRepo, users: userRepo, sessions, serverSettings,
   })
 
+  const identity = loadIdentity(db, cfg)
+
   const app = await buildServer(
     cfg,
     hwAccel,
@@ -128,6 +131,7 @@ async function main() {
     sessions,
     { scanManager, refreshWorker, scanHistory: scanHistoryRepo },
     orchestrator,
+    identity,
     db,
   )
   await app.listen({ port: cfg.port, host: '0.0.0.0' })
