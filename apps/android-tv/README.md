@@ -7,8 +7,10 @@ from Android 6 up — reference device is Nvidia Shield TV Pro.
 
 1. Install Android Studio Ladybug or newer.
 2. Open `tv/` as a Gradle project (File → Open → pick this folder).
-3. Copy `tv/local.properties.example` to `tv/local.properties` and set
-   `HORIZON_SERVER_URL` to your server's LAN URL.
+3. The app discovers servers on first launch (mDNS + network scan) and shows a
+   picker, so no URL configuration is required. Optionally, copy
+   `tv/local.properties.example` to `tv/local.properties` and set
+   `HORIZON_SERVER_URL` — this is only a dev pre-fill for the manual-entry field.
 4. On your Shield: Settings → Device Preferences → About → Build × 7 to
    enable developer mode, then Developer options → Network debugging.
 5. From your Mac:
