@@ -22,6 +22,7 @@ export {
 export { hash, verify } from './infrastructure/password.ts'
 export {
   makeRequireAuth,
+  makeResolveProfile,
   SESSION_COOKIE,
   setSessionCookie,
   tokenFromRequest,

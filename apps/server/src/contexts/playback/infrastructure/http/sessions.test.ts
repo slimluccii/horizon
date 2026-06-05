@@ -6,7 +6,7 @@ import { openDatabase, type DatabaseSync } from '../../../../platform/db/connect
 import { migrate } from '../../../../platform/db/migrations.ts'
 import { createUserRepo } from '../../../identity/index.ts'
 import { createSessionRepo } from '../../../identity/index.ts'
-import { makeRequireAuth } from '../../../identity/index.ts'
+import { makeRequireAuth, makeResolveProfile } from '../../../identity/index.ts'
 import { createServerSettings } from '../../../settings/index.ts'
 import { createSessionManager } from '../../application/manager.ts'
 import { registerSessions } from './sessions.ts'
@@ -70,6 +70,31 @@ async function buildApp(
   registerSessions(app, cfg, hwAccel, sessions, progressRepo, orchestrator, serverSettings, users)
   await app.ready()
   return app
+}
+
+/** Like buildApp, but also installs the resolveProfile preHandler so
+ *  req.profileUserId is populated — exercising the active-profile path of
+ *  POST /sessions (Task 14). */
+async function buildAppWithProfile(
+  db: DatabaseSync,
+  users: ReturnType<typeof setup>['users'],
+  serverSettings: ReturnType<typeof setup>['serverSettings'],
+  orchestrator: PlaybackOrchestrator,
+) {
+  const app = Fastify({ logger: false })
+  app.addHook('onRequest', makeRequireAuth(createSessionRepo(db), users))
+  app.addHook('preHandler', makeResolveProfile(createSessionRepo(db), users))
+  const sessions = createSessionManager(serverSettings)
+  const progressRepo = {} as ProgressRepo
+  const cfg = {} as Config
+  registerSessions(app, cfg, hwAccel, sessions, progressRepo, orchestrator, serverSettings, users)
+  await app.ready()
+  return app
+}
+
+/** Session bearer header for a user id, with an act-as grant. */
+function hdrGrant(db: DatabaseSync, userId: string, grant: string[]): { authorization: string } {
+  return { authorization: `Bearer ${createSessionRepo(db).issue(userId, null, grant).token}` }
 }
 
 /** Builds an app and exposes the live SessionManager so DELETE tests can seed a
@@ -251,6 +276,40 @@ describe('POST /sessions auth', () => {
     })
     expect(res.statusCode).toBe(200)
     expect(orch.calls[0].userId).toBe(member.id)
+  })
+
+  it('keys the session user off the active profile, not the body/caller', async () => {
+    // Principal is the member, but the session is granted to act as the owner
+    // and X-Horizon-Profile selects the owner. The session must be created for
+    // the OWNER — the acting user comes from req.profileUserId.
+    const { db, users, serverSettings, member, owner } = setup()
+    const orch = fakeOrchestrator()
+    const app = await buildAppWithProfile(db, users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body(),
+      headers: {
+        ...hdrGrant(db, member.id, [member.id, owner.id]),
+        'x-horizon-profile': owner.id,
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(orch.calls[0].userId).toBe(owner.id)
+  })
+
+  it('rejects a body userId that disagrees with the active profile (403 user-mismatch)', async () => {
+    const { db, users, serverSettings, member, owner } = setup()
+    const orch = fakeOrchestrator()
+    const app = await buildAppWithProfile(db, users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body({ userId: member.id }),
+      headers: {
+        ...hdrGrant(db, member.id, [member.id, owner.id]),
+        'x-horizon-profile': owner.id,
+      },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('user-mismatch')
+    expect(orch.calls).toHaveLength(0)
   })
 
   it('returns 400 invalid-input for a negative audioTrackIndex (Zod)', async () => {

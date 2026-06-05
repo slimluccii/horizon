@@ -12,7 +12,7 @@ import type { MetadataRefreshWorker } from '../../contexts/metadata/index.ts'
 import type { PlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import type { ActivityBus } from '../../contexts/activity/index.ts'
 import type { UserRepo, SessionRepo, HouseholdRepo } from '../../contexts/identity/index.ts'
-import { registerAuth, makeRequireAuth, registerUsers } from '../../contexts/identity/index.ts'
+import { registerAuth, makeRequireAuth, makeResolveProfile, registerUsers } from '../../contexts/identity/index.ts'
 import { registerHealth } from './health.ts'
 import type { Identity } from '../identity/identity.ts'
 import { registerSessions } from '../../contexts/playback/index.ts'
@@ -83,6 +83,12 @@ export async function buildServer(
       if (req.method === 'POST' && path === '/api/users' && repos.userRepo.list().length === 0) return
       return requireAuth(req, reply)
     })
+
+    // resolveProfile runs after requireAuth and sets req.profileUserId from the
+    // X-Horizon-Profile header (defaulting to the principal). Per-user routes key
+    // their acting user off req.profileUserId, so this hook must be installed in
+    // production — not just in the route tests.
+    api.addHook('preHandler', makeResolveProfile(repos.sessionRepo, repos.userRepo))
 
     registerHealth(api, hwAccel, identity)
     registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)

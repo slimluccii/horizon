@@ -69,13 +69,29 @@ export function registerSessions(
     if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
 
     const requestedUserId = input.userId
-    if (requestedUserId && requestedUserId !== caller.id && caller.role === 'member') {
+
+    // The acting user is the ACTIVE PROFILE (req.profileUserId, set by the
+    // resolveProfile hook) when present — it has already been validated against
+    // the session grant, so it is the authoritative "play as" identity. A body
+    // `userId`, if sent, must agree with it: the client may not assert a
+    // different identity in the body than the profile it activated.
+    const actingUserId = req.profileUserId
+    if (actingUserId) {
+      if (requestedUserId && requestedUserId !== actingUserId) {
+        return errorReply(reply, 403, ErrorCodes.USER_MISMATCH, 'Profile mismatch')
+      }
+    } else if (requestedUserId && requestedUserId !== caller.id && caller.role === 'member') {
+      // Fallback (no active profile resolved, e.g. legacy path): owner/admin may
+      // delegate playback on behalf of another household member; members may
+      // only play as themselves.
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner/admin can start playback for another user')
     }
 
+    const sessionUserId = actingUserId ?? requestedUserId ?? caller.id
+
     let started
     try {
-      started = orchestrator.startPlayback({ ...input, userId: requestedUserId || caller.id })
+      started = orchestrator.startPlayback({ ...input, userId: sessionUserId })
     } catch (err) {
       const code = (err as { code?: string }).code
       if (code === ErrorCodes.MEDIA_NOT_FOUND) return sendNotFound(reply, ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
