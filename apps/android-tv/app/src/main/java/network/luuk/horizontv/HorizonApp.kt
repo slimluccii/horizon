@@ -2,8 +2,9 @@ package network.luuk.horizontv
 
 import android.app.Application
 import network.luuk.horizontv.api.CapabilitiesProbe
-import network.luuk.horizontv.api.HorizonApi
 import network.luuk.horizontv.app.AppState
+import network.luuk.horizontv.discovery.MdnsDiscovery
+import network.luuk.horizontv.discovery.ServerStore
 
 class HorizonApp : Application() {
 
@@ -12,8 +13,11 @@ class HorizonApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        val api = HorizonApi(baseUrl = BuildConfig.SERVER_URL)
         val caps = CapabilitiesProbe.detect(this)
-        state = AppState(api = api, capabilities = caps)
+        state = AppState(
+            capabilities = caps,
+            store = ServerStore(this),
+            mdns = MdnsDiscovery(this),
+        )
     }
 }

@@ -7,6 +7,8 @@ import androidx.compose.runtime.setValue
 import network.luuk.horizontv.api.Capabilities
 import network.luuk.horizontv.api.HorizonApi
 import network.luuk.horizontv.api.User
+import network.luuk.horizontv.discovery.ServerStore
+import network.luuk.horizontv.discovery.MdnsDiscovery
 
 /**
  * Top-of-process singleton. Built in [network.luuk.horizontv.HorizonApp.onCreate]
@@ -16,16 +18,31 @@ import network.luuk.horizontv.api.User
  *  - `activeUser`    — the profile the user picked; null until they pick one
  */
 class AppState(
-    val api: HorizonApi,
     val capabilities: Capabilities,
+    val store: ServerStore,
+    val mdns: MdnsDiscovery,
 ) {
+    var api: HorizonApi? by mutableStateOf(null)
+        private set
+
+    /** Base URL of the connected server — needed for stream + WebSocket URLs
+     *  (PlayerScreen) that previously read BuildConfig.SERVER_URL. */
+    var serverUrl: String? by mutableStateOf(null)
+        private set
+
     var activeUser: User? by mutableStateOf(null)
         private set
+
+    /** Build the API client once a server is chosen. */
+    fun connect(url: String) {
+        serverUrl = url
+        api = HorizonApi(baseUrl = url)
+    }
 
     @JvmName("updateActiveUser")
     fun setActiveUser(user: User?) {
         activeUser = user
-        api.setActiveUser(user?.id)
+        api?.setActiveUser(user?.id)
     }
 }
 

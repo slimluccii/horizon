@@ -52,11 +52,11 @@ fun LibraryScreen(
     LaunchedEffect(Unit) {
         try {
             coroutineScope {
-                val mD  = async { state.api.listMovies() }
-                val sD  = async { state.api.listShows() }
-                val cD  = async { state.api.listCollections() }
+                val mD  = async { state.api!!.listMovies() }
+                val sD  = async { state.api!!.listShows() }
+                val cD  = async { state.api!!.listCollections() }
                 val cwD = async {
-                    state.activeUser?.id?.let { state.api.continueWatching(it) } ?: emptyList()
+                    state.activeUser?.id?.let { state.api!!.continueWatching(it) } ?: emptyList()
                 }
                 movies = mD.await()
                 shows = sD.await()
