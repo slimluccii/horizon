@@ -2,7 +2,7 @@ import { loadConfig } from '../config/config.ts'
 import { detectHwAccel } from '../../contexts/playback/index.ts'
 import { openDatabase } from '../db/connection.ts'
 import { migrate } from '../db/migrations.ts'
-import { createUserRepo, createSessionRepo } from '../../contexts/identity/index.ts'
+import { createUserRepo, createSessionRepo, ensureHouseholds } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
 import { createTmdbProvider, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../contexts/metadata/index.ts'
@@ -47,6 +47,12 @@ export async function bootstrap() {
   const mediaRepo = createMediaRepo(db)
   const collectionsRepo = createCollectionsRepo(db)
   const userRepo = createUserRepo(db)
+
+  // Boot backfill: ensure every user belongs to a household (idempotent). Covers
+  // DBs that predate households and fresh installs where the owner has no Home
+  // yet. Mirrors loadIdentity / bootstrapFromEnv — dynamic data setup stays out
+  // of pure-DDL migrations.
+  ensureHouseholds(db)
 
   // Owner-lockout escape hatch (DEPLOY.md → "Owner lockout escape hatch"):
   // boot once with HORIZON_RESET_OWNER_PASSWORD=1 to clear the owner's password
