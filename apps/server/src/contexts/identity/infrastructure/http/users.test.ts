@@ -4,6 +4,7 @@ import { openDatabase, type DatabaseSync } from '../../../../platform/db/connect
 import { migrate } from '../../../../platform/db/migrations.ts'
 import { createUserRepo, type UserRepo } from '../persistence/userRepo.ts'
 import { createSessionRepo } from '../persistence/sessionRepo.ts'
+import { createHouseholdRepo } from '../persistence/householdRepo.ts'
 import { makeRequireAuth } from '../authMiddleware.ts'
 import { registerUsers } from './users.ts'
 import fastifyCookie from '@fastify/cookie'
@@ -18,6 +19,7 @@ async function buildApp(users: UserRepo, db: DatabaseSync) {
   // First-boot POST /users sets the session cookie, which needs @fastify/cookie
   // registered (in production registerAuth does this before registerUsers).
   await app.register(fastifyCookie)
+  const households = createHouseholdRepo(db)
   const requireAuth = makeRequireAuth(sessions, users)
   // Mirror server.ts: first-boot POST /users (empty household) bypasses the guard.
   app.addHook('onRequest', async (req, reply) => {
@@ -25,7 +27,7 @@ async function buildApp(users: UserRepo, db: DatabaseSync) {
     if (req.method === 'POST' && path === '/users' && users.list().length === 0) return
     return requireAuth(req, reply)
   })
-  registerUsers(app, users, sessions)
+  registerUsers(app, users, sessions, households)
   await app.ready()
   return app
 }
@@ -107,6 +109,20 @@ describe('POST /users', () => {
     expect(res.json().code).toBe('caller-forbidden')
   })
 
+  it('first-boot owner is placed in a Home household they own', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const households = createHouseholdRepo(db)
+    const app = await buildApp(users, db)
+    // create the very first user via POST /users (unauthenticated first-boot path)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Owner' } })
+    expect(res.statusCode).toBe(200)
+    const id = res.json().id
+    const u = users.get(id)!
+    expect(u.householdId).not.toBeNull()
+    expect(households.get(u.householdId!)!.ownerUserId).toBe(id)
+  })
+
   it('allows unauthenticated creation on empty database', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
@@ -125,6 +141,29 @@ describe('GET /users and /users/:id', () => {
     const app = await buildApp(users, db)
     const list = await app.inject({ method: 'GET', url: '/users', headers: hdr(db, owner.id) })
     expect(list.json()).toHaveLength(1)
+  })
+
+  it('authenticated GET /users returns only the caller household members', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const households = createHouseholdRepo(db)
+    // Owner's household (Home) with the owner + one fellow member.
+    const owner = users.create({ name: 'Owner' })
+    const home = households.create('Home', owner.id).id
+    users.setHousehold(owner.id, home)
+    const housemate = users.create({ name: 'Housemate' })
+    users.setHousehold(housemate.id, home)
+    // A separate household whose member must not leak into the caller's list.
+    const friendHousehold = households.create('Friend', null).id
+    const friend = users.create({ name: 'Friend' })
+    users.setHousehold(friend.id, friendHousehold)
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'GET', url: '/users', headers: hdr(db, owner.id) })
+    expect(res.statusCode).toBe(200)
+    const names = res.json().map((u: any) => u.name)
+    expect(names).toContain('Owner')
+    expect(names).toContain('Housemate')
+    expect(names).not.toContain('Friend')
   })
 
   it('gets single user', async () => {

@@ -117,4 +117,46 @@ describe('auth/session repo', () => {
       expect(() => repo.createPairingCode('DUP-CODE', now, now + 60_000)).toThrow()
     })
   })
+
+  describe('session grant', () => {
+    it('issue stores a grant and resolve returns it', () => {
+      const { token } = repo.issue('u1', null, ['u1', 'u2'])
+      expect(repo.resolve(token)?.grant).toEqual(['u1', 'u2'])
+    })
+
+    it('issue without a grant defaults grant to [userId]', () => {
+      const { token } = repo.issue('u1', null)
+      expect(repo.resolve(token)?.grant).toEqual(['u1'])
+    })
+
+    it('issue with an EMPTY grant array normalizes to [userId] (never act-as-nobody)', () => {
+      const { token, session } = repo.issue('u1', null, [])
+      expect(session.grant).toEqual(['u1'])
+      expect(repo.resolve(token)?.grant).toEqual(['u1'])
+    })
+
+    it('pairing approve records granted user ids; getPairingCode returns them', () => {
+      // approved_user_id is a real FK → users(id); seed the approver.
+      seedUser(db, 'approver')
+      seedUser(db, 'partner')
+      const now = Date.now()
+      repo.createPairingCode('AB-12', now, now + 60_000)
+      repo.approvePairingCode('AB-12', 'approver', ['approver', 'partner'])
+      const pc = repo.getPairingCode('AB-12')
+      expect(pc?.approvedUserId).toBe('approver')
+      expect(pc?.grantedUserIds).toEqual(['approver', 'partner'])
+    })
+
+    it('consumePairingCode is atomic single-winner — a second consume returns false', () => {
+      seedUser(db, 'approver')
+      const now = Date.now()
+      repo.createPairingCode('CD-34', now, now + 60_000)
+      repo.approvePairingCode('CD-34', 'approver', ['approver'])
+      const a = repo.issue('approver', null, ['approver'])
+      const b = repo.issue('approver', null, ['approver'])
+      expect(repo.consumePairingCode('CD-34', a.session.id)).toBe(true)
+      // Second poll of the same single-use code loses — must not re-consume.
+      expect(repo.consumePairingCode('CD-34', b.session.id)).toBe(false)
+    })
+  })
 })

@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
-import { setSessionCookie } from '../authMiddleware.ts'
+import type { HouseholdRepo } from '../persistence/householdRepo.ts'
+import { setSessionCookie, tokenFromRequest } from '../authMiddleware.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole } from './authz.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
@@ -19,7 +20,7 @@ const PatchBody = z.object({
   role: z.enum(['owner', 'admin', 'member']).optional(),
 })
 
-export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: SessionRepo): void {
+export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: SessionRepo, households: HouseholdRepo): void {
   app.post('/users', async (req, reply) => {
     const parse = CreateBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
@@ -45,10 +46,16 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
       // authenticated and can set their password. Subsequent (authenticated)
       // creates don't get a session; they return the plain User as before.
       if (isEmptyDatabase) {
+        // Place the first-boot owner in a Home household they own, so subsequent
+        // act-as / household-scoping works immediately (no restart's
+        // ensureHouseholds required). Re-read the user to reflect householdId.
+        const home = households.create('Home', created.id)
+        users.setHousehold(created.id, home.id)
+        const owner = users.get(created.id) ?? created
         const ua = req.headers['user-agent']
-        const { token } = sessions.issue(created.id, typeof ua === 'string' ? ua : null)
+        const { token } = sessions.issue(owner.id, typeof ua === 'string' ? ua : null)
         setSessionCookie(reply, req, token)
-        return { ...created, token }
+        return { ...owner, token }
       }
       return created
     } catch (err) {
@@ -63,7 +70,19 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
     }
   })
 
-  app.get('/users', async () => users.list())
+  app.get('/users', async (req) => {
+    // GET /users is auth-allowlisted (the pre-login profile picker), so the
+    // requireAuth hook never sets req.user here. Resolve the caller from the
+    // session token ourselves: an authenticated caller sees only their own
+    // household's members; the unauthenticated login picker keeps the full list.
+    const token = tokenFromRequest(req)
+    if (token) {
+      const session = sessions.resolve(token)
+      const me = session ? users.get(session.userId) : null
+      if (me?.householdId) return users.listByHousehold(me.householdId)
+    }
+    return users.list()
+  })
 
   app.get<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
     const u = users.get(req.params.id)

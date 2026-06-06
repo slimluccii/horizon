@@ -14,9 +14,23 @@ export {
   type Session,
   type PairingCode,
 } from './infrastructure/persistence/sessionRepo.ts'
+export { ensureHouseholds } from './domain/household.ts'
+export {
+  createHouseholdRepo,
+  type HouseholdRepo,
+  type Household,
+} from './infrastructure/persistence/householdRepo.ts'
+export {
+  createInviteRepo,
+  type InviteRepo,
+  type Invite,
+  type InviteKind,
+} from './infrastructure/persistence/inviteRepo.ts'
 export { hash, verify } from './infrastructure/password.ts'
 export {
   makeRequireAuth,
+  makeResolveProfile,
+  PROFILE_HEADER,
   SESSION_COOKIE,
   setSessionCookie,
   tokenFromRequest,
@@ -29,4 +43,6 @@ export {
 } from './infrastructure/authMiddleware.ts'
 export { registerAuth } from './infrastructure/http/auth.ts'
 export { registerUsers } from './infrastructure/http/users.ts'
+export { registerInvites, type InviteDeps } from './infrastructure/http/invites.ts'
+export { registerHouseholds } from './infrastructure/http/households.ts'
 export { resolveCallerRole, requireUser, canAccessSession } from './infrastructure/http/authz.ts'

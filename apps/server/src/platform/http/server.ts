@@ -11,8 +11,8 @@ import { registerLibrary } from '../../contexts/library/index.ts'
 import type { MetadataRefreshWorker } from '../../contexts/metadata/index.ts'
 import type { PlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import type { ActivityBus } from '../../contexts/activity/index.ts'
-import type { UserRepo, SessionRepo } from '../../contexts/identity/index.ts'
-import { registerAuth, makeRequireAuth, registerUsers } from '../../contexts/identity/index.ts'
+import type { UserRepo, SessionRepo, HouseholdRepo, InviteRepo } from '../../contexts/identity/index.ts'
+import { registerAuth, makeRequireAuth, makeResolveProfile, registerUsers, registerInvites, registerHouseholds } from '../../contexts/identity/index.ts'
 import { registerHealth } from './health.ts'
 import type { Identity } from '../identity/identity.ts'
 import { registerSessions } from '../../contexts/playback/index.ts'
@@ -31,6 +31,8 @@ export interface Repos {
   collectionsRepo: CollectionsRepo
   userRepo: UserRepo
   sessionRepo: SessionRepo
+  householdRepo: HouseholdRepo
+  inviteRepo: InviteRepo
   progressRepo: ProgressRepo
   serverSettings: ServerSettings
 }
@@ -70,7 +72,7 @@ export async function buildServer(
   await app.register(async (api) => {
     // Auth routes also register @fastify/cookie so `req.cookies` is populated
     // before the guard reads the session cookie.
-    await registerAuth(api, repos.userRepo, repos.sessionRepo)
+    await registerAuth(api, repos.userRepo, repos.sessionRepo, repos.householdRepo)
 
     const requireAuth = makeRequireAuth(repos.sessionRepo, repos.userRepo)
     api.addHook('onRequest', async (req, reply) => {
@@ -83,13 +85,21 @@ export async function buildServer(
       return requireAuth(req, reply)
     })
 
+    // resolveProfile runs after requireAuth and sets req.profileUserId from the
+    // X-Horizon-Profile header (defaulting to the principal). Per-user routes key
+    // their acting user off req.profileUserId, so this hook must be installed in
+    // production — not just in the route tests.
+    api.addHook('preHandler', makeResolveProfile(repos.sessionRepo, repos.userRepo))
+
     registerHealth(api, hwAccel, identity)
     registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
     registerSessions(api, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
     registerPlaylists(api, sessions, repos.userRepo)
     registerSegments(api, hwAccel, sessions, repos.mediaRepo, repos.userRepo)
     registerMetadata(api, cfg)
-    registerUsers(api, repos.userRepo, repos.sessionRepo)
+    registerUsers(api, repos.userRepo, repos.sessionRepo, repos.householdRepo)
+    registerInvites(api, { users: repos.userRepo, sessions: repos.sessionRepo, households: repos.householdRepo, invites: repos.inviteRepo })
+    registerHouseholds(api, { users: repos.userRepo, households: repos.householdRepo })
     registerProgress(api, repos.userRepo, repos.progressRepo)
     registerSettings(api, repos.userRepo, repos.serverSettings, cfg)
 

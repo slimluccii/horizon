@@ -164,15 +164,35 @@ New error codes added to the SDK `ErrorCodes` enum: `PROFILE_NOT_GRANTED`, `GRAN
 
 ## Affected files (server)
 
-- `src/db/migrations.ts` — migration v3.
-- `src/households.ts` (new) — `ensureHouseholds`, household repo/queries.
-- `src/repos/users.ts` — `household_id` on create/read; household-scoped list.
-- `src/auth/session.ts` — `grant_user_ids` on issue/resolve; `granted_user_ids` on pairing approve/poll.
-- `src/auth/middleware.ts` — `resolveProfile` hook; remove `X-Horizon-User`; add `/invites/redeem` to `AUTH_ALLOWLIST`.
-- `src/routes/auth.ts` — `grant` on approve; grant stamping on poll/login; `poll` returns granted `profiles`; new `GET /auth/grant`.
-- `src/routes/invites.ts` (new) — create (kind-split authorization) + redeem; both rate-limited.
-- `src/routes/households.ts` (new) — `GET /households/me`, `PATCH /households/:id`.
-- `src/routes/users.ts`, `src/routes/progress.ts`, `src/routes/sessions.ts` — use `req.profileUserId`.
-- `src/server.ts`, `src/index.ts` — register routes, wire `resolveProfile`, call `ensureHouseholds`.
-- `libs/sdk` — new `ErrorCodes`; any shared types for households/invites.
-- `test/*` — per §8.
+> **Layout note:** a DDD restructure (PR #115) landed after this spec was first
+> written. The server is now bounded contexts under `apps/server/src/contexts/<ctx>/`
+> (cross-context access via the `index.ts` barrel only) + platform infra under
+> `apps/server/src/platform/`. Auth/users/sessions/pairing live in the **identity
+> context** (`contexts/identity/`), so households/invites/act-as belong there too
+> (they are identity concerns). Tests are co-located next to source. Migration v2
+> (`server_meta`) already shipped with discovery, so household DDL is **v3**.
+
+Identity context (`apps/server/src/contexts/identity/`):
+- `domain/household.ts` (new) — `ensureHouseholds(db)` idempotent boot backfill + household domain types.
+- `infrastructure/persistence/householdRepo.ts` (new) — household + membership queries.
+- `infrastructure/persistence/inviteRepo.ts` (new) — invite create/lookup/consume.
+- `infrastructure/persistence/userRepo.ts` — `household_id` on create/read; household-scoped list.
+- `infrastructure/persistence/sessionRepo.ts` — `grant_user_ids` on issue/resolve; `granted_user_ids` on pairing approve/poll.
+- `infrastructure/authMiddleware.ts` — `resolveProfile` hook; remove `X-Horizon-User`; add `/invites/redeem` to `AUTH_ALLOWLIST`.
+- `infrastructure/http/auth.ts` — `grant` on `pair/approve`; grant stamping on poll/login; `poll` returns granted `profiles`; new `GET /auth/grant`.
+- `infrastructure/http/invites.ts` (new) — create (kind-split authorization) + redeem; both rate-limited.
+- `infrastructure/http/households.ts` (new) — `GET /households/me`, `PATCH /households/:id`.
+- `infrastructure/http/users.ts` — household-scoped `GET /users`.
+- `index.ts` — export the new repos/routes/`ensureHouseholds` on the barrel.
+
+Playback context (`apps/server/src/contexts/playback/`):
+- progress + sessions HTTP adapters — act on `req.profileUserId`; WS upgrade auth (finding D).
+
+Platform:
+- `platform/db/migrations.ts` — migration **v3** (households, `users.household_id`, `sessions.grant_user_ids`, `pairing_codes.granted_user_ids`, `invites`).
+- `platform/http/server.ts` — register invites/households routes; wire `resolveProfile`.
+- `platform/composition/bootstrap.ts` — call `ensureHouseholds(db)` after `migrate`.
+
+Shared:
+- `libs/sdk` — new `ErrorCodes` (`PROFILE_NOT_GRANTED`, `GRANT_FORBIDDEN`, `INVITE_NOT_FOUND`, `INVITE_EXPIRED`); shared household/invite types if needed.
+- Tests co-located next to each new/changed source file, per §8.

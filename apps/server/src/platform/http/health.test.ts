@@ -5,7 +5,7 @@ import { buildServer } from './server.ts'
 import { openDatabase } from '../db/connection.ts'
 import { migrate } from '../db/migrations.ts'
 import { createMediaRepo, createCollectionsRepo, createScanHistoryRepo } from '../../contexts/library/index.ts'
-import { createUserRepo, createSessionRepo } from '../../contexts/identity/index.ts'
+import { createUserRepo, createSessionRepo, createHouseholdRepo, createInviteRepo } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
 import { createActivityBus } from '../../contexts/activity/index.ts'
@@ -43,6 +43,8 @@ describe('buildServer wiring → /health', () => {
     const collectionsRepo = createCollectionsRepo(db)
     const userRepo = createUserRepo(db)
     const sessionRepo = createSessionRepo(db)
+    const householdRepo = createHouseholdRepo(db)
+    const inviteRepo = createInviteRepo(db)
     const serverSettings = createServerSettings(db)
     const progressRepo = createProgressRepo(db, mediaRepo, {
       getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct,
@@ -62,7 +64,7 @@ describe('buildServer wiring → /health', () => {
     return buildServer(
       cfg,
       fakeHw,
-      { mediaRepo, collectionsRepo, userRepo, sessionRepo, progressRepo, serverSettings },
+      { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, inviteRepo, progressRepo, serverSettings },
       {} as any,
       { scanManager: {} as any, refreshWorker: {} as any, scanHistory, activityBus: createActivityBus() },
       {} as any,
@@ -92,6 +94,13 @@ describe('buildServer wiring → /health', () => {
     const res = await app.inject({ method: 'GET', url: '/api/dev/seed' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toHaveProperty('scenarios')
+    await app.close()
+  })
+
+  it('households route is registered under /api (guarded)', async () => {
+    const app = await makeApp()
+    const res = await app.inject({ method: 'GET', url: '/api/households/me' })
+    expect(res.statusCode).toBe(401)   // exists but requires auth (not 404)
     await app.close()
   })
 })

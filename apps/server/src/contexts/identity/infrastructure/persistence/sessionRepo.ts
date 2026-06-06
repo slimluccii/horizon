@@ -9,6 +9,8 @@ export interface Session {
   expiresAt: number
   lastSeenAt: number
   userAgent: string | null
+  /** User ids this session may act as (X-Horizon-Profile). Defaults to [userId]. */
+  grant: string[]
 }
 
 /** A TV device-pairing code, in domain shape. */
@@ -19,12 +21,13 @@ export interface PairingCode {
   approvedUserId: string | null
   consumed: boolean
   sessionId: string | null
+  grantedUserIds: string[] | null
 }
 
 export interface SessionRepo {
   /** Issue a new session for `userId`. Returns the raw token (shown once) plus
    *  the stored session. Only the SHA-256 of the token is persisted. */
-  issue(userId: string, userAgent?: string | null): { token: string; session: Session }
+  issue(userId: string, userAgent?: string | null, grant?: string[]): { token: string; session: Session }
   /** Resolve a raw token to its live session, or null if missing/expired.
    *  On a hit, bumps `last_seen_at` and slides `expires_at` forward (sliding
    *  expiry). On an expired hit, deletes the row and returns null. */
@@ -42,10 +45,13 @@ export interface SessionRepo {
   createPairingCode(code: string, createdAt: number, expiresAt: number): void
   /** Look up a pairing code, or null if unknown. */
   getPairingCode(code: string): PairingCode | null
-  /** Bind an authenticated user to a pairing code (the approval step). */
-  approvePairingCode(code: string, userId: string): void
-  /** Mark a pairing code consumed and link the session it minted. */
-  consumePairingCode(code: string, sessionId: string): void
+  /** Bind an authenticated user to a pairing code (the approval step), storing
+   *  the granted user ids the minted session may act as. */
+  approvePairingCode(code: string, userId: string, grantedUserIds?: string[]): void
+  /** Atomically mark an unconsumed pairing code consumed and link the session it
+   *  minted. Returns false if the code was already consumed — so of two
+   *  concurrent polls only one wins and a single-use code mints a single session. */
+  consumePairingCode(code: string, sessionId: string): boolean
 }
 
 /** Sliding session lifetime: ~90 days, bumped on every resolve. */
@@ -64,6 +70,7 @@ function rowToSession(row: {
   expires_at: number
   last_seen_at: number
   user_agent: string | null
+  grant_user_ids: string | null
 }): Session {
   return {
     id: row.id,
@@ -72,32 +79,39 @@ function rowToSession(row: {
     expiresAt: row.expires_at,
     lastSeenAt: row.last_seen_at,
     userAgent: row.user_agent,
+    grant: row.grant_user_ids ? (JSON.parse(row.grant_user_ids) as string[]) : [row.user_id],
   }
 }
 
 export function createSessionRepo(db: DatabaseSync): SessionRepo {
   return {
-    issue(userId, userAgent) {
+    issue(userId, userAgent, grant) {
       const now = Date.now()
       const id = crypto.randomUUID()
       // base64url — URL-safe, no padding; rides cookies and Bearer headers.
       const token = crypto.randomBytes(TOKEN_BYTES).toString('base64url')
       const tokenHash = hashToken(token)
       const expiresAt = now + SESSION_TTL_MS
+      // An empty grant array is normalized to null so resolve() falls back to
+      // [userId] — never a session that can act as nobody (not even itself).
+      const grantJson = grant && grant.length ? JSON.stringify(grant) : null
       db.prepare(
-        `INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_seen_at, user_agent)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(id, tokenHash, userId, now, expiresAt, now, userAgent ?? null)
+        `INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_seen_at, user_agent, grant_user_ids)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(id, tokenHash, userId, now, expiresAt, now, userAgent ?? null, grantJson)
       return {
         token,
-        session: { id, userId, createdAt: now, expiresAt, lastSeenAt: now, userAgent: userAgent ?? null },
+        session: {
+          id, userId, createdAt: now, expiresAt, lastSeenAt: now,
+          userAgent: userAgent ?? null, grant: grant && grant.length ? grant : [userId],
+        },
       }
     },
 
     resolve(token) {
       const tokenHash = hashToken(token)
       const row = db.prepare('SELECT * FROM sessions WHERE token_hash = ?').get(tokenHash) as
-        | { id: string; user_id: string; created_at: number; expires_at: number; last_seen_at: number; user_agent: string | null }
+        | { id: string; user_id: string; created_at: number; expires_at: number; last_seen_at: number; user_agent: string | null; grant_user_ids: string | null }
         | undefined
       if (!row) return null
       const now = Date.now()
@@ -136,7 +150,7 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
 
     getPairingCode(code) {
       const row = db.prepare('SELECT * FROM pairing_codes WHERE code = ?').get(code) as
-        | { code: string; created_at: number; expires_at: number; approved_user_id: string | null; consumed: number; session_id: string | null }
+        | { code: string; created_at: number; expires_at: number; approved_user_id: string | null; consumed: number; session_id: string | null; granted_user_ids: string | null }
         | undefined
       if (!row) return null
       return {
@@ -146,15 +160,18 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
         approvedUserId: row.approved_user_id,
         consumed: row.consumed !== 0,
         sessionId: row.session_id,
+        grantedUserIds: row.granted_user_ids ? (JSON.parse(row.granted_user_ids) as string[]) : null,
       }
     },
 
-    approvePairingCode(code, userId) {
-      db.prepare('UPDATE pairing_codes SET approved_user_id = ? WHERE code = ?').run(userId, code)
+    approvePairingCode(code, userId, grantedUserIds) {
+      db.prepare('UPDATE pairing_codes SET approved_user_id = ?, granted_user_ids = ? WHERE code = ?')
+        .run(userId, grantedUserIds ? JSON.stringify(grantedUserIds) : null, code)
     },
 
     consumePairingCode(code, sessionId) {
-      db.prepare('UPDATE pairing_codes SET consumed = 1, session_id = ? WHERE code = ?').run(sessionId, code)
+      return db.prepare('UPDATE pairing_codes SET consumed = 1, session_id = ? WHERE code = ? AND consumed = 0')
+        .run(sessionId, code).changes > 0
     },
   }
 }
