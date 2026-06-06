@@ -41,6 +41,9 @@ describe('households', () => {
     const res = await ctx.app.inject({ method: 'PATCH', url: `/households/${id}`, headers: auth(ctx.token), payload: { name: 'Living Room' } })
     expect(res.statusCode).toBe(200)
     expect(ctx.households.get(id)!.name).toBe('Living Room')
+    const body = res.json()
+    expect(body).toMatchObject({ id, name: 'Living Room', ownerUserId: ctx.owner.id })
+    expect(body.members.map((m: any) => m.name).sort()).toEqual(['Owner', 'Partner'])
   })
 
   it('PATCH /households/:id rename by a non-owner member → 403 caller-forbidden', async () => {
