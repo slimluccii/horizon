@@ -93,6 +93,29 @@
   box-shadow: 0 0 0 4px var(--accent-dim);
 }
 
+.link__grant {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-hi);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+}
+.link__grant-legend {
+  padding: 0 6px;
+  color: var(--muted-hi);
+  font-size: 13px;
+  font-weight: 600;
+}
+.link__grant-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
 .link__error {
   margin: -4px 0 16px;
   color: var(--danger);

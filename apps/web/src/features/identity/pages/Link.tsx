@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { horizon } from '../../../shared/horizon.ts'
+import type { HouseholdView } from '@horizon/sdk'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import HorizonMark from '../../../shared/ui/chrome/HorizonMark.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
@@ -28,6 +29,21 @@ export default function Link() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [household, setHousehold] = useState<HouseholdView | null>(null)
+  const [granted, setGranted] = useState<Set<string>>(new Set())
+
+  // A household owner can choose which of their household's profiles the linked
+  // TV may act as; a plain member just approves themselves (no grant — the
+  // server grants self).
+  const isHouseholdOwner = !!household && !!user && household.ownerUserId === user.id
+
+  useEffect(() => {
+    let live = true
+    horizon.households.me()
+      .then(h => { if (live) { setHousehold(h); setGranted(new Set(h.members.map(m => m.id))) } })
+      .catch(() => { /* not fatal — fall back to a self-only approve */ })
+    return () => { live = false }
+  }, [])
 
   async function approve() {
     const trimmed = code.trim()
@@ -35,7 +51,13 @@ export default function Link() {
     setBusy(true)
     setError(null)
     try {
-      await horizon.auth.pairApprove(trimmed)
+      if (isHouseholdOwner) {
+        const ids = [...granted]
+        if (ids.length === 0) { setError('Select at least one profile for this TV.'); setBusy(false); return }
+        await horizon.auth.pairApprove(trimmed, ids)
+      } else {
+        await horizon.auth.pairApprove(trimmed)
+      }
       setDone(true)
     } catch {
       setError('That code is invalid or has expired. Ask the TV to show a new code.')
@@ -79,12 +101,33 @@ export default function Link() {
                 value={code}
                 onChange={e => setCode(formatCode(e.target.value))}
                 placeholder="ABCD-1234"
+                aria-label="Code"
                 autoFocus
                 autoComplete="off"
                 spellCheck={false}
                 inputMode="text"
                 onKeyDown={e => e.key === 'Enter' && approve()}
               />
+
+              {isHouseholdOwner && household && (
+                <fieldset className="link__grant">
+                  <legend className="link__grant-legend">Which profiles can use this TV?</legend>
+                  {household.members.map(m => (
+                    <label key={m.id} className="link__grant-row">
+                      <input
+                        type="checkbox"
+                        checked={granted.has(m.id)}
+                        onChange={e => setGranted(prev => {
+                          const next = new Set(prev)
+                          if (e.target.checked) next.add(m.id); else next.delete(m.id)
+                          return next
+                        })}
+                      />
+                      {m.name}
+                    </label>
+                  ))}
+                </fieldset>
+              )}
 
               {error && <div className="link__error">{error}</div>}
 
