@@ -1,0 +1,9 @@
+.ahh__card { border: 1px solid var(--border, #333); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.ahh__head { display: flex; align-items: center; gap: 8px; }
+.ahh__name { font-weight: 600; flex: 1; }
+.ahh__members { list-style: none; padding: 0; margin: 8px 0 0; }
+.ahh__member { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.ahh__member span { flex: 1; }
+.ahh__link { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.ahh__muted { opacity: 0.6; font-size: 0.85em; }
+.ahh__dialog { border: 1px solid var(--border, #333); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }

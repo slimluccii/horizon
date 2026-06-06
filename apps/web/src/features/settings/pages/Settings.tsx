@@ -5,6 +5,7 @@ import { useActiveUser } from '../../identity/hooks/useActiveUser.ts'
 import { useActivityStream } from '../hooks/useActivityStream.ts'
 import ActivityLogPanel from '../components/ActivityLogPanel.tsx'
 import HouseholdPanel from '../components/HouseholdPanel'
+import AllHouseholdsPanel from '../components/AllHouseholdsPanel'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
 import type { Preferences, User, ServerSettings, ScanStatusResponse } from '@horizon/sdk'
 import { FolderBrowser, type LibraryTag } from '../../../shared/ui/FolderBrowser/FolderBrowser.tsx'
@@ -1155,6 +1156,7 @@ export default function Settings() {
             <ScanStatusBadge onToast={showToast} />
             <LibraryFoldersPanel onSave={showToast} />
             <ServerPanel onSave={showToast} />
+            {user && <AllHouseholdsPanel ownerUserId={user.id} />}
           </>
         )}
 
