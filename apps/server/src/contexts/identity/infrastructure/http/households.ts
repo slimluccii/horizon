@@ -6,6 +6,7 @@ import type { UserRepo } from '../persistence/userRepo.ts'
 import type { HouseholdRepo } from '../persistence/householdRepo.ts'
 
 const RenameBody = z.object({ name: z.string().min(1).max(100) }).strict()
+const DeleteBody = z.object({ deleteMembers: z.boolean() }).strict()
 
 export function registerHouseholds(
   app: FastifyInstance,
@@ -42,6 +43,20 @@ export function registerHouseholds(
       ownerUserId: household.ownerUserId,
       members: users.listByHousehold(household.id),
     }
+  })
+
+  app.delete('/households/:id', async (req, reply) => {
+    if (!requireServerAdmin(req, reply)) return
+    const id = (req.params as { id: string }).id
+    const parse = DeleteBody.safeParse(req.body)
+    if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
+    if (!households.get(id)) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Household not found')
+    if (households.hasServerOwner(id)) {
+      return errorReply(reply, 409, ErrorCodes.OWNER_PROTECTED, 'Cannot delete the server owner’s household')
+    }
+    if (parse.data.deleteMembers) households.deleteCascade(id)
+    else households.deleteOrphaning(id)
+    return reply.status(204).send()
   })
 
   app.patch('/households/:id', async (req, reply) => {
