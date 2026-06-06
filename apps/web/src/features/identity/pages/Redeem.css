@@ -1,0 +1,6 @@
+.redeem { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.redeem__card { width: min(360px, 90vw); display: flex; flex-direction: column; gap: 12px; padding: 32px; }
+.redeem__label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9em; }
+.redeem__input { padding: 8px 10px; }
+.redeem__submit { padding: 10px; margin-top: 8px; }
+.redeem__error { color: var(--danger, #e25); font-size: 0.9em; }
