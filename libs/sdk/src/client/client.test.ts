@@ -283,3 +283,22 @@ describe('HorizonClient.auth', () => {
     expect(client.getToken()).toBe('tv-tok')
   })
 })
+
+describe('households', () => {
+  it('me() GETs /api/households/me', async () => {
+    const fn = spyFetch({ id: 'h1', name: 'Home', ownerUserId: 'u1', members: [] })
+    const c = new HorizonClient({ baseUrl: '' })
+    const h = await c.households.me()
+    expect(fn).toHaveBeenCalledWith('/api/households/me', expect.objectContaining({ credentials: 'include' }))
+    expect(h.name).toBe('Home')
+  })
+
+  it('rename() PATCHes /api/households/:id with the new name', async () => {
+    const fn = spyFetch({ id: 'h1', name: 'Den', ownerUserId: 'u1', members: [] })
+    const c = new HorizonClient({ baseUrl: '' })
+    await c.households.rename('h1', 'Den')
+    expect(fn.mock.calls[0][0]).toBe('/api/households/h1')
+    expect((fn.mock.calls[0][1] as RequestInit).method).toBe('PATCH')
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ name: 'Den' })
+  })
+})

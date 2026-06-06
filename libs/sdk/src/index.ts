@@ -26,6 +26,7 @@ export type {
 export type {
   User, AuthSession, SetPasswordResult, PairStartResult, PairPollResult,
 } from './identity/user.ts'
+export type { HouseholdView, InviteKind, InviteResult } from './identity/household.ts'
 export type {
   WatchProgress, ContinueWatchingItem,
   ServerSettings, ServerSettingsPatch,
