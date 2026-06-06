@@ -56,10 +56,10 @@ fun BootScreen(onAuthed: () -> Unit, onNeedAuth: () -> Unit, onNeedPicker: () ->
                 // Now decide auth: validate any saved token via /auth/grant.
                 val authDecision = network.luuk.horizontv.discovery.resolveAuth(
                     savedToken = state.store.readToken(),
-                    fetchGrant = { _ ->
-                        // The token was just saved into the api by authenticate()? No —
-                        // set it provisionally so the grant call carries it.
-                        state.api!!.setToken(state.store.readToken())
+                    fetchGrant = { token ->
+                        // Provisionally set the resolved token on the api so the
+                        // grant call carries it; cleared below on NeedAuth.
+                        state.api!!.setToken(token)
                         try { state.api!!.getGrant().profiles }
                         catch (_: Throwable) { null }
                     },
