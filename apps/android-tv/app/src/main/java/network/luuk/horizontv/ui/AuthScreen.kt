@@ -9,7 +9,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,41 +51,40 @@ private fun PairingView(onAuthed: () -> Unit, onPassword: () -> Unit) {
     var code by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // Start a code + poll loop; re-mints on expiry. Cancelled on leaving the view.
-    DisposableEffect(Unit) {
-        val job = kotlinx.coroutines.MainScope().launch {
-            while (isActive) {
-                try {
-                    val started = api.pairStart()
-                    code = started.code
-                    error = null
-                    // Poll this code until approved or expired.
-                    pollLoop@ while (isActive) {
-                        delay(3_000)
-                        val r: PairPoll? = try {
-                            api.pairPoll(started.code)
-                        } catch (e: ApiException) {
-                            if (e.status == 410) break@pollLoop // expired → re-mint
-                            error = "Couldn’t reach the server."; delay(2_000); null
-                        } catch (_: Throwable) {
-                            error = "Couldn’t reach the server."; delay(2_000); null
-                        }
-                        when (r) {
-                            is PairPoll.Authed -> {
-                                state.authenticate(r.result.token, r.result.profiles)
-                                state.store.saveToken(r.result.token)
-                                onAuthed(); return@launch
-                            }
-                            PairPoll.Pending, null -> { /* keep polling */ }
-                        }
-                    }
-                } catch (_: Throwable) {
-                    error = "Couldn’t reach the server."
+    // Start a code + poll loop; re-mints on expiry. LaunchedEffect ties the
+    // coroutine to composition — leaving the view (or switching to the password
+    // view, which disposes this composable) cancels it; no detached scope leak.
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            try {
+                val started = api.pairStart()
+                code = started.code
+                error = null
+                // Poll this code until approved or expired.
+                pollLoop@ while (isActive) {
                     delay(3_000)
+                    val r: PairPoll? = try {
+                        api.pairPoll(started.code)
+                    } catch (e: ApiException) {
+                        if (e.status == 410) break@pollLoop // expired → re-mint
+                        error = "Couldn’t reach the server."; delay(2_000); null
+                    } catch (_: Throwable) {
+                        error = "Couldn’t reach the server."; delay(2_000); null
+                    }
+                    when (r) {
+                        is PairPoll.Authed -> {
+                            state.authenticate(r.result.token, r.result.profiles)
+                            state.store.saveToken(r.result.token)
+                            onAuthed(); return@LaunchedEffect
+                        }
+                        PairPoll.Pending, null -> { /* keep polling */ }
+                    }
                 }
+            } catch (_: Throwable) {
+                error = "Couldn’t reach the server."
+                delay(3_000)
             }
         }
-        onDispose { job.cancel() }
     }
 
     Text("Link this TV")
@@ -116,17 +114,28 @@ private fun PasswordView(onAuthed: () -> Unit, onPairing: () -> Unit) {
             try {
                 val res = api.login(name.trim(), password)
                 api.setToken(res.token)
-                val profiles = runCatching { api.getGrant().profiles }.getOrDefault(emptyList())
-                state.authenticate(res.token, profiles.ifEmpty { listOf(network.luuk.horizontv.api.Profile(res.user.id, res.user.name, res.user.avatar)) })
+                // Login's grant is self-only; getGrant() yields [self]. Let a
+                // failure here surface (don't fake success on a token that can't
+                // even read its grant) — fall back to the logged-in user only if
+                // the server returned an empty (but successful) grant.
+                val granted = api.getGrant().profiles
+                state.authenticate(
+                    res.token,
+                    granted.ifEmpty { listOf(network.luuk.horizontv.api.Profile(res.user.id, res.user.name, res.user.avatar)) },
+                )
                 state.store.saveToken(res.token)
                 onAuthed()
             } catch (e: ApiException) {
+                api.setToken(null)   // don't leave a half-applied token on the api
                 error = when (e.code) {
                     "invalid-credentials" -> "Wrong name or password."
                     "account-locked" -> "Account temporarily locked."
                     "rate-limited" -> "Too many attempts — wait a moment."
                     else -> e.message
                 }
+            } catch (_: Throwable) {
+                api.setToken(null)
+                error = "Couldn’t reach the server."
             } finally { busy = false }
         }
     }) { Text("Sign in") }

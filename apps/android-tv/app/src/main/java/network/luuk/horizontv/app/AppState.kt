@@ -44,6 +44,7 @@ class AppState(
     /** True once a session token is set on the api. */
     val isAuthenticated: Boolean get() = api?.let { token != null } ?: false
 
+    @Volatile
     private var token: String? = null
 
     /** Build the API client once a server is chosen. */
