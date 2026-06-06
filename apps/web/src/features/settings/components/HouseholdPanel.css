@@ -1,0 +1,10 @@
+.hh__name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.hh__name { font-weight: 600; }
+.hh__members { list-style: none; padding: 0; margin: 0 0 12px; }
+.hh__member { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.hh__member-name { flex: 1; }
+.hh__member-role { opacity: 0.6; font-size: 0.85em; text-transform: capitalize; }
+.hh__confirm { display: inline-flex; gap: 6px; }
+.hh__invites { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hh__link { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.hh__muted { opacity: 0.6; font-size: 0.85em; }
