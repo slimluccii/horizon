@@ -12,7 +12,7 @@ function mockFetch(impl: () => Partial<Response> & { json?: () => Promise<unknow
 /** Capture every fetch call so tests can assert URL, method, headers, and the
  *  always-on `credentials: 'include'`. Returns ok JSON `body` for each call. */
 function spyFetch(body: unknown = {}, status = 200) {
-  const fn = vi.fn(async () => ({
+  const fn = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
     ok: status < 400,
     status,
     json: async () => body,
@@ -322,5 +322,21 @@ describe('invites', () => {
     expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ code: 'ABCD-2345', name: 'Friend', password: 'longenough12' })
     expect(res.token).toBe('tok-1')
     expect(c.getToken()).toBe('tok-1')   // native clients ride the stored token
+  })
+})
+
+describe('auth.pairApprove grant', () => {
+  it('omits grant from the body when not provided', async () => {
+    const fn = spyFetch({ ok: true })
+    const c = new HorizonClient({ baseUrl: '' })
+    await c.auth.pairApprove('ABCD-1234')
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ code: 'ABCD-1234' })
+  })
+
+  it('includes grant in the body when provided', async () => {
+    const fn = spyFetch({ ok: true })
+    const c = new HorizonClient({ baseUrl: '' })
+    await c.auth.pairApprove('ABCD-1234', ['u1', 'u2'])
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ code: 'ABCD-1234', grant: ['u1', 'u2'] })
   })
 })
