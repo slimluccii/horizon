@@ -56,7 +56,7 @@ fun LibraryScreen(
                 val sD  = async { state.api!!.listShows() }
                 val cD  = async { state.api!!.listCollections() }
                 val cwD = async {
-                    state.activeUser?.id?.let { state.api!!.continueWatching(it) } ?: emptyList()
+                    state.activeProfile?.id?.let { state.api!!.continueWatching(it) } ?: emptyList()
                 }
                 movies = mD.await()
                 shows = sD.await()

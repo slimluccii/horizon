@@ -65,10 +65,15 @@ private fun PairingView(onAuthed: () -> Unit, onPassword: () -> Unit) {
                     // Poll this code until approved or expired.
                     pollLoop@ while (isActive) {
                         delay(3_000)
-                        when (val r = runCatching { api.pairPoll(started.code) }.getOrElse { e ->
-                            if (e is ApiException && e.status == 410) break@pollLoop // expired → re-mint
+                        val r: PairPoll? = try {
+                            api.pairPoll(started.code)
+                        } catch (e: ApiException) {
+                            if (e.status == 410) break@pollLoop // expired → re-mint
                             error = "Couldn’t reach the server."; delay(2_000); null
-                        }) {
+                        } catch (_: Throwable) {
+                            error = "Couldn’t reach the server."; delay(2_000); null
+                        }
+                        when (r) {
                             is PairPoll.Authed -> {
                                 state.authenticate(r.result.token, r.result.profiles)
                                 state.store.saveToken(r.result.token)

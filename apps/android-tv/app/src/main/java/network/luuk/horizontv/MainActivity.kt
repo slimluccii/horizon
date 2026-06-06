@@ -14,6 +14,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import network.luuk.horizontv.app.AppState
 import network.luuk.horizontv.app.LocalAppState
+import network.luuk.horizontv.ui.AuthScreen
 import network.luuk.horizontv.ui.BootScreen
 import network.luuk.horizontv.ui.LibraryScreen
 import network.luuk.horizontv.ui.PlayerScreen
@@ -32,8 +33,13 @@ class MainActivity : ComponentActivity() {
                 NavHost(nav, startDestination = Routes.BOOT) {
                     composable(Routes.BOOT) {
                         BootScreen(
-                            onConnected = {
+                            onAuthed = {
                                 nav.navigate(Routes.PROFILE_LIST) {
+                                    popUpTo(Routes.BOOT) { inclusive = true }
+                                }
+                            },
+                            onNeedAuth = {
+                                nav.navigate(Routes.AUTH) {
                                     popUpTo(Routes.BOOT) { inclusive = true }
                                 }
                             },
@@ -44,9 +50,22 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
+                    composable(Routes.AUTH) {
+                        if (state.api == null) {
+                            LaunchedEffect(Unit) {
+                                nav.navigate(Routes.BOOT) { popUpTo(0) { inclusive = true } }
+                            }
+                            return@composable
+                        }
+                        AuthScreen(onAuthed = {
+                            nav.navigate(Routes.PROFILE_LIST) {
+                                popUpTo(Routes.AUTH) { inclusive = true }
+                            }
+                        })
+                    }
                     composable(Routes.SERVER_PICKER) {
                         ServerPickerScreen(onPicked = {
-                            nav.navigate(Routes.PROFILE_LIST) {
+                            nav.navigate(Routes.AUTH) {
                                 popUpTo(Routes.SERVER_PICKER) { inclusive = true }
                             }
                         })
@@ -54,12 +73,17 @@ class MainActivity : ComponentActivity() {
                     composable(Routes.PROFILE_LIST) {
                         if (!connectedGuard(state, nav)) return@composable
                         ProfileListScreen(
-                            onUserPicked = {
+                            onProfilePicked = {
                                 nav.navigate(Routes.LIBRARY) {
                                     popUpTo(Routes.PROFILE_LIST) { inclusive = true }
                                 }
                             },
                             onSwitchServer = { nav.navigate(Routes.SERVER_PICKER) },
+                            onSignOut = {
+                                nav.navigate(Routes.AUTH) {
+                                    popUpTo(Routes.PROFILE_LIST) { inclusive = true }
+                                }
+                            },
                         )
                     }
                     composable(Routes.LIBRARY) {
