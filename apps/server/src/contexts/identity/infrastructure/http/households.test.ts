@@ -107,4 +107,18 @@ describe('households', () => {
     const res = await ctx.app.inject({ method: 'DELETE', url: `/households/${h.id}`, headers: auth(ctx.sessions.issue(memberId).token), payload: { deleteMembers: true } })
     expect(res.statusCode).toBe(403)
   })
+
+  it('POST /households/:id/members moves a profile (incl. an orphan) into the household', async () => {
+    const h = ctx.households.create('Target', null)
+    const orphan = ctx.users.create({ name: 'Lonely' })   // no household
+    const res = await ctx.app.inject({ method: 'POST', url: `/households/${h.id}/members`, headers: auth(ctx.token), payload: { userId: orphan.id } })
+    expect(res.statusCode).toBe(200)
+    expect(ctx.users.get(orphan.id)?.householdId).toBe(h.id)
+  })
+
+  it('POST /households/:id/members 404s an unknown household', async () => {
+    const orphan = ctx.users.create({ name: 'Lonely2' })
+    const res = await ctx.app.inject({ method: 'POST', url: `/households/nope/members`, headers: auth(ctx.token), payload: { userId: orphan.id } })
+    expect(res.statusCode).toBe(404)
+  })
 })

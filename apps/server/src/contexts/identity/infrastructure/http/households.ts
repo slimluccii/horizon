@@ -7,6 +7,7 @@ import type { HouseholdRepo } from '../persistence/householdRepo.ts'
 
 const RenameBody = z.object({ name: z.string().min(1).max(100) }).strict()
 const DeleteBody = z.object({ deleteMembers: z.boolean() }).strict()
+const AddMemberBody = z.object({ userId: z.string().min(1) }).strict()
 
 export function registerHouseholds(
   app: FastifyInstance,
@@ -57,6 +58,16 @@ export function registerHouseholds(
     if (parse.data.deleteMembers) households.deleteCascade(id)
     else households.deleteOrphaning(id)
     return reply.status(204).send()
+  })
+
+  app.post('/households/:id/members', async (req, reply) => {
+    if (!requireServerAdmin(req, reply)) return
+    const id = (req.params as { id: string }).id
+    const parse = AddMemberBody.safeParse(req.body)
+    if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
+    if (!households.get(id)) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Household not found')
+    if (!users.setHousehold(parse.data.userId, id)) return sendNotFound(reply, ErrorCodes.USER_NOT_FOUND, 'User not found')
+    return { id, members: users.listByHousehold(id) }
   })
 
   app.patch('/households/:id', async (req, reply) => {
