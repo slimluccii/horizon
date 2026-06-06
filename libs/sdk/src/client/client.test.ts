@@ -325,6 +325,37 @@ describe('invites', () => {
   })
 })
 
+describe('household admin', () => {
+  it('all() GETs /api/households', async () => {
+    const fn = spyFetch([])
+    await new HorizonClient({ baseUrl: '' }).households.all()
+    expect(fn.mock.calls[0][0]).toBe('/api/households')
+  })
+  it('remove() DELETEs with deleteMembers in the body', async () => {
+    const fn = spyFetch({}, 204)
+    await new HorizonClient({ baseUrl: '' }).households.remove('h1', true)
+    const [url, init] = fn.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/households/h1'); expect(init.method).toBe('DELETE')
+    expect(JSON.parse(init.body as string)).toEqual({ deleteMembers: true })
+  })
+  it('addMember() POSTs the userId', async () => {
+    const fn = spyFetch({})
+    await new HorizonClient({ baseUrl: '' }).households.addMember('h1', 'u9')
+    expect(fn.mock.calls[0][0]).toBe('/api/households/h1/members')
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ userId: 'u9' })
+  })
+  it('users.orphans() GETs /api/users/orphans', async () => {
+    const fn = spyFetch([])
+    await new HorizonClient({ baseUrl: '' }).users.orphans()
+    expect(fn.mock.calls[0][0]).toBe('/api/users/orphans')
+  })
+  it('invites.create passes householdId when given', async () => {
+    const fn = spyFetch({ code: 'A-1', expiresAt: 1 })
+    await new HorizonClient({ baseUrl: '' }).invites.create({ kind: 'join', householdId: 'h2' })
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ kind: 'join', householdId: 'h2' })
+  })
+})
+
 describe('auth.pairApprove grant', () => {
   it('omits grant from the body when not provided', async () => {
     const fn = spyFetch({ ok: true })
