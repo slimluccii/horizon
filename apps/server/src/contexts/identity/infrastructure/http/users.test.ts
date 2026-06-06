@@ -185,6 +185,28 @@ describe('GET /users and /users/:id', () => {
   })
 })
 
+describe('GET /users/orphans', () => {
+  it('returns null-household users to an admin; 403 for a member', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const households = createHouseholdRepo(db)
+    // owner placed in a Home household; a fresh orphan (no household).
+    const owner = users.create({ name: 'Owner' })
+    const home = households.create('Home', owner.id).id
+    users.setHousehold(owner.id, home)
+    const orphan = users.create({ name: 'NoHome' })   // no household
+    const app = await buildApp(users, db)
+
+    const ok = await app.inject({ method: 'GET', url: '/users/orphans', headers: hdr(db, owner.id) })
+    expect(ok.statusCode).toBe(200)
+    expect((ok.json() as { id: string }[]).map(u => u.id)).toContain(orphan.id)
+
+    const member = users.create({ name: 'Mm' }); users.setHousehold(member.id, home)
+    const forbidden = await app.inject({ method: 'GET', url: '/users/orphans', headers: hdr(db, member.id) })
+    expect(forbidden.statusCode).toBe(403)
+  })
+})
+
 describe('PATCH + DELETE /users/:id', () => {
   it('patches name', async () => {
     const db = openDatabase(':memory:'); migrate(db)

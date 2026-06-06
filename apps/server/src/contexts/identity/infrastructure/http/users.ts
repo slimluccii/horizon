@@ -110,6 +110,18 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
     return users.list()
   })
 
+  // Registered before `/users/:id` so the static segment isn't captured by the
+  // param route. Server owner/admin only: lists profiles with no household
+  // (intentional orphans, e.g. from delete-household orphan-mode).
+  app.get('/users/orphans', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    if (caller.role !== 'owner' && caller.role !== 'admin') {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Server owner/admin only')
+    }
+    return users.listOrphans()
+  })
+
   app.get<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
     const u = users.get(req.params.id)
     if (!u) return sendNotFound(reply, ErrorCodes.USER_NOT_FOUND, 'User not found')
