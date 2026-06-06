@@ -11,8 +11,8 @@ import { registerLibrary } from '../../contexts/library/index.ts'
 import type { MetadataRefreshWorker } from '../../contexts/metadata/index.ts'
 import type { PlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import type { ActivityBus } from '../../contexts/activity/index.ts'
-import type { UserRepo, SessionRepo, HouseholdRepo } from '../../contexts/identity/index.ts'
-import { registerAuth, makeRequireAuth, makeResolveProfile, registerUsers } from '../../contexts/identity/index.ts'
+import type { UserRepo, SessionRepo, HouseholdRepo, InviteRepo } from '../../contexts/identity/index.ts'
+import { registerAuth, makeRequireAuth, makeResolveProfile, registerUsers, registerInvites, registerHouseholds } from '../../contexts/identity/index.ts'
 import { registerHealth } from './health.ts'
 import type { Identity } from '../identity/identity.ts'
 import { registerSessions } from '../../contexts/playback/index.ts'
@@ -32,6 +32,7 @@ export interface Repos {
   userRepo: UserRepo
   sessionRepo: SessionRepo
   householdRepo: HouseholdRepo
+  inviteRepo: InviteRepo
   progressRepo: ProgressRepo
   serverSettings: ServerSettings
 }
@@ -97,6 +98,8 @@ export async function buildServer(
     registerSegments(api, hwAccel, sessions, repos.mediaRepo, repos.userRepo)
     registerMetadata(api, cfg)
     registerUsers(api, repos.userRepo, repos.sessionRepo)
+    registerInvites(api, { users: repos.userRepo, sessions: repos.sessionRepo, households: repos.householdRepo, invites: repos.inviteRepo })
+    registerHouseholds(api, { users: repos.userRepo, households: repos.householdRepo })
     registerProgress(api, repos.userRepo, repos.progressRepo)
     registerSettings(api, repos.userRepo, repos.serverSettings, cfg)
 
