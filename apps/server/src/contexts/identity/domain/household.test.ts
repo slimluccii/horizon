@@ -55,4 +55,19 @@ describe('ensureHouseholds', () => {
     // Home must have a manageable owner, never null.
     expect(createHouseholdRepo(db).get(u.householdId!)!.ownerUserId).toBe('m1')
   })
+
+  it('is one-shot — a second run does not re-adopt a newly-orphaned user', () => {
+    const users = createUserRepo(db)
+    users.create({ name: 'Owner' })       // first user → owner
+    ensureHouseholds(db)                   // backfills + sets the flag
+    // Simulate an intentional orphan created AFTER the backfill.
+    const households = createHouseholdRepo(db)
+    const friendH = households.create('Friend', null).id
+    const friend = users.create({ name: 'Friend', householdId: friendH })
+    users.setHousehold(friend.id, friendH)
+    // Orphan them (as delete-household orphan-mode would).
+    db.prepare('UPDATE users SET household_id = NULL WHERE id = ?').run(friend.id)
+    ensureHouseholds(db)                   // must be a NO-OP now
+    expect(users.get(friend.id)?.householdId).toBeNull()
+  })
 })
