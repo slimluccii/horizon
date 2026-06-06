@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, Navigate } from 'react-router-dom'
 import { horizon } from '../../../shared/horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import './Redeem.css'
@@ -25,7 +25,7 @@ function messageFor(code: string | undefined): string {
 export default function Redeem() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
-  const { refresh } = useActiveUser()
+  const { refresh, user, loading } = useActiveUser()
   const [code, setCode] = useState(formatCode(params.get('code') ?? ''))
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
@@ -44,6 +44,11 @@ export default function Redeem() {
       setError(messageFor((e as { code?: string }).code))
     } finally { setBusy(false) }
   }
+
+  // Already signed in → don't let a redeem silently replace the active session
+  // with a brand-new account. The redeemer must be a fresh (unauthenticated)
+  // visitor; a logged-in user is sent home.
+  if (!loading && user) return <Navigate to="/" replace />
 
   return (
     <div className="redeem">

@@ -6,9 +6,11 @@ import { horizon } from '../../../shared/horizon.ts'
 import Redeem from './Redeem'
 
 const refresh = vi.fn().mockResolvedValue(undefined)
-vi.mock('../hooks/useActiveUser.ts', () => ({ useActiveUser: () => ({ refresh }) }))
+vi.mock('../hooks/useActiveUser.ts', () => ({
+  useActiveUser: () => ({ refresh, user: (globalThis as any).__viewer ?? null, loading: false }),
+}))
 
-beforeEach(() => { vi.restoreAllMocks(); refresh.mockClear() })
+beforeEach(() => { vi.restoreAllMocks(); refresh.mockClear(); (globalThis as any).__viewer = null })
 
 function renderAt(url: string) {
   return render(
@@ -49,6 +51,15 @@ describe('Redeem', () => {
     await userEvent.type(screen.getByLabelText(/^password/i), 'short')
     await userEvent.click(screen.getByRole('button', { name: /create account|join/i }))
     expect(await screen.findByText(/at least 8/i)).toBeInTheDocument()
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('redirects an already-signed-in visitor home (no silent account swap)', async () => {
+    (globalThis as any).__viewer = { id: 'owner', name: 'Owner' }
+    const spy = vi.spyOn(horizon.invites, 'redeem')
+    renderAt('/join?code=ABCD-2345')
+    await waitFor(() => expect(screen.getByText('LIBRARY')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /create account|join/i })).toBeNull()
     expect(spy).not.toHaveBeenCalled()
   })
 })

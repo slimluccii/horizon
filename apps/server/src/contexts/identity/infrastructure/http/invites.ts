@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { errorReply, badRequest, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { IpRateLimiter } from '../../../../platform/http/rateLimit.ts'
 import { hash as hashPassword } from '../password.ts'
+import { setSessionCookie } from '../authMiddleware.ts'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
 import type { HouseholdRepo } from '../persistence/householdRepo.ts'
@@ -190,7 +191,12 @@ export function registerInvites(app: FastifyInstance, deps: InviteDeps): void {
 
     users.setPassword(user.id, passwordHash)
 
-    const { token } = sessions.issue(user.id, null, [user.id])
+    const ua = req.headers['user-agent']
+    const { token } = sessions.issue(user.id, typeof ua === 'string' ? ua : null, [user.id])
+    // Set the httpOnly session cookie so the WEB redeemer is immediately
+    // authenticated (it rides the cookie, ignores the token), mirroring login /
+    // set-password / first-boot create. Native clients use the returned token.
+    setSessionCookie(reply, req, token)
     return { token, user: users.get(user.id) }
   })
 }
