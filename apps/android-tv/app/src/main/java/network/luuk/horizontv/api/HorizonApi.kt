@@ -25,16 +25,12 @@ class HorizonApi(
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     @Volatile
-    private var activeUserId: String? = null
+    private var token: String? = null
+    @Volatile
+    private var activeProfileId: String? = null
 
-    fun setActiveUser(id: String?) {
-        activeUserId = id
-    }
-
-    // ----- users -----
-    suspend fun listUsers(): List<User> = get("/users", serializer())
-    suspend fun createUser(body: CreateUserBody): User = post("/users", body, serializer())
-    suspend fun deleteUser(id: String): Unit = delete("/users/$id")
+    fun setToken(value: String?) { token = value }
+    fun setActiveProfile(id: String?) { activeProfileId = id }
 
     // ----- library -----
     suspend fun listMovies(): List<MediaItem> = get("/library/movies", serializer())
@@ -58,6 +54,31 @@ class HorizonApi(
         post("/sessions", body, serializer())
     suspend fun destroySession(id: String) = delete("/sessions/$id")
 
+    // ----- auth -----
+    suspend fun pairStart(): PairStartResult = postEmpty("/auth/pair/start", serializer())
+
+    suspend fun pairPoll(code: String): PairPoll = withContext(Dispatchers.IO) {
+        val payload = json.encodeToString(serializer(), PairPollBody(code))
+        val req = Request.Builder().url(baseUrl + "/auth/pair/poll").post(payload.toRequestBody(jsonMedia))
+        authHeaders(req)
+        okHttp.newCall(req.build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            when {
+                resp.code == 202 -> PairPoll.Pending
+                resp.isSuccessful -> PairPoll.Authed(json.decodeFromString(AuthResult.serializer(), body))
+                else -> {
+                    val parsed = runCatching { json.decodeFromString(ErrorBody.serializer(), body) }.getOrNull()
+                    throw ApiException(resp.code, parsed?.code, parsed?.error ?: "HTTP ${resp.code}")
+                }
+            }
+        }
+    }
+
+    suspend fun login(name: String, password: String): AuthResult =
+        post("/auth/login", LoginBody(name, password), serializer())
+
+    suspend fun getGrant(): GrantResult = get("/auth/grant", serializer())
+
     // ----- generic helpers --------------------------------------------------
 
     private suspend fun <T> get(path: String, ser: KSerializer<T>): T =
@@ -80,14 +101,24 @@ class HorizonApi(
         exec(req, serializer<Unit>())
     }
 
+    private suspend fun <T> postEmpty(path: String, ser: KSerializer<T>): T =
+        exec(Request.Builder().url(baseUrl + path).post(ByteArray(0).toRequestBody(jsonMedia)), ser)
+
+    /** Apply auth headers to a request builder (bearer always when set; the
+     *  active-profile selector only when one is chosen). */
+    private fun authHeaders(req: Request.Builder) {
+        token?.let { req.header("Authorization", "Bearer $it") }
+        activeProfileId?.let { req.header("X-Horizon-Profile", it) }
+    }
+
     private suspend fun <T> exec(req: Request.Builder, ser: KSerializer<T>): T =
         withContext(Dispatchers.IO) {
-            val userId = activeUserId
-            if (userId != null) req.header("X-Horizon-User", userId)
+            authHeaders(req)
             okHttp.newCall(req.build()).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful) {
                     val parsed = runCatching { json.decodeFromString(ErrorBody.serializer(), body) }.getOrNull()
+                    if (resp.code == 401) throw Unauthorized(parsed?.code, parsed?.error ?: "Unauthorized")
                     throw ApiException(resp.code, parsed?.code, parsed?.error ?: "HTTP ${resp.code}")
                 }
                 if (ser.descriptor.serialName == "kotlin.Unit") {
@@ -111,8 +142,20 @@ class HorizonApi(
     }
 }
 
-class ApiException(
+open class ApiException(
     val status: Int,
     val code: String?,
     override val message: String,
 ) : RuntimeException(message)
+
+/** A 401 — the session token is missing/expired. Callers (AppState) drop the
+ *  token and route back to AuthScreen rather than handling it per-screen. */
+class Unauthorized(code: String?, message: String) : ApiException(401, code, message)
+
+@kotlinx.serialization.Serializable
+data class PairPollBody(val code: String)
+
+sealed interface PairPoll {
+    data object Pending : PairPoll
+    data class Authed(val result: AuthResult) : PairPoll
+}
