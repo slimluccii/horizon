@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { ErrorCodes } from '@horizon/sdk'
 import { errorReply, badRequest, sendNotFound } from '../../../../platform/http/errors.ts'
@@ -12,6 +12,22 @@ export function registerHouseholds(
   deps: { users: UserRepo; households: HouseholdRepo },
 ): void {
   const { users, households } = deps
+
+  function requireServerAdmin(req: FastifyRequest, reply: FastifyReply): { id: string; role: 'owner' | 'admin' | 'member' } | null {
+    const caller = req.user
+    if (!caller) { errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required'); return null }
+    if (caller.role !== 'owner' && caller.role !== 'admin') {
+      errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Server owner/admin only'); return null
+    }
+    return caller
+  }
+
+  app.get('/households', async (req, reply) => {
+    if (!requireServerAdmin(req, reply)) return
+    return households.list().map(h => ({
+      id: h.id, name: h.name, ownerUserId: h.ownerUserId, members: users.listByHousehold(h.id),
+    }))
+  })
 
   app.get('/households/me', async (req, reply) => {
     const caller = req.user

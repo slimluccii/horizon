@@ -60,4 +60,18 @@ describe('households', () => {
     expect(res.statusCode).toBe(404)
     expect(res.json().code).toBe('not-found')
   })
+
+  it('GET /households lists all households for an owner/admin', async () => {
+    ctx.households.create('Friends', null)
+    const res = await ctx.app.inject({ method: 'GET', url: '/households', headers: auth(ctx.token) })
+    expect(res.statusCode).toBe(200)
+    const names = (res.json() as { name: string }[]).map(h => h.name)
+    expect(names).toContain('Friends')
+  })
+
+  it('GET /households is forbidden for a member', async () => {
+    const memberId = ctx.users.create({ name: 'Mem', householdId: ctx.users.get(ctx.owner.id)!.householdId }).id
+    const res = await ctx.app.inject({ method: 'GET', url: '/households', headers: auth(ctx.sessions.issue(memberId).token) })
+    expect(res.statusCode).toBe(403)
+  })
 })
