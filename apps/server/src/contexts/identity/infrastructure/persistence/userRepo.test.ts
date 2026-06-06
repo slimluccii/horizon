@@ -192,6 +192,22 @@ describe('userRepo', () => {
     expect(repo.list()).toHaveLength(2)
   })
 
+  it('listOrphans returns only users with no household', () => {
+    // users.household_id has a FK to households(id); seed a real household on
+    // the SAME db so the assigned user satisfies the FK.
+    const db: DatabaseSync = openDatabase(':memory:')
+    migrate(db)
+    const repo = createUserRepo(db)
+    const households = createHouseholdRepo(db)
+    const h = households.create('H', null).id
+    const a = repo.create({ name: 'Assigned', householdId: h })
+    const o1 = repo.create({ name: 'Orphan1' })   // no household
+    const o2 = repo.create({ name: 'Orphan2' })
+    const ids = repo.listOrphans().map(u => u.id).sort()
+    expect(ids).toEqual([o1.id, o2.id].sort())
+    expect(ids).not.toContain(a.id)
+  })
+
   it('assigns and reads household_id; lists by household', () => {
     // users.household_id has a FK to households(id) and PRAGMA foreign_keys = ON
     // is global, so seed real households (via createHouseholdRepo) on the SAME db
