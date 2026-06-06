@@ -21,6 +21,23 @@ const PatchBody = z.object({
 })
 
 export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: SessionRepo, households: HouseholdRepo): void {
+  /**
+   * May `caller` manage (delete) the user `targetId`? Authority per spec §3
+   * ("household-owner or server owner/admin"):
+   *  - a server owner/admin may manage anyone (cross-household escape hatch);
+   *  - otherwise the caller must be the OWNER of their own household and the
+   *    target must belong to that same household.
+   * Members who do not own their household cannot manage anyone.
+   */
+  function canManageUser(caller: { id: string; role: 'owner' | 'admin' | 'member' }, targetId: string): boolean {
+    if (caller.role === 'owner' || caller.role === 'admin') return true
+    const me = users.get(caller.id)
+    if (!me?.householdId) return false
+    const target = users.get(targetId)
+    if (!target || target.householdId !== me.householdId) return false
+    return households.get(me.householdId)?.ownerUserId === caller.id
+  }
+
   app.post('/users', async (req, reply) => {
     const parse = CreateBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
@@ -138,15 +155,16 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
   })
 
   app.delete<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
-    // Deleting a profile is a household-management action, mirroring user
-    // creation: only an authenticated owner/admin may do it. Without this gate
-    // any client could delete any non-owner profile (the repo only protects the
-    // owner) — an authz hole, since every other user mutation already checks
-    // the caller's role.
+    // Deleting a profile is a household-management action. Authority is
+    // household-scoped (spec §3): a server owner/admin may delete anyone
+    // (cross-household escape hatch); otherwise the caller must be the OWNER of
+    // their own household and the target must belong to that same household.
+    // This both closes the IDOR (the repo only protects the server owner) and
+    // bounds a non-admin's reach to their own household.
     const caller = resolveCallerRole(req)
     if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
-    if (caller.role === 'member') {
-      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can delete users')
+    if (!canManageUser(caller, req.params.id)) {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not allowed to delete this profile')
     }
     try {
       users.delete(req.params.id)
