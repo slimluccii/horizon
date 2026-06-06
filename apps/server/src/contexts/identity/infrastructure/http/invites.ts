@@ -118,6 +118,24 @@ export function registerInvites(app: FastifyInstance, deps: InviteDeps): void {
       return errorReply(reply, 410, ErrorCodes.INVITE_EXPIRED, 'Invite expired')
     }
 
+    // Revalidate a `join` invite's authority at redeem time. The invite bakes in
+    // a target household and is valid ~24h, but the authority that minted it can
+    // lapse in that window. Honor it only while the minter is still authorized to
+    // grow that household — mirroring POST /invites: still a server owner/admin,
+    // or still the owner of the target household. Otherwise the outstanding
+    // invite would inject members into a household its minter no longer controls.
+    if (inv.kind === 'join') {
+      const minter = users.get(inv.createdBy)
+      const household = households.get(inv.householdId!)
+      const minterIsServerAdmin = minter?.role === 'owner' || minter?.role === 'admin'
+      // `minter &&` guards a stale owner_user_id: a deleted minter can still be
+      // referenced by households.owner_user_id, so existence must be re-checked.
+      const minterOwnsHousehold = !!minter && !!household && household.ownerUserId === inv.createdBy
+      if (!household || (!minterIsServerAdmin && !minterOwnsHousehold)) {
+        return errorReply(reply, 410, ErrorCodes.INVITE_EXPIRED, 'Invite no longer valid')
+      }
+    }
+
     // Duplicate name within the target household → 409. For `join` the target
     // household already exists, so check it up front (a read) and reject on a
     // recoverable input clash *before* burning the single-use code. A fresh

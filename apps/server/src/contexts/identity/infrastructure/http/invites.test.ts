@@ -251,4 +251,56 @@ describe('invites', () => {
     }
     expect(got429).toBe(true)
   })
+
+  // --- join-invite minter revalidation (follow-up B) -----------------------
+  // Build a second household J owned by a server-role member `mo`, and a join
+  // invite for J minted by `mo`.
+  function householdJ() {
+    const mo = ctx.users.create({ name: 'MO' })            // server role member
+    const hj = ctx.households.create('J', mo.id)
+    ctx.users.setHousehold(mo.id, hj.id)
+    const now = Date.now()
+    ctx.invites.create({ code: 'JOIN-9', kind: 'join', householdId: hj.id, createdBy: mo.id, createdAt: now, expiresAt: now + 60_000 })
+    return { mo, hj }
+  }
+
+  it('rejects a join redeem once the minter no longer owns the household (410)', async () => {
+    const { hj } = householdJ()
+    // Ownership transfers away from the minter (mo), who is a plain server member.
+    ctx.households.setOwner(hj.id, ctx.owner.id)
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/invites/redeem',
+      payload: { code: 'JOIN-9', name: 'Guest', password: 'longenough12' },
+    })
+    expect(res.statusCode).toBe(410)
+    expect(res.json().code).toBe('invite-expired')
+    // No user was injected into J.
+    expect(ctx.users.listByHousehold(hj.id).some(u => u.name === 'Guest')).toBe(false)
+  })
+
+  // Note: a "minter deleted" case is not reachable — invites.created_by is a NOT
+  // NULL FK to users(id), so an outstanding invite pins its minter's row. The
+  // realistic authority lapse is an ownership transfer (above). The implementation
+  // still re-checks minter existence defensively.
+
+  it('still honors a join invite while the minter remains the household owner (200)', async () => {
+    householdJ() // mo still owns J
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/invites/redeem',
+      payload: { code: 'JOIN-9', name: 'Guest', password: 'longenough12' },
+    })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('still honors a join invite minted by a server owner/admin who is not the household owner (200)', async () => {
+    const { hj } = householdJ()
+    // Re-mint the J invite as the SERVER OWNER (ctx.owner), who does not own J.
+    const now = Date.now()
+    ctx.invites.create({ code: 'JOIN-ADM', kind: 'join', householdId: hj.id, createdBy: ctx.owner.id, createdAt: now, expiresAt: now + 60_000 })
+    const res = await ctx.app.inject({
+      method: 'POST', url: '/invites/redeem',
+      payload: { code: 'JOIN-ADM', name: 'Guest2', password: 'longenough12' },
+    })
+    expect(res.statusCode).toBe(200)
+  })
 })
