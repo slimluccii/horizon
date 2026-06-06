@@ -35,9 +35,11 @@ class AppState(
     var profiles: List<Profile> by mutableStateOf(emptyList())
         private set
 
-    /** The profile the user is currently acting as (drives X-Horizon-Profile). */
-    var activeProfile: Profile? by mutableStateOf(null)
-        private set
+    /** The profile the user is currently acting as (drives X-Horizon-Profile).
+     *  Backed by [_activeProfile]; mutated only via [setActiveProfile]/[signOut]
+     *  to avoid a JVM setter-signature clash with [setActiveProfile]. */
+    private var _activeProfile: Profile? by mutableStateOf(null)
+    val activeProfile: Profile? get() = _activeProfile
 
     /** True once a session token is set on the api. */
     val isAuthenticated: Boolean get() = api?.let { token != null } ?: false
@@ -58,7 +60,7 @@ class AppState(
     }
 
     fun setActiveProfile(profile: Profile?) {
-        activeProfile = profile
+        _activeProfile = profile
         api?.setActiveProfile(profile?.id)
     }
 
@@ -66,7 +68,7 @@ class AppState(
     fun signOut() {
         token = null
         profiles = emptyList()
-        activeProfile = null
+        _activeProfile = null
         api?.setToken(null)
         api?.setActiveProfile(null)
     }

@@ -61,7 +61,7 @@ fun PlayerScreen(
 
     // Fetch saved progress once.
     LaunchedEffect(mediaId) {
-        val userId = state.activeUser?.id
+        val userId = state.activeProfile?.id
         if (userId == null) { phase = Phase.Starting; return@LaunchedEffect }
         try {
             val p = state.api!!.getProgress(userId, mediaId)
@@ -85,7 +85,7 @@ fun PlayerScreen(
                 CreateSessionBody(
                     mediaId = mediaId,
                     capabilities = state.capabilities,
-                    userId = state.activeUser?.id,
+                    userId = state.activeProfile?.id,
                     startPositionMs = if (startMs > 0) startMs else null,
                 )
             )
