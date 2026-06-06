@@ -45,8 +45,8 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
     // household is empty (the first user is auto-elected owner). Once any user
     // exists, creating further profiles requires an owner/admin caller.
     const isEmptyDatabase = users.list().length === 0
+    const caller = isEmptyDatabase ? null : resolveCallerRole(req)
     if (!isEmptyDatabase) {
-      const caller = resolveCallerRole(req)
       if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Cannot create user without authentication')
       if (caller.role === 'member') return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can create users')
     }
@@ -73,6 +73,15 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
         const { token } = sessions.issue(owner.id, typeof ua === 'string' ? ua : null)
         setSessionCookie(reply, req, token)
         return { ...owner, token }
+      }
+      // Authenticated create: place the new profile in the CALLER's household so
+      // it's visible to household-scoped GET /users and is manageable / act-as-able.
+      // Without this the profile has a null household_id and silently disappears
+      // from the scoped listing.
+      const callerHouseholdId = caller ? users.get(caller.id)?.householdId : null
+      if (callerHouseholdId) {
+        users.setHousehold(created.id, callerHouseholdId)
+        return users.get(created.id) ?? created
       }
       return created
     } catch (err) {
