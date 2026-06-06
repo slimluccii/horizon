@@ -186,20 +186,34 @@ export class HorizonClient {
       this.fetch<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) =>
       this.fetch<void>(`/users/${id}`, { method: 'DELETE' }),
+    /** Server owner/admin: profiles with no household (orphans). */
+    orphans: () => this.fetch<User[]>('/users/orphans'),
   }
 
   readonly households = {
     /** The caller's household + its members. */
     me: () => this.fetch<HouseholdView>('/households/me'),
+    /** Server owner/admin: every household with its members. */
+    all: () => this.fetch<HouseholdView[]>('/households'),
     /** Rename a household (household owner or server owner/admin). */
     rename: (id: string, name: string) =>
       this.fetch<HouseholdView>(`/households/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+    /** Server owner/admin: delete a household. `deleteMembers` true cascades
+     *  the member profiles; false orphans them (household_id → null). */
+    remove: (id: string, deleteMembers: boolean) =>
+      this.fetch<void>(`/households/${id}`, { method: 'DELETE', body: JSON.stringify({ deleteMembers }) }),
+    /** Server owner/admin: move a profile (incl. an orphan) into the household.
+     *  The server returns only the household id + refreshed member list (not the
+     *  full view), so the result is narrowed to match what's actually sent. */
+    addMember: (householdId: string, userId: string) =>
+      this.fetch<Pick<HouseholdView, 'id' | 'members'>>(`/households/${householdId}/members`, { method: 'POST', body: JSON.stringify({ userId }) }),
   }
 
   readonly invites = {
     /** Mint a single-use invite. `new_household` is server owner/admin only;
-     *  `join` is the household owner's (server re-checks). */
-    create: (body: { kind: InviteKind }) =>
+     *  `join` is the household owner's (server re-checks). `householdId` targets
+     *  another household for a `join` invite (server owner/admin only). */
+    create: (body: { kind: InviteKind; householdId?: string }) =>
       this.fetch<InviteResult>('/invites', { method: 'POST', body: JSON.stringify(body) }),
     /** Redeem an invite to create the account + session. Unauthenticated. Stores
      *  the returned bearer token (native); the web also gets the hz_session cookie. */
