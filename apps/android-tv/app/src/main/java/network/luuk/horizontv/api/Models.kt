@@ -187,3 +187,28 @@ data class ProgressReportMessage(
 
 @Serializable
 data class ErrorBody(val error: String? = null, val code: String? = null)
+
+// ---------- auth ------------------------------------------------------------
+
+@Serializable
+data class Profile(val id: String, val name: String, val avatar: String? = null)
+
+@Serializable
+data class PairStartResult(val code: String, val expiresAt: Long)
+
+/** Response of /auth/pair/poll (when approved) and /auth/login. `profiles` is
+ *  present on the pairing poll (granted set); login returns it empty and the
+ *  caller follows up with /auth/grant. */
+@Serializable
+data class AuthResult(
+    val token: String,
+    val user: User,
+    val grant: List<String> = emptyList(),
+    val profiles: List<Profile> = emptyList(),
+)
+
+@Serializable
+data class GrantResult(val profiles: List<Profile> = emptyList())
+
+@Serializable
+data class LoginBody(val name: String, val password: String)
