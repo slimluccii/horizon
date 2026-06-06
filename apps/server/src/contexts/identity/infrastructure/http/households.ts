@@ -41,6 +41,11 @@ export function registerHouseholds(
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only the household owner can rename it')
     }
     households.rename(id, parse.data.name)
-    return { id, name: parse.data.name, ownerUserId: household.ownerUserId }
+    return {
+      id,
+      name: parse.data.name,
+      ownerUserId: household.ownerUserId,
+      members: users.listByHousehold(id),
+    }
   })
 }
