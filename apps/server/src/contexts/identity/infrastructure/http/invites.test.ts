@@ -9,6 +9,7 @@ import { createInviteRepo } from '../persistence/inviteRepo.ts'
 import { ensureHouseholds } from '../../domain/household.ts'
 import { makeRequireAuth } from '../authMiddleware.ts'
 import { registerInvites } from './invites.ts'
+import fastifyCookie from '@fastify/cookie'
 
 async function makeApp() {
   const db: DatabaseSync = openDatabase(':memory:')
@@ -22,6 +23,7 @@ async function makeApp() {
   const ownerToken = sessions.issue(owner.id).token
 
   const app = Fastify()
+  await app.register(fastifyCookie)   // redeem sets the hz_session cookie (prod: registerAuth does this)
   app.addHook('onRequest', makeRequireAuth(sessions, users))
   registerInvites(app, { users, sessions, households, invites })
   await app.ready()
@@ -55,6 +57,8 @@ describe('invites', () => {
     })
     expect(redeem.statusCode).toBe(200)
     expect(redeem.json().token).toBeTruthy()
+    // Web redeemer rides the httpOnly session cookie — it must be set, like login.
+    expect(String(redeem.headers['set-cookie'])).toContain('hz_session')
     const friendId = redeem.json().user.id as string
     const friend = ctx.users.get(friendId)!
     const ownerHousehold = ctx.users.get(ctx.owner.id)!.householdId
