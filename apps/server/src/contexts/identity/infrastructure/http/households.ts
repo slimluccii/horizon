@@ -66,7 +66,20 @@ export function registerHouseholds(
     const parse = AddMemberBody.safeParse(req.body)
     if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
     if (!households.get(id)) return sendNotFound(reply, ErrorCodes.NOT_FOUND, 'Household not found')
-    if (!users.setHousehold(parse.data.userId, id)) return sendNotFound(reply, ErrorCodes.USER_NOT_FOUND, 'User not found')
+    const target = users.get(parse.data.userId)
+    if (!target) return sendNotFound(reply, ErrorCodes.USER_NOT_FOUND, 'User not found')
+    // The server owner must stay in their own household — moving them would
+    // strip that household's protected status and could lock the owner out.
+    if (target.role === 'owner') {
+      return errorReply(reply, 409, ErrorCodes.OWNER_PROTECTED, 'Cannot move the server owner')
+    }
+    const fromHousehold = target.householdId
+    users.setHousehold(parse.data.userId, id)
+    // If the moved profile OWNED its previous household, clear that now-stale
+    // owner reference (it's no longer a member there).
+    if (fromHousehold && fromHousehold !== id && households.get(fromHousehold)?.ownerUserId === target.id) {
+      households.clearOwner(fromHousehold)
+    }
     return { id, members: users.listByHousehold(id) }
   })
 

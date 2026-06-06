@@ -17,6 +17,8 @@ export interface HouseholdRepo {
   setOwner(id: string, ownerUserId: string): boolean
   /** True if the household contains the server `owner` (must never be deleted). */
   hasServerOwner(id: string): boolean
+  /** Clear a household's owner reference (set owner_user_id = NULL). */
+  clearOwner(id: string): void
   /** Delete the household AND its member users + their non-cascading dependents
    *  (invites). Returns false if the household doesn't exist. Transactional. */
   deleteCascade(id: string): boolean
@@ -54,13 +56,19 @@ export function createHouseholdRepo(db: DatabaseSync): HouseholdRepo {
     hasServerOwner(id) {
       return !!db.prepare("SELECT 1 FROM users WHERE household_id = ? AND role = 'owner' LIMIT 1").get(id)
     },
+    clearOwner(id) {
+      db.prepare('UPDATE households SET owner_user_id = NULL WHERE id = ?').run(id)
+    },
     deleteCascade(id) {
       if (!db.prepare('SELECT 1 FROM households WHERE id = ?').get(id)) return false
       db.transaction(() => {
         const members = (db.prepare('SELECT id FROM users WHERE household_id = ?').all(id) as { id: string }[])
-        // Break the circular owner ref so the owner user can be deleted.
-        db.prepare('UPDATE households SET owner_user_id = NULL WHERE id = ?').run(id)
         for (const m of members) {
+          // Break EVERY households.owner_user_id ref to this member (RESTRICT FK)
+          // — a member could own a DIFFERENT household (e.g. moved between
+          // households), which would otherwise FK-fail the delete and roll the
+          // whole cascade back.
+          db.prepare('UPDATE households SET owner_user_id = NULL WHERE owner_user_id = ?').run(m.id)
           // invites.created_by has no ON DELETE CASCADE — clear them first.
           db.prepare('DELETE FROM invites WHERE created_by = ?').run(m.id)
           // sessions / watch_progress / pairing_codes cascade on user delete.

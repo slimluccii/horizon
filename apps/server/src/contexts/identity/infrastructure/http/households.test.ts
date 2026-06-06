@@ -121,4 +121,35 @@ describe('households', () => {
     const res = await ctx.app.inject({ method: 'POST', url: `/households/nope/members`, headers: auth(ctx.token), payload: { userId: orphan.id } })
     expect(res.statusCode).toBe(404)
   })
+
+  it('refuses to move the server owner into another household (409)', async () => {
+    const other = ctx.households.create('Other', null)
+    const res = await ctx.app.inject({ method: 'POST', url: `/households/${other.id}/members`, headers: auth(ctx.token), payload: { userId: ctx.owner.id } })
+    expect(res.statusCode).toBe(409)
+    expect(ctx.users.get(ctx.owner.id)!.householdId).not.toBe(other.id)
+  })
+
+  it('moving a household owner clears the stale owner ref on their old household', async () => {
+    const old = ctx.households.create('Old', null)
+    const u = ctx.users.create({ name: 'OldOwner', householdId: old.id })
+    ctx.households.setOwner(old.id, u.id)
+    const dest = ctx.households.create('Dest', null)
+    const res = await ctx.app.inject({ method: 'POST', url: `/households/${dest.id}/members`, headers: auth(ctx.token), payload: { userId: u.id } })
+    expect(res.statusCode).toBe(200)
+    expect(ctx.users.get(u.id)!.householdId).toBe(dest.id)
+    expect(ctx.households.get(old.id)!.ownerUserId).toBeNull()
+  })
+
+  it('cascade-deletes a household whose member owns ANOTHER household (no FK rollback)', async () => {
+    const a = ctx.households.create('A', null)
+    const m = ctx.users.create({ name: 'CrossOwner', householdId: a.id })
+    ctx.households.setOwner(a.id, m.id)
+    const b = ctx.households.create('B', null)
+    ctx.households.setOwner(b.id, m.id)   // m owns B but is a member of A
+    const res = await ctx.app.inject({ method: 'DELETE', url: `/households/${a.id}`, headers: auth(ctx.token), payload: { deleteMembers: true } })
+    expect(res.statusCode).toBe(204)
+    expect(ctx.households.get(a.id)).toBeNull()
+    expect(ctx.users.get(m.id)).toBeNull()
+    expect(ctx.households.get(b.id)!.ownerUserId).toBeNull()   // B's owner ref nulled, B survives
+  })
 })
