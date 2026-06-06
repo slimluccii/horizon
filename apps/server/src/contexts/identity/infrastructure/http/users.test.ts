@@ -308,6 +308,61 @@ describe('PATCH + DELETE /users/:id', () => {
     expect(res.json().code).toBe('owner-protected')
   })
 
+  // --- Household-scoped management (follow-up A) ----------------------------
+  // Build: a server owner (no household needed), and two households A & B each
+  // with a household-owner (server-role member) + a plain member.
+  function household2(db: DatabaseSync, users: UserRepo) {
+    const households = createHouseholdRepo(db)
+    const srvOwner = users.create({ name: 'SrvOwner' })            // server role owner (first user)
+    const hoA = users.create({ name: 'HoA' })                      // server role member
+    const hA = households.create('A', hoA.id); users.setHousehold(hoA.id, hA.id)
+    const memA = users.create({ name: 'MemA' }); users.setHousehold(memA.id, hA.id)
+    const hoB = users.create({ name: 'HoB' })
+    const hB = households.create('B', hoB.id); users.setHousehold(hoB.id, hB.id)
+    const memB = users.create({ name: 'MemB' }); users.setHousehold(memB.id, hB.id)
+    return { srvOwner, hoA, memA, hoB, memB }
+  }
+
+  it('household owner DELETEs a member of their OWN household (204)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const { hoA, memA } = household2(db, users)
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${memA.id}`, headers: hdr(db, hoA.id) })
+    expect(res.statusCode).toBe(204)
+    expect(users.get(memA.id)).toBeNull()
+  })
+
+  it('household owner CANNOT DELETE a member of another household (403)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const { hoA, memB } = household2(db, users)
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${memB.id}`, headers: hdr(db, hoA.id) })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+    expect(users.get(memB.id)).not.toBeNull()
+  })
+
+  it('a plain member (not household owner) CANNOT DELETE a household-mate (403)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const { memA, hoA } = household2(db, users)
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${hoA.id}`, headers: hdr(db, memA.id) })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('caller-forbidden')
+  })
+
+  it('server owner/admin DELETEs across households (escape hatch preserved)', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const { srvOwner, memB } = household2(db, users)   // srvOwner = server role owner
+    const app = await buildApp(users, db)
+    const res = await app.inject({ method: 'DELETE', url: `/users/${memB.id}`, headers: hdr(db, srvOwner.id) })
+    expect(res.statusCode).toBe(204)
+  })
+
   it('PATCH owner role to member returns 403 role-immutable', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)
