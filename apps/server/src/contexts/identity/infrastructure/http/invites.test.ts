@@ -118,6 +118,24 @@ describe('invites', () => {
     expect(res.statusCode).toBe(403)
   })
 
+  it('owner can mint a join invite into ANOTHER household via householdId', async () => {
+    const other = ctx.households.create('Other', null)
+    const create = await ctx.app.inject({ method: 'POST', url: '/invites', headers: auth(ctx.ownerToken), payload: { kind: 'join', householdId: other.id } })
+    expect(create.statusCode).toBe(200)
+    // Redeeming joins the targeted household.
+    const code = create.json().code as string
+    const redeem = await ctx.app.inject({ method: 'POST', url: '/invites/redeem', payload: { code, name: 'Guest-X', password: 'longenough12' } })
+    expect(redeem.statusCode).toBe(200)
+    expect(ctx.users.get(redeem.json().user.id as string)?.householdId).toBe(other.id)
+  })
+
+  it('a member cannot target another household (403)', async () => {
+    const other = ctx.households.create('Other2', null)
+    const memberId = ctx.users.create({ name: 'Mem3', householdId: ctx.users.get(ctx.owner.id)!.householdId }).id
+    const res = await ctx.app.inject({ method: 'POST', url: '/invites', headers: auth(ctx.sessions.issue(memberId).token), payload: { kind: 'join', householdId: other.id } })
+    expect(res.statusCode).toBe(403)
+  })
+
   it('redeem of an unknown code → 404 invite-not-found', async () => {
     const res = await ctx.app.inject({
       method: 'POST',

@@ -30,7 +30,7 @@ const REDEEM_IP_MAX = 20
 const RATE_WINDOW_MS = 60_000
 const MIN_PASSWORD_LEN = 8
 
-const CreateBody = z.object({ kind: z.enum(['join', 'new_household']) }).strict()
+const CreateBody = z.object({ kind: z.enum(['join', 'new_household']), householdId: z.string().optional() }).strict()
 const RedeemBody = z
   .object({
     code: z.string().min(1).max(32),
@@ -81,6 +81,14 @@ export function registerInvites(app: FastifyInstance, deps: InviteDeps): void {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only the household owner can invite members')
     }
 
+    // join target: own household by default; owner/admin may target any household.
+    let joinHouseholdId = callerUser.householdId
+    if (kind === 'join' && parse.data.householdId && parse.data.householdId !== callerUser.householdId) {
+      if (!isServerAdmin) return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only server owner/admin can target another household')
+      if (!households.get(parse.data.householdId)) return errorReply(reply, 404, ErrorCodes.NOT_FOUND, 'Household not found')
+      joinHouseholdId = parse.data.householdId
+    }
+
     const now = Date.now()
     let code = generateInviteCode()
     for (let i = 0; i < 5; i++) {
@@ -88,7 +96,7 @@ export function registerInvites(app: FastifyInstance, deps: InviteDeps): void {
         invites.create({
           code,
           kind,
-          householdId: kind === 'join' ? callerUser.householdId : null,
+          householdId: kind === 'join' ? joinHouseholdId : null,
           createdBy: caller.id,
           createdAt: now,
           expiresAt: now + INVITE_TTL_MS,
