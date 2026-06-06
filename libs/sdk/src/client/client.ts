@@ -276,9 +276,15 @@ export class HorizonClient {
     },
     /** TV device-pairing: mint a short-lived code the TV displays, then polls. */
     pairStart: () => this.fetch<PairStartResult>('/auth/pair/start', { method: 'POST' }),
-    /** Approve a pairing code from an already-authenticated phone/web client. */
-    pairApprove: (code: string) =>
-      this.fetch<{ ok: true }>('/auth/pair/approve', { method: 'POST', body: JSON.stringify({ code }) }),
+    /** Approve a pairing code from an already-authenticated phone/web client.
+     *  `grant` is the set of profile ids the linked device may act as (a subset
+     *  of the approver's household); omitted → the server grants the approver
+     *  only (or, for a household owner, the whole household). */
+    pairApprove: (code: string, grant?: string[]) =>
+      this.fetch<{ ok: true }>('/auth/pair/approve', {
+        method: 'POST',
+        body: JSON.stringify(grant ? { code, grant } : { code }),
+      }),
     /**
      * Poll a pairing code. Returns `{ status: 'pending' }` (HTTP 202) until the
      * code is approved, then `{ token, user }` once — the token is stored so the
