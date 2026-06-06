@@ -555,6 +555,25 @@ describe('GET /sessions/:id/ws userId ownership (#41)', () => {
     await app.close()
   })
 
+  // Guard: the WS path is NOT allowlisted, so the global requireAuth hook runs on
+  // the upgrade request and rejects a tokenless upgrade before the route handler.
+  // inject() can't complete a real WS handshake, but it proves the auth hook
+  // short-circuits the upgrade with a non-101 (401) instead of letting it through.
+  it('progress WS upgrade without a token is rejected (auth hook, non-101)', async () => {
+    const { db, users, serverSettings, member } = setup()
+    const orch = fakeOrchestrator()
+    const { app, sessions } = await buildAppWithManager(db, users, serverSettings, orch)
+    const session = seedSession(sessions, member.id)
+    const res = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/ws`,
+      headers: { connection: 'upgrade', upgrade: 'websocket' },
+    })
+    expect(res.statusCode).not.toBe(101)
+    expect([400, 401, 426]).toContain(res.statusCode)
+    expect(res.json().code).toBe('unauthorized')
+  })
+
   // Browser-playback path: the httpOnly hz_session cookie auto-rides the WS
   // upgrade (the `?user=` query hack is gone). A matching owner cookie connects.
   it('connects (no 4001) when the owner session cookie rides the upgrade (browser path)', async () => {
