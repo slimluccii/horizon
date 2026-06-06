@@ -1156,7 +1156,7 @@ export default function Settings() {
             <ScanStatusBadge onToast={showToast} />
             <LibraryFoldersPanel onSave={showToast} />
             <ServerPanel onSave={showToast} />
-            {user && <AllHouseholdsPanel ownerUserId={user.id} />}
+            <AllHouseholdsPanel />
           </>
         )}
 

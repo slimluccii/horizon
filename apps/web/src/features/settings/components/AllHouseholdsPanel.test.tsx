@@ -16,7 +16,7 @@ beforeEach(() => {
 
 describe('AllHouseholdsPanel', () => {
   it('lists all households + members and the orphans section', async () => {
-    render(<AllHouseholdsPanel ownerUserId="owner" />)
+    render(<AllHouseholdsPanel />)
     // Household names render as a card heading (a <span>) AND as <option>s in the
     // orphan "Move to…" dropdown, so the bare name is ambiguous — assert each
     // card via its unique per-household Delete control and members/orphan by name.
@@ -28,7 +28,7 @@ describe('AllHouseholdsPanel', () => {
 
   it('deleting a household offers cascade vs orphan and calls remove with the flag', async () => {
     vi.spyOn(horizon.households, 'remove').mockResolvedValue(undefined as any)
-    render(<AllHouseholdsPanel ownerUserId="owner" />)
+    render(<AllHouseholdsPanel />)
     await screen.findByRole('button', { name: /delete Friend/i })
     // open the delete dialog for the Friend household
     fireEvent.click(screen.getByRole('button', { name: /delete Friend/i }))
@@ -37,7 +37,7 @@ describe('AllHouseholdsPanel', () => {
   })
 
   it('does not offer delete for the server-owner household', async () => {
-    render(<AllHouseholdsPanel ownerUserId="owner" />)
+    render(<AllHouseholdsPanel />)
     await screen.findByRole('button', { name: /delete Friend/i })
     expect(screen.queryByRole('button', { name: /delete Home/i })).toBeNull()
   })

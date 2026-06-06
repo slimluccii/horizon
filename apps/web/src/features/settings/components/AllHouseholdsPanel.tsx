@@ -7,7 +7,7 @@ function inviteLink(code: string): string {
   return `${window.location.origin}/join?code=${code}`
 }
 
-export default function AllHouseholdsPanel({ ownerUserId }: { ownerUserId: string }) {
+export default function AllHouseholdsPanel() {
   const [households, setHouseholds] = useState<HouseholdView[]>([])
   const [orphans, setOrphans] = useState<User[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -31,8 +31,11 @@ export default function AllHouseholdsPanel({ ownerUserId }: { ownerUserId: strin
   }
 
   // True for the household that contains the server owner — never deletable.
+  // Keyed off the server ROLE present in the household (not the viewer), so the
+  // guard is correct regardless of which admin is looking (matches the server's
+  // hasServerOwner 409 guard).
   function isOwnerHousehold(h: HouseholdView): boolean {
-    return h.members.some(m => m.id === ownerUserId)
+    return h.members.some(m => (m as { role?: string }).role === 'owner')
   }
 
   return (
