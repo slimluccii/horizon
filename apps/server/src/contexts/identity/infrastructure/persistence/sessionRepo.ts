@@ -48,8 +48,10 @@ export interface SessionRepo {
   /** Bind an authenticated user to a pairing code (the approval step), storing
    *  the granted user ids the minted session may act as. */
   approvePairingCode(code: string, userId: string, grantedUserIds?: string[]): void
-  /** Mark a pairing code consumed and link the session it minted. */
-  consumePairingCode(code: string, sessionId: string): void
+  /** Atomically mark an unconsumed pairing code consumed and link the session it
+   *  minted. Returns false if the code was already consumed — so of two
+   *  concurrent polls only one wins and a single-use code mints a single session. */
+  consumePairingCode(code: string, sessionId: string): boolean
 }
 
 /** Sliding session lifetime: ~90 days, bumped on every resolve. */
@@ -90,7 +92,9 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
       const token = crypto.randomBytes(TOKEN_BYTES).toString('base64url')
       const tokenHash = hashToken(token)
       const expiresAt = now + SESSION_TTL_MS
-      const grantJson = grant ? JSON.stringify(grant) : null
+      // An empty grant array is normalized to null so resolve() falls back to
+      // [userId] — never a session that can act as nobody (not even itself).
+      const grantJson = grant && grant.length ? JSON.stringify(grant) : null
       db.prepare(
         `INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_seen_at, user_agent, grant_user_ids)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -99,7 +103,7 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
         token,
         session: {
           id, userId, createdAt: now, expiresAt, lastSeenAt: now,
-          userAgent: userAgent ?? null, grant: grant ?? [userId],
+          userAgent: userAgent ?? null, grant: grant && grant.length ? grant : [userId],
         },
       }
     },
@@ -166,7 +170,8 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
     },
 
     consumePairingCode(code, sessionId) {
-      db.prepare('UPDATE pairing_codes SET consumed = 1, session_id = ? WHERE code = ?').run(sessionId, code)
+      return db.prepare('UPDATE pairing_codes SET consumed = 1, session_id = ? WHERE code = ? AND consumed = 0')
+        .run(sessionId, code).changes > 0
     },
   }
 }

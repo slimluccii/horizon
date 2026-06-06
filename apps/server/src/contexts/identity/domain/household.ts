@@ -25,9 +25,12 @@ export function ensureHouseholds(db: DatabaseSync): void {
   const ownerRow = db.prepare("SELECT id FROM users WHERE role = 'owner' LIMIT 1").get() as
     | { id: string }
     | undefined
-  const homeId = existing?.id ?? households.create('Home', ownerRow?.id ?? null).id
-  if (!existing && !ownerRow) {
-    // Defensive: households exist only to hold users; an owner is expected.
-  }
+  // Never create an ownerless Home — a household with a null owner can never be
+  // renamed or invited into by a non-server-admin (every owner-gated route fails
+  // closed). Prefer the server owner; absent one (corrupt/edge DB), fall back to
+  // the first orphan user so the household always has a manageable owner.
+  // orphanIds is non-empty here (the early return above guarantees it).
+  const ownerId = ownerRow?.id ?? orphanIds[0]
+  const homeId = existing?.id ?? households.create('Home', ownerId).id
   for (const id of orphanIds) users.setHousehold(id, homeId)
 }

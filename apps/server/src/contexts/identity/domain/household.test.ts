@@ -43,4 +43,16 @@ describe('ensureHouseholds', () => {
     ensureHouseholds(db)
     expect((db.prepare('SELECT COUNT(*) c FROM households').get() as { c: number }).c).toBe(0)
   })
+
+  it('creates a Home owned by a real user even when no owner row exists', () => {
+    // Edge DB: a member user with no owner present (e.g. owner deleted via SQL).
+    const now = Date.now()
+    db.prepare('INSERT INTO users (id, name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run('m1', 'M', 'member', now, now)
+    ensureHouseholds(db)
+    const u = createUserRepo(db).get('m1')!
+    expect(u.householdId).not.toBeNull()
+    // Home must have a manageable owner, never null.
+    expect(createHouseholdRepo(db).get(u.householdId!)!.ownerUserId).toBe('m1')
+  })
 })

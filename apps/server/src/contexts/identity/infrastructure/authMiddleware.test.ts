@@ -155,5 +155,23 @@ describe('auth/middleware', () => {
       expect(body.code).toBe('profile-not-granted')
       expect(req.profileUserId).toBeUndefined()
     })
+
+    it('rejects a granted profile that no longer shares the household (defense-in-depth)', async () => {
+      // 'partner' is in the grant but has since moved to another household.
+      const movedSessionRepo = { resolve: () => ({ userId: 'principal', grant: ['principal', 'partner'] }) } as any
+      const splitUserRepo = {
+        get: (id: string) => id === 'principal'
+          ? { id, role: 'member', householdId: 'home' }
+          : { id, role: 'member', householdId: 'other' },
+      } as any
+      const splitHook = makeResolveProfile(movedSessionRepo, splitUserRepo)
+      const req = reqWith('partner', ['principal', 'partner'])
+      let status = 0; let body: any
+      const reply = { status: (c: number) => { status = c; return reply }, send: (b: any) => { body = b; return reply } } as any
+      await splitHook(req, reply)
+      expect(status).toBe(403)
+      expect(body.code).toBe('profile-not-granted')
+      expect(req.profileUserId).toBeUndefined()
+    })
   })
 })

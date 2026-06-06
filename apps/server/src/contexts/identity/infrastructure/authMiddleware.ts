@@ -196,7 +196,14 @@ export function makeResolveProfile(sessionRepo: SessionRepo, userRepo: UserRepo)
     const token = tokenFromRequest(req)
     const session = token ? sessionRepo.resolve(token) : null
     const grant = session?.grant ?? [req.user.id]
-    if (!grant.includes(target)) {
+    // The target must be in the grant AND still share the principal's household.
+    // The household re-check is defense-in-depth: a grant is captured at pairing
+    // and frozen on a 90-day session, so without it a profile later moved to
+    // another household could still be acted on cross-household. GET /auth/grant
+    // applies the same household intersection — enforcement must match display.
+    const principal = userRepo.get(req.user.id)
+    const targetUser = userRepo.get(target)
+    if (!grant.includes(target) || !targetUser || targetUser.householdId !== principal?.householdId) {
       await reply.status(403).send({ error: 'Profile not granted', code: ErrorCodes.PROFILE_NOT_GRANTED })
       return
     }

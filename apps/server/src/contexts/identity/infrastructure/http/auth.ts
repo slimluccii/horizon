@@ -107,14 +107,18 @@ export interface GrantCheck {
 /** Validate/normalize the act-as grant an approver may attach to a device. */
 export function validateGrant(c: GrantCheck): { ok: true; grant: string[] } | { ok: false } {
   if (!c.isHouseholdOwner) {
-    // Members may grant only themselves.
-    if (c.requested && !(c.requested.length === 1 && c.requested[0] === c.approverId)) return { ok: false }
+    // Members may grant only themselves. An empty/omitted request defaults to self.
+    if (c.requested && c.requested.length && !(c.requested.length === 1 && c.requested[0] === c.approverId)) {
+      return { ok: false }
+    }
     return { ok: true, grant: [c.approverId] }
   }
-  // Household owner: default to the whole household; any explicit id must be in it.
-  if (c.requested === undefined) return { ok: true, grant: c.householdMemberIds }
+  // Household owner: an omitted OR empty request defaults to the whole household
+  // (an empty grant would mint an act-as-nobody session). Any explicit id must be
+  // in the household; the result is de-duplicated.
+  if (c.requested === undefined || c.requested.length === 0) return { ok: true, grant: c.householdMemberIds }
   if (c.requested.some(id => !c.householdMemberIds.includes(id))) return { ok: false }
-  return { ok: true, grant: c.requested }
+  return { ok: true, grant: [...new Set(c.requested)] }
 }
 
 /** Short, human-friendly pairing code (e.g. "ABCD-1234"). Avoids ambiguous
@@ -338,7 +342,12 @@ export async function registerAuth(
     const grant = pc.grantedUserIds ?? [pc.approvedUserId]
     const ua = req.headers['user-agent']
     const { token, session } = sessions.issue(pc.approvedUserId, typeof ua === 'string' ? ua : null, grant)
-    sessions.consumePairingCode(parse.data.code, session.id)
+    // Atomically claim the single-use code. If a concurrent poll already claimed
+    // it, revoke the session we just minted so one code yields exactly one session.
+    if (!sessions.consumePairingCode(parse.data.code, session.id)) {
+      sessions.revoke(session.id)
+      return errorReply(reply, 410, ErrorCodes.PAIRING_EXPIRED, 'Pairing code already used')
+    }
     const profiles = grant.map(id => users.get(id)).filter(Boolean).map(u => ({ id: u!.id, name: u!.name, avatar: u!.avatar }))
     return { token, user: users.get(pc.approvedUserId), grant, profiles }
   })

@@ -129,6 +129,12 @@ export function registerInvites(app: FastifyInstance, deps: InviteDeps): void {
       return errorReply(reply, 409, ErrorCodes.NAME_TAKEN, 'Name already taken in this household')
     }
 
+    // Hash the password BEFORE the single-use claim. Hashing (argon2) is the only
+    // async step; performing it after the claim would, on a hash failure, burn the
+    // code AND strand a passwordless account. Done first, every step after the
+    // claim is a synchronous DB write that won't realistically throw.
+    const passwordHash = await hashPassword(password)
+
     // Settle the single-use claim *before* creating any account or household.
     // `consume` is an atomic `UPDATE ... WHERE consumed_at IS NULL`, so of two
     // concurrent redeems of the same valid code only the one whose UPDATE flips
@@ -164,7 +170,7 @@ export function registerInvites(app: FastifyInstance, deps: InviteDeps): void {
     const householdId = inv.kind === 'join' ? inv.householdId! : households.create(name, user.id).id
     users.setHousehold(user.id, householdId)
 
-    users.setPassword(user.id, await hashPassword(password))
+    users.setPassword(user.id, passwordHash)
 
     const { token } = sessions.issue(user.id, null, [user.id])
     return { token, user: users.get(user.id) }

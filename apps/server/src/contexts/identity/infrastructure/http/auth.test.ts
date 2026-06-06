@@ -481,4 +481,16 @@ describe('validateGrant', () => {
     expect(validateGrant({ approverId: 'partner', isHouseholdOwner: false, householdMemberIds: members, requested: ['owner'] }).ok)
       .toBe(false)
   })
+  it('owner: an empty grant array defaults to the whole household (never act-as-nobody)', () => {
+    expect(validateGrant({ approverId: 'owner', isHouseholdOwner: true, householdMemberIds: members, requested: [] }))
+      .toEqual({ ok: true, grant: members })
+  })
+  it('owner: duplicate ids are de-duplicated', () => {
+    expect(validateGrant({ approverId: 'owner', isHouseholdOwner: true, householdMemberIds: members, requested: ['partner', 'partner', 'owner'] }))
+      .toEqual({ ok: true, grant: ['partner', 'owner'] })
+  })
+  it('member: an empty grant array defaults to self', () => {
+    expect(validateGrant({ approverId: 'partner', isHouseholdOwner: false, householdMemberIds: members, requested: [] }))
+      .toEqual({ ok: true, grant: ['partner'] })
+  })
 })
