@@ -30,8 +30,6 @@ private enum class Mode { Pairing, Password }
 
 @Composable
 fun AuthScreen(onAuthed: () -> Unit) {
-    val state = LocalAppState.current
-    val api = state.api!!
     var mode by remember { mutableStateOf(Mode.Pairing) }
 
     Column(

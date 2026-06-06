@@ -16,8 +16,6 @@ data class User(
     val updatedAt: Long,
 )
 
-@Serializable
-data class CreateUserBody(val name: String, val avatar: String? = null)
 
 // ---------- media -----------------------------------------------------------
 
