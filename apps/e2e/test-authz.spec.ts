@@ -51,8 +51,10 @@ test.describe('authorization', () => {
         capabilities: { videoCodecs: ['h264'], audioCodecs: ['aac'], hdr: [], maxBitrate: 1_000_000, container: ['mp4'] },
       },
     })
+    // Act-as model: the acting profile (member) ≠ the body userId (owner), so the
+    // per-user route rejects with 403 user-mismatch.
     expect(res.status()).toBe(403)
-    expect((await res.json()).code).toBe('caller-forbidden')
+    expect((await res.json()).code).toBe('user-mismatch')
   })
 
   test("member cannot read another user's progress", async ({ request }) => {
@@ -61,7 +63,8 @@ test.describe('authorization', () => {
     const res = await request.get(`${API}/users/${owner.id}/progress/anything`, {
       headers: bearer(member),
     })
-    expect(res.status()).toBe(400)
+    // Reading another profile's data is forbidden (403), not a bad request.
+    expect(res.status()).toBe(403)
     expect((await res.json()).code).toBe('user-mismatch')
   })
 })
