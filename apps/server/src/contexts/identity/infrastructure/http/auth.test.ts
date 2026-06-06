@@ -393,7 +393,7 @@ describe('auth routes', () => {
         if (req.method === 'POST' && path === '/users' && users.list().length === 0) return
         return requireAuth(req, reply)
       })
-      registerUsers(app, users, sessions)
+      registerUsers(app, users, sessions, households)
       await app.ready()
       return app
     }

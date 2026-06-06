@@ -97,7 +97,7 @@ export async function buildServer(
     registerPlaylists(api, sessions, repos.userRepo)
     registerSegments(api, hwAccel, sessions, repos.mediaRepo, repos.userRepo)
     registerMetadata(api, cfg)
-    registerUsers(api, repos.userRepo, repos.sessionRepo)
+    registerUsers(api, repos.userRepo, repos.sessionRepo, repos.householdRepo)
     registerInvites(api, { users: repos.userRepo, sessions: repos.sessionRepo, households: repos.householdRepo, invites: repos.inviteRepo })
     registerHouseholds(api, { users: repos.userRepo, households: repos.householdRepo })
     registerProgress(api, repos.userRepo, repos.progressRepo)

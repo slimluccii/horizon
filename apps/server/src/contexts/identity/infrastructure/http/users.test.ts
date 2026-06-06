@@ -19,6 +19,7 @@ async function buildApp(users: UserRepo, db: DatabaseSync) {
   // First-boot POST /users sets the session cookie, which needs @fastify/cookie
   // registered (in production registerAuth does this before registerUsers).
   await app.register(fastifyCookie)
+  const households = createHouseholdRepo(db)
   const requireAuth = makeRequireAuth(sessions, users)
   // Mirror server.ts: first-boot POST /users (empty household) bypasses the guard.
   app.addHook('onRequest', async (req, reply) => {
@@ -26,7 +27,7 @@ async function buildApp(users: UserRepo, db: DatabaseSync) {
     if (req.method === 'POST' && path === '/users' && users.list().length === 0) return
     return requireAuth(req, reply)
   })
-  registerUsers(app, users, sessions)
+  registerUsers(app, users, sessions, households)
   await app.ready()
   return app
 }
@@ -106,6 +107,20 @@ describe('POST /users', () => {
     const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Carol' }, headers: hdr(db, member.id) })
     expect(res.statusCode).toBe(403)
     expect(res.json().code).toBe('caller-forbidden')
+  })
+
+  it('first-boot owner is placed in a Home household they own', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const households = createHouseholdRepo(db)
+    const app = await buildApp(users, db)
+    // create the very first user via POST /users (unauthenticated first-boot path)
+    const res = await app.inject({ method: 'POST', url: '/users', payload: { name: 'Owner' } })
+    expect(res.statusCode).toBe(200)
+    const id = res.json().id
+    const u = users.get(id)!
+    expect(u.householdId).not.toBeNull()
+    expect(households.get(u.householdId!)!.ownerUserId).toBe(id)
   })
 
   it('allows unauthenticated creation on empty database', async () => {
