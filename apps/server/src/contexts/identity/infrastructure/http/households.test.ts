@@ -74,4 +74,37 @@ describe('households', () => {
     const res = await ctx.app.inject({ method: 'GET', url: '/households', headers: auth(ctx.sessions.issue(memberId).token) })
     expect(res.statusCode).toBe(403)
   })
+
+  it('DELETE /households/:id deleteMembers=true removes household + members', async () => {
+    const h = ctx.households.create('Doomed', null)
+    const u = ctx.users.create({ name: 'Doom1', householdId: h.id })
+    ctx.households.setOwner(h.id, u.id)
+    const res = await ctx.app.inject({ method: 'DELETE', url: `/households/${h.id}`, headers: auth(ctx.token), payload: { deleteMembers: true } })
+    expect(res.statusCode).toBe(204)
+    expect(ctx.households.get(h.id)).toBeNull()
+    expect(ctx.users.get(u.id)).toBeNull()
+  })
+
+  it('DELETE /households/:id deleteMembers=false orphans members', async () => {
+    const h = ctx.households.create('Kept', null)
+    const u = ctx.users.create({ name: 'Keep1', householdId: h.id })
+    ctx.households.setOwner(h.id, u.id)
+    const res = await ctx.app.inject({ method: 'DELETE', url: `/households/${h.id}`, headers: auth(ctx.token), payload: { deleteMembers: false } })
+    expect(res.statusCode).toBe(204)
+    expect(ctx.households.get(h.id)).toBeNull()
+    expect(ctx.users.get(u.id)?.householdId).toBeNull()
+  })
+
+  it('refuses to delete the household containing the server owner (409)', async () => {
+    const ownerHousehold = ctx.users.get(ctx.owner.id)!.householdId!
+    const res = await ctx.app.inject({ method: 'DELETE', url: `/households/${ownerHousehold}`, headers: auth(ctx.token), payload: { deleteMembers: true } })
+    expect(res.statusCode).toBe(409)
+  })
+
+  it('DELETE /households/:id is forbidden for a member (403)', async () => {
+    const h = ctx.households.create('X', null)
+    const memberId = ctx.users.create({ name: 'M2', householdId: ctx.users.get(ctx.owner.id)!.householdId }).id
+    const res = await ctx.app.inject({ method: 'DELETE', url: `/households/${h.id}`, headers: auth(ctx.sessions.issue(memberId).token), payload: { deleteMembers: true } })
+    expect(res.statusCode).toBe(403)
+  })
 })
