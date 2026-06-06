@@ -3,6 +3,7 @@ import type { SessionInfo } from '../playback/session.ts'
 import type { ClientCapabilities } from '../playback/capabilities.ts'
 import type { MediaItem, ShowSummary, SeasonSummary } from '../library/mediaItem.ts'
 import type { User, AuthSession, SetPasswordResult, PairStartResult, PairPollResult } from '../identity/user.ts'
+import type { HouseholdView } from '../identity/household.ts'
 import type { WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, ScanStatusResponse } from '../shared/http.ts'
 import type { Preferences } from '../identity/preferences.ts'
 import type { CollectionSummary } from '../library/collections.ts'
@@ -185,6 +186,14 @@ export class HorizonClient {
       this.fetch<User>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: string) =>
       this.fetch<void>(`/users/${id}`, { method: 'DELETE' }),
+  }
+
+  readonly households = {
+    /** The caller's household + its members. */
+    me: () => this.fetch<HouseholdView>('/households/me'),
+    /** Rename a household (household owner or server owner/admin). */
+    rename: (id: string, name: string) =>
+      this.fetch<HouseholdView>(`/households/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   }
 
   readonly settings = {
