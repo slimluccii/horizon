@@ -4,6 +4,7 @@ import { horizon } from '../../../shared/horizon.ts'
 import { useActiveUser } from '../../identity/hooks/useActiveUser.ts'
 import { useActivityStream } from '../hooks/useActivityStream.ts'
 import ActivityLogPanel from '../components/ActivityLogPanel.tsx'
+import HouseholdPanel from '../components/HouseholdPanel'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
 import type { Preferences, User, ServerSettings, ScanStatusResponse } from '@horizon/sdk'
 import { FolderBrowser, type LibraryTag } from '../../../shared/ui/FolderBrowser/FolderBrowser.tsx'
@@ -1152,12 +1153,15 @@ export default function Settings() {
         )}
 
         {activeTab === 'Profiles' && user && (
-          <ProfilesPanel
-            viewerId={user.id}
-            viewerRole={user.role}
-            onRoleChanged={handleRoleChanged}
-            onToast={showToast}
-          />
+          <>
+            <ProfilesPanel
+              viewerId={user.id}
+              viewerRole={user.role}
+              onRoleChanged={handleRoleChanged}
+              onToast={showToast}
+            />
+            <HouseholdPanel viewerId={user.id} viewerRole={user.role} />
+          </>
         )}
 
         {activeTab === 'Personal' && (
