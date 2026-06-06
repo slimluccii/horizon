@@ -11,7 +11,7 @@ import { FolderBrowser, type LibraryTag } from '../../../shared/ui/FolderBrowser
 import LargeTopNav from '../../../shared/ui/chrome/LargeTopNav.tsx'
 import './Settings.css'
 
-type Tab = 'Personal' | 'Server' | 'Profiles'
+type Tab = 'Personal' | 'Household' | 'Server' | 'Profiles'
 
 const PALETTE = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
 function userColor(name: string): string {
@@ -1081,7 +1081,13 @@ export default function Settings() {
   }, [userId])
 
   const viewerCanManage = user?.role === 'owner' || user?.role === 'admin'
-  const tabs: Tab[] = viewerCanManage ? ['Personal', 'Server', 'Profiles'] : ['Personal']
+  // Household management is available to EVERY authenticated user: a household
+  // owner (who may be a server-role 'member', e.g. a new_household redeemer)
+  // must be able to invite/manage their household. The panel itself gates the
+  // owner-only controls; non-owners get a read-only view of their household.
+  const tabs: Tab[] = viewerCanManage
+    ? ['Personal', 'Household', 'Server', 'Profiles']
+    : ['Personal', 'Household']
 
   const diff = Object.fromEntries(
     Object.entries(form).filter(([k, v]) => v !== initial[k as keyof typeof initial])
@@ -1152,16 +1158,17 @@ export default function Settings() {
           </>
         )}
 
+        {activeTab === 'Household' && user && (
+          <HouseholdPanel viewerId={user.id} viewerRole={user.role} />
+        )}
+
         {activeTab === 'Profiles' && user && (
-          <>
-            <ProfilesPanel
-              viewerId={user.id}
-              viewerRole={user.role}
-              onRoleChanged={handleRoleChanged}
-              onToast={showToast}
-            />
-            <HouseholdPanel viewerId={user.id} viewerRole={user.role} />
-          </>
+          <ProfilesPanel
+            viewerId={user.id}
+            viewerRole={user.role}
+            onRoleChanged={handleRoleChanged}
+            onToast={showToast}
+          />
         )}
 
         {activeTab === 'Personal' && (
