@@ -3,7 +3,7 @@ import type { SessionInfo } from '../playback/session.ts'
 import type { ClientCapabilities } from '../playback/capabilities.ts'
 import type { MediaItem, ShowSummary, SeasonSummary } from '../library/mediaItem.ts'
 import type { User, AuthSession, SetPasswordResult, PairStartResult, PairPollResult } from '../identity/user.ts'
-import type { HouseholdView } from '../identity/household.ts'
+import type { HouseholdView, InviteKind, InviteResult } from '../identity/household.ts'
 import type { WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, ScanStatusResponse } from '../shared/http.ts'
 import type { Preferences } from '../identity/preferences.ts'
 import type { CollectionSummary } from '../library/collections.ts'
@@ -194,6 +194,20 @@ export class HorizonClient {
     /** Rename a household (household owner or server owner/admin). */
     rename: (id: string, name: string) =>
       this.fetch<HouseholdView>(`/households/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  }
+
+  readonly invites = {
+    /** Mint a single-use invite. `new_household` is server owner/admin only;
+     *  `join` is the household owner's (server re-checks). */
+    create: (body: { kind: InviteKind }) =>
+      this.fetch<InviteResult>('/invites', { method: 'POST', body: JSON.stringify(body) }),
+    /** Redeem an invite to create the account + session. Unauthenticated. Stores
+     *  the returned bearer token (native); the web also gets the hz_session cookie. */
+    redeem: async (body: { code: string; name: string; password: string }): Promise<AuthSession> => {
+      const res = await this.fetch<AuthSession>('/invites/redeem', { method: 'POST', body: JSON.stringify(body) })
+      this.setToken(res.token)
+      return res
+    },
   }
 
   readonly settings = {

@@ -302,3 +302,25 @@ describe('households', () => {
     expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ name: 'Den' })
   })
 })
+
+describe('invites', () => {
+  it('create() POSTs /api/invites with the kind', async () => {
+    const fn = spyFetch({ code: 'ABCD-2345', expiresAt: 123 })
+    const c = new HorizonClient({ baseUrl: '' })
+    const res = await c.invites.create({ kind: 'join' })
+    expect(fn.mock.calls[0][0]).toBe('/api/invites')
+    expect((fn.mock.calls[0][1] as RequestInit).method).toBe('POST')
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ kind: 'join' })
+    expect(res.code).toBe('ABCD-2345')
+  })
+
+  it('redeem() POSTs /api/invites/redeem and stores the returned token', async () => {
+    const fn = spyFetch({ token: 'tok-1', user: { id: 'u9', name: 'Friend' } })
+    const c = new HorizonClient({ baseUrl: '' })
+    const res = await c.invites.redeem({ code: 'ABCD-2345', name: 'Friend', password: 'longenough12' })
+    expect(fn.mock.calls[0][0]).toBe('/api/invites/redeem')
+    expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ code: 'ABCD-2345', name: 'Friend', password: 'longenough12' })
+    expect(res.token).toBe('tok-1')
+    expect(c.getToken()).toBe('tok-1')   // native clients ride the stored token
+  })
+})
