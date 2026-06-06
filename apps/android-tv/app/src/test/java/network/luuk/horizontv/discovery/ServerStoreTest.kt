@@ -93,4 +93,12 @@ class ServerStoreTest {
             store.read(),
         )
     }
+
+    @Test fun `saveToken then readToken round-trips; clearToken removes it`() = runBlocking {
+        assertNull(store.readToken())
+        store.saveToken("tok-9")
+        assertEquals("tok-9", store.readToken())
+        store.clearToken()
+        assertNull(store.readToken())
+    }
 }

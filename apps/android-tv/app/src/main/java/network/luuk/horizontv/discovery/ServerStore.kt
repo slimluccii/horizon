@@ -17,6 +17,7 @@ class ServerStore internal constructor(private val store: DataStore<Preferences>
     private val idKey = stringPreferencesKey("instance_id")
     private val urlKey = stringPreferencesKey("last_url")
     private val nameKey = stringPreferencesKey("name")
+    private val tokenKey = stringPreferencesKey("session_token")
 
     suspend fun read(): SavedServer? {
         val prefs = store.data.first()
@@ -38,5 +39,15 @@ class ServerStore internal constructor(private val store: DataStore<Preferences>
     /** Update just the URL after a re-resolve, keeping id + name. */
     suspend fun updateUrl(url: String) {
         store.edit { prefs -> prefs[urlKey] = url }
+    }
+
+    suspend fun readToken(): String? = store.data.first()[tokenKey]
+
+    suspend fun saveToken(token: String) {
+        store.edit { it[tokenKey] = token }
+    }
+
+    suspend fun clearToken() {
+        store.edit { it.remove(tokenKey) }
     }
 }
