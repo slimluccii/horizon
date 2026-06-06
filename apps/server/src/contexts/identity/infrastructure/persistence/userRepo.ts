@@ -77,6 +77,8 @@ export interface UserRepo {
   resetOwnerPassword(): string | null
   /** Users in a household, in insertion order. */
   listByHousehold(householdId: string): User[]
+  /** Users with no household (`household_id IS NULL`), in insertion order. */
+  listOrphans(): User[]
   /** Move a user into a household. Returns false if no such user. */
   setHousehold(id: string, householdId: string): boolean
 }
@@ -160,6 +162,11 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
 
     listByHousehold(householdId) {
       const rows = db.prepare('SELECT * FROM users WHERE household_id = ? ORDER BY created_at, rowid').all(householdId)
+      return rows.map(rowToUser)
+    },
+
+    listOrphans() {
+      const rows = db.prepare('SELECT * FROM users WHERE household_id IS NULL ORDER BY created_at, rowid').all()
       return rows.map(rowToUser)
     },
 
