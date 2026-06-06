@@ -12,6 +12,7 @@ export interface Household {
 export interface HouseholdRepo {
   create(name: string, ownerUserId: string | null): Household
   get(id: string): Household | null
+  list(): Household[]
   rename(id: string, name: string): boolean
   setOwner(id: string, ownerUserId: string): boolean
 }
@@ -33,6 +34,9 @@ export function createHouseholdRepo(db: DatabaseSync): HouseholdRepo {
     get(id) {
       const row = db.prepare('SELECT * FROM households WHERE id = ?').get(id)
       return row ? rowToHousehold(row) : null
+    },
+    list() {
+      return (db.prepare('SELECT * FROM households ORDER BY created_at, rowid').all()).map(rowToHousehold)
     },
     rename(id, name) {
       return db.prepare('UPDATE households SET name = ? WHERE id = ?').run(name, id).changes > 0

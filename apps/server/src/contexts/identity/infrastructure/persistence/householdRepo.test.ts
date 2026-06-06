@@ -50,4 +50,9 @@ describe('householdRepo', () => {
   it('setOwner returns false for an unknown id', () => {
     expect(repo.setOwner('nope', 'x')).toBe(false)
   })
+
+  it('list() returns all households', () => {
+    repo.create('A', null); repo.create('B', null)
+    expect(repo.list().map(h => h.name).sort()).toEqual(['A', 'B'])
+  })
 })
