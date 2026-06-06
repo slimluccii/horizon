@@ -17,7 +17,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 @Composable
-fun BootScreen(onConnected: () -> Unit, onNeedPicker: () -> Unit) {
+fun BootScreen(onAuthed: () -> Unit, onNeedAuth: () -> Unit, onNeedPicker: () -> Unit) {
     val state = LocalAppState.current
 
     LaunchedEffect(Unit) {
@@ -53,7 +53,28 @@ fun BootScreen(onConnected: () -> Unit, onNeedPicker: () -> Unit) {
                         )
                     )
                 }
-                onConnected()
+                // Now decide auth: validate any saved token via /auth/grant.
+                val authDecision = network.luuk.horizontv.discovery.resolveAuth(
+                    savedToken = state.store.readToken(),
+                    fetchGrant = { _ ->
+                        // The token was just saved into the api by authenticate()? No —
+                        // set it provisionally so the grant call carries it.
+                        state.api!!.setToken(state.store.readToken())
+                        try { state.api!!.getGrant().profiles }
+                        catch (_: Throwable) { null }
+                    },
+                )
+                when (authDecision) {
+                    is network.luuk.horizontv.discovery.AuthDecision.Authed -> {
+                        state.authenticate(authDecision.token, authDecision.profiles)
+                        onAuthed()
+                    }
+                    network.luuk.horizontv.discovery.AuthDecision.NeedAuth -> {
+                        state.store.clearToken()
+                        state.api!!.setToken(null)
+                        onNeedAuth()
+                    }
+                }
             }
             BootDecision.ShowPicker -> onNeedPicker()
         }
