@@ -32,3 +32,6 @@ media/
 .claude/wf-*.js
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# visual brainstorm companion
+.superpowers/
