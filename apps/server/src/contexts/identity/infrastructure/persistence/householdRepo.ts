@@ -15,6 +15,13 @@ export interface HouseholdRepo {
   list(): Household[]
   rename(id: string, name: string): boolean
   setOwner(id: string, ownerUserId: string): boolean
+  /** True if the household contains the server `owner` (must never be deleted). */
+  hasServerOwner(id: string): boolean
+  /** Delete the household AND its member users + their non-cascading dependents
+   *  (invites). Returns false if the household doesn't exist. Transactional. */
+  deleteCascade(id: string): boolean
+  /** Delete the household, orphaning its members (household_id → null). Transactional. */
+  deleteOrphaning(id: string): boolean
 }
 
 function rowToHousehold(raw: unknown): Household {
@@ -43,6 +50,37 @@ export function createHouseholdRepo(db: DatabaseSync): HouseholdRepo {
     },
     setOwner(id, ownerUserId) {
       return db.prepare('UPDATE households SET owner_user_id = ? WHERE id = ?').run(ownerUserId, id).changes > 0
+    },
+    hasServerOwner(id) {
+      return !!db.prepare("SELECT 1 FROM users WHERE household_id = ? AND role = 'owner' LIMIT 1").get(id)
+    },
+    deleteCascade(id) {
+      if (!db.prepare('SELECT 1 FROM households WHERE id = ?').get(id)) return false
+      db.transaction(() => {
+        const members = (db.prepare('SELECT id FROM users WHERE household_id = ?').all(id) as { id: string }[])
+        // Break the circular owner ref so the owner user can be deleted.
+        db.prepare('UPDATE households SET owner_user_id = NULL WHERE id = ?').run(id)
+        for (const m of members) {
+          // invites.created_by has no ON DELETE CASCADE — clear them first.
+          db.prepare('DELETE FROM invites WHERE created_by = ?').run(m.id)
+          // sessions / watch_progress / pairing_codes cascade on user delete.
+          db.prepare('DELETE FROM users WHERE id = ?').run(m.id)
+        }
+        // Invites targeting this household (FK household_id, no cascade).
+        db.prepare('DELETE FROM invites WHERE household_id = ?').run(id)
+        db.prepare('DELETE FROM households WHERE id = ?').run(id)
+      })()
+      return true
+    },
+    deleteOrphaning(id) {
+      if (!db.prepare('SELECT 1 FROM households WHERE id = ?').get(id)) return false
+      db.transaction(() => {
+        db.prepare('UPDATE users SET household_id = NULL WHERE household_id = ?').run(id)
+        db.prepare('UPDATE households SET owner_user_id = NULL WHERE id = ?').run(id)
+        db.prepare('DELETE FROM invites WHERE household_id = ?').run(id)
+        db.prepare('DELETE FROM households WHERE id = ?').run(id)
+      })()
+      return true
     },
   }
 }
