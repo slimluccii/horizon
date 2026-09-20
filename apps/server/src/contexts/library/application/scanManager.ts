@@ -165,11 +165,15 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     } catch (err) {
       errors.push((err as Error).message)
       result = {
-        scope, itemsSeen: 0, itemsAdded: 0, itemsRemoved: 0, itemsFailed: 0,
+        scope, unavailableRoots: [], itemsSeen: 0, itemsAdded: 0, itemsRemoved: 0, itemsFailed: 0,
         durationMs: Date.now() - startedAt,
         movies: 0, shows: 0, episodes: 0,
       }
       console.error('Scan error:', err)
+    }
+    for (const root of result.unavailableRoots) {
+      errors.push(`Library folder is unreadable or empty, skipped: ${root}`)
+      console.error(`Scan: library folder is unreadable or empty, skipped: ${root}`)
     }
     const finishedAt = Date.now()
     deps.scanHistory.finish(histId, {

@@ -162,6 +162,8 @@ export interface MediaRepo {
   softDeleteMissing(seenIds: Set<string>): number
   /** Soft-delete rows whose file_path is under `pathPrefix` and not in seenIds. */
   softDeleteMissingUnder(pathPrefix: string, seenIds: Set<string>): number
+  /** Ids of live rows whose file is under `pathPrefix`, plus their parent shows. */
+  idsUnder(pathPrefix: string): string[]
   listMovies(): MediaItem[]
   listShows(): MediaItem[]
   /** Case-insensitive title search over movies, shows and episodes. */
@@ -439,6 +441,20 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
      * Wrapped in an explicit transaction so a mid-loop failure rolls back
      * atomically rather than soft-deleting against a partial `seen` set.
      */
+    idsUnder(pathPrefix) {
+      const prefix = pathPrefix.endsWith('/') ? pathPrefix : `${pathPrefix}/`
+      const rows = db.prepare(
+        `SELECT id, parent_id FROM media_items
+          WHERE deleted_at IS NULL AND substr(file_path, 1, length(?)) = ?`,
+      ).all(prefix, prefix) as { id: string; parent_id: string | null }[]
+      const ids = new Set<string>()
+      for (const r of rows) {
+        ids.add(r.id)
+        if (r.parent_id) ids.add(r.parent_id)
+      }
+      return [...ids]
+    },
+
     softDeleteMissing(seenIds) {
       const now = Date.now()
       try {

@@ -246,5 +246,63 @@ describe('rescan (integration)', () => {
 
       expect(media.listMovies().map(m => m.title)).toEqual(['Tenet'])
     })
+
+    it('keeps the library when a root is unreadable', async () => {
+      const { moviesRoot, media, scan } = setup()
+      writeFileSync(path.join(moviesRoot, 'Oppenheimer (2023).mkv'), '')
+      await scan()
+
+      rmSync(moviesRoot, { recursive: true })
+      const result = await scan()
+
+      expect(result.itemsRemoved).toBe(0)
+      expect(result.unavailableRoots).toEqual([moviesRoot])
+      expect(media.listMovies()).toHaveLength(1)
+    })
+
+    it('keeps the library when a root is present but empty, as an unmounted bind mount is', async () => {
+      const { moviesRoot, media, scan } = setup()
+      writeFileSync(path.join(moviesRoot, 'Oppenheimer (2023).mkv'), '')
+      await scan()
+
+      rmSync(moviesRoot, { recursive: true })
+      mkdirSync(moviesRoot)
+      const result = await scan()
+
+      expect(result.itemsRemoved).toBe(0)
+      expect(result.unavailableRoots).toEqual([moviesRoot])
+      expect(media.listMovies()).toHaveLength(1)
+    })
+
+    it('still removes an item whose file is gone while the root has other content', async () => {
+      const { moviesRoot, media, scan } = setup()
+      writeFileSync(path.join(moviesRoot, 'Oppenheimer (2023).mkv'), '')
+      writeFileSync(path.join(moviesRoot, 'Tenet (2020).mkv'), '')
+      await scan()
+
+      rmSync(path.join(moviesRoot, 'Tenet (2020).mkv'))
+      const result = await scan()
+
+      expect(result.itemsRemoved).toBe(1)
+      expect(result.unavailableRoots).toEqual([])
+      expect(media.listMovies().map(m => m.title)).toEqual(['Oppenheimer'])
+    })
+
+    it('keeps an existing item whose probe fails while the file is still on disk', async () => {
+      const { moviesRoot, media, scan } = setup()
+      writeFileSync(path.join(moviesRoot, 'Oppenheimer (2023).mkv'), '')
+      writeFileSync(path.join(moviesRoot, 'Tenet (2020).mkv'), '')
+      await scan()
+
+      vi.spyOn(probeMod, 'probe').mockImplementation(async (p: string) => {
+        if (p.includes('Tenet')) throw new Error('ffprobe timed out')
+        return fakeProbe(p) as any
+      })
+      const result = await scan()
+
+      expect(result.itemsFailed).toBe(1)
+      expect(result.itemsRemoved).toBe(0)
+      expect(media.listMovies().map(m => m.title).sort()).toEqual(['Oppenheimer', 'Tenet'])
+    })
   })
 })
