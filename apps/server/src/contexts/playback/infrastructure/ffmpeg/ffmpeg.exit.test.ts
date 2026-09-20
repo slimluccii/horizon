@@ -36,7 +36,7 @@ vi.mock('node:child_process', async importOriginal => ({
   },
 }))
 
-const { spawnFfmpeg, killFfmpeg } = await import('./ffmpeg.ts')
+const { spawnFfmpeg, killFfmpeg, pauseFfmpeg, resumeFfmpeg } = await import('./ffmpeg.ts')
 
 const plan: PlaybackPlan = {
   method: 'transcode',
@@ -107,5 +107,45 @@ describe('ffmpeg exit reporting', () => {
     await start()
     spawned[1].exit(1)
     expect(sent).toMatchObject([{ type: 'error', code: 'transcode-failed', fatal: true }])
+  })
+})
+
+describe('killFfmpeg', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  const sessionWith = (proc: FakeProc) => ({ id: 's1', ffmpegProcess: proc }) as unknown as Session
+
+  it('continues the process before terminating it, because a stopped ffmpeg never sees SIGTERM', () => {
+    const proc = new FakeProc()
+    killFfmpeg(sessionWith(proc))
+    expect(proc.signals).toEqual(['SIGCONT', 'SIGTERM'])
+  })
+
+  it('falls back to SIGKILL when the process has not exited in time', () => {
+    vi.useFakeTimers()
+    const proc = new FakeProc()
+    killFfmpeg(sessionWith(proc))
+    vi.advanceTimersByTime(10_000)
+    expect(proc.signals).toEqual(['SIGCONT', 'SIGTERM', 'SIGKILL'])
+  })
+
+  it('does not send SIGKILL to a process that exited in time', () => {
+    vi.useFakeTimers()
+    const proc = new FakeProc()
+    killFfmpeg(sessionWith(proc))
+    proc.exit(255)
+    vi.advanceTimersByTime(10_000)
+    expect(proc.signals).toEqual(['SIGCONT', 'SIGTERM'])
+  })
+})
+
+describe('pauseFfmpeg / resumeFfmpeg', () => {
+  it('can resume a process it paused, even though Node flags it as killed after any signal', () => {
+    const proc = new FakeProc()
+    const session = { id: 's1', ffmpegProcess: proc } as unknown as Session
+    pauseFfmpeg(session)
+    expect(proc.killed).toBe(true)
+    resumeFfmpeg(session)
+    expect(proc.signals).toEqual(['SIGSTOP', 'SIGCONT'])
   })
 })

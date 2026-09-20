@@ -25,7 +25,7 @@ vi.mock('../infrastructure/ffmpeg/ffmpeg.ts', () => ({
   }),
 }))
 
-const { restartWithReset } = await import('./restart.ts')
+const { restartWithReset, restartAtSegment } = await import('./restart.ts')
 
 function fakePlan() {
   return {
@@ -115,5 +115,23 @@ describe('restartWithReset process lifecycle (issue #79)', () => {
     await restartWithReset(session, { name: 'cpu' } as any, fakePlan(), 0)
     expect(Date.now() - t0).toBeLessThan(1_000)
     expect(order).toEqual(['kill', 'spawn'])
+  })
+})
+
+describe('restartAtSegment', () => {
+  it('kills the old encoder even when it was paused before, which leaves its killed flag set', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'horizon-seek-'))
+    await mkdir(path.join(dir, 'r0'), { recursive: true })
+    const proc = fakeProc()
+    proc.killed = true
+    const signals: string[] = []
+    proc.kill = (signal: string) => { signals.push(signal); proc.fireExit(); return true }
+    const session: any = { id: 's4', sessionDir: dir, filePath: '/m.mkv', ffmpegProcess: proc, currentStartSegment: 0 }
+    try {
+      await restartAtSegment(session, { name: 'cpu' } as any, fakePlan(), 40)
+      expect(signals).toEqual(['SIGKILL'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
