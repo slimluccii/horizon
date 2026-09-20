@@ -9,6 +9,7 @@ import ContinueWatchingRail from '../components/ContinueWatchingRail.tsx'
 import LargePoster from '../components/LargePoster.tsx'
 import CollectionPoster from '../components/CollectionPoster.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
+import { runtimeMinutes } from '../runtime.ts'
 type Tab = 'movies' | 'shows'
 
 /** Pick a hero title for the top of the page — prefer something with a
@@ -79,7 +80,7 @@ export default function Library() {
           <h1>{hero.title}</h1>
           <p>
             {hero.year && <span>{hero.year} · </span>}
-            <span>{Math.round(hero.duration / 60)} min</span>
+            {runtimeMinutes(hero) !== null && <span>{runtimeMinutes(hero)} min</span>}
             {hero.resolution && <span> · {hero.resolution.split('x')[1] ? `${hero.resolution.split('x')[1]}p` : hero.resolution}</span>}
             {hero.hdr?.dv && <span> · Dolby Vision</span>}
             {hero.videoCodec && <span> · {hero.videoCodec.toUpperCase()}</span>}

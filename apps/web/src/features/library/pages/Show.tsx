@@ -5,6 +5,7 @@ import { tmdbImageUrl } from '@horizon/sdk'
 import type { ShowSummary, MediaItem, EpisodeMetadata } from '@horizon/sdk'
 import LargeTopNav from '../../../shared/ui/chrome/LargeTopNav.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
+import { runtimeMinutes } from '../runtime.ts'
 export default function Show() {
   const { showId } = useParams<{ showId: string }>()
   const navigate = useNavigate()
@@ -105,7 +106,7 @@ function EpisodeRow({ episode, onPlay }: { episode: MediaItem; onPlay: () => voi
   const epMeta = episode.metadata?.kind === 'episode' ? (episode.metadata as EpisodeMetadata) : null
   const still = tmdbImageUrl(epMeta?.stillPath, 'w342')
   const epNum = typeof episode.episode === 'number' ? `E${String(episode.episode).padStart(2, '0')}` : ''
-  const mins = Math.round(episode.duration / 60)
+  const mins = runtimeMinutes(episode)
   return (
     <button onClick={onPlay}>
       {still
@@ -117,8 +118,8 @@ function EpisodeRow({ episode, onPlay }: { episode: MediaItem; onPlay: () => voi
         <span>{episode.title}</span>
       </span>
       <span>
-        <span>{mins}m</span>
-        <span> · {episode.resolution}</span>
+        {mins !== null && <span>{mins}m</span>}
+        {episode.resolution && <span>{mins !== null && ' · '}{episode.resolution}</span>}
         {episode.hdr?.dv && <span> · Dolby Vision</span>}
         {episode.audioTracks?.[0] && <span> · {episode.audioTracks[0].codec.toUpperCase()}</span>}
         {epMeta?.airDate && <span> · {epMeta.airDate}</span>}

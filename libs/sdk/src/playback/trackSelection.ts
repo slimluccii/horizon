@@ -20,15 +20,16 @@ export function isImageSubtitle(t: SubtitleTrack): boolean {
 export function pickInitialTracks(media: MediaItem, prefs: Preferences | undefined): InitialTracks {
   let audioTrackIndex = 0
   if (prefs?.audioLanguage) {
-    const match = media.audioTracks.find(t => trackMatchesLanguage(t.language, prefs.audioLanguage!))
+    const match = media.audioTracks?.find(t => trackMatchesLanguage(t.language, prefs.audioLanguage!))
     if (match) audioTrackIndex = match.index
   }
 
   let subtitleTrackIndex: number | null = null
   if (prefs?.subtitlesEnabled) {
+    const tracks = media.subtitleTracks ?? []
     const candidates = prefs.subtitleLanguage
-      ? media.subtitleTracks.filter(t => trackMatchesLanguage(t.language, prefs.subtitleLanguage!))
-      : media.subtitleTracks
+      ? tracks.filter(t => trackMatchesLanguage(t.language, prefs.subtitleLanguage!))
+      : tracks
     // Prefer a full track over a forced-only one, and text over image —
     // an image sub forces the burn-in transcode path.
     const pick =

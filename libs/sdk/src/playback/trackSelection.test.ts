@@ -25,6 +25,12 @@ describe('pickInitialTracks', () => {
     expect(picked).toEqual({ audioTrackIndex: 1, subtitleTrackIndex: 1 })
   })
 
+  it('falls back to the defaults for an item whose tracks have not been probed yet', () => {
+    const unprobed = { audioTracks: null, subtitleTracks: null } as MediaItem
+    expect(pickInitialTracks(unprobed, { audioLanguage: 'nl', subtitleLanguage: 'nl', subtitlesEnabled: true }))
+      .toEqual({ audioTrackIndex: 0, subtitleTrackIndex: null })
+  })
+
   it('defaults to track 0 audio and no subtitle without preferences (edge path)', () => {
     const m = media([audio(0, 'eng')], [sub(0, 'eng')])
     expect(pickInitialTracks(m, undefined)).toEqual({ audioTrackIndex: 0, subtitleTrackIndex: null })

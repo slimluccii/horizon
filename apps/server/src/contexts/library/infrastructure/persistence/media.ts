@@ -1,3 +1,4 @@
+import type { MediaItem as WireMediaItem } from '@horizon/sdk'
 import type { DatabaseSync } from '../../../../platform/db/connection.ts'
 
 export interface HdrFlags { dv: boolean; hdr10: boolean; hdr10plus: boolean; dvProfile?: number }
@@ -75,30 +76,7 @@ export interface EpisodeUpsert extends Omit<MovieUpsert, 'sortYear'> {
  *
  * See CONTEXT.md → MediaItem / MediaItemRow.
  */
-export interface MediaItemBase {
-  id: string
-  kind: 'movie' | 'show' | 'episode'
-  parentId: string | null
-  title: string
-  /** Release year (movies) or first-air year (shows + episodes). Renamed
-   *  from `sortYear` to match SDK + client expectations. */
-  year: number | null
-  season: number | null
-  episode: number | null
-  /** Last episode in a multi-episode file; equals `episode` otherwise. */
-  episodeEnd: number | null
-  durationSec: number | null
-  resolution: string | null
-  videoCodec: string | null
-  /** Source video bitrate in bits/s (null = probed before v4 migration). */
-  videoBitrate: number | null
-  container: string | null
-  hdr: HdrFlags | null
-  audioTracks: AudioTrack[] | null
-  subtitleTracks: SubtitleTrack[] | null
-  externalIds: ExternalIds
-  metadata: unknown
-}
+export type MediaItemBase = WireMediaItem
 
 /**
  * Domain MediaItem — wire-safe + business-logic shape returned by every
@@ -112,7 +90,7 @@ export interface MediaItemBase {
  * Wire-safe projection of MediaItemBase — adds no fields.
  * See CONTEXT.md → MediaItem / MediaItemRow.
  */
-export interface MediaItem extends MediaItemBase {}
+export type MediaItem = MediaItemBase
 
 /**
  * Row shape — public base + filesystem + DB bookkeeping. Returned by
