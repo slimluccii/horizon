@@ -14,6 +14,7 @@ export interface ScanManagerDeps extends ScanDeps {
    *  (PATCH /settings/server) take effect with no restart. Replaces the static
    *  cfg.moviesRoots/cfg.showsRoots. */
   getRoots: () => { movies: string[]; shows: string[] }
+  getScanConcurrency: () => number
 }
 
 export interface ScanStatus {
@@ -75,7 +76,7 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
   function liveCfg(): ScanConfig {
     const { movies, shows } = deps.getRoots()
     const norm = (r: string) => path.resolve(r).replace(/\/+$/, '')
-    return { ...cfg, moviesRoots: movies.map(norm), showsRoots: shows.map(norm) }
+    return { ...cfg, moviesRoots: movies.map(norm), showsRoots: shows.map(norm), scanConcurrency: deps.getScanConcurrency() }
   }
 
   let running: { trigger: ScanTrigger; scope: 'full' | string; startedAt: number; processed: number; total: number } | null = null
@@ -161,7 +162,7 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     const errors: string[] = []
     let result: ScanResult
     try {
-      result = await runScan(scope, cfg, { media: deps.media, collections: deps.collections, bus: deps.bus }, progress)
+      result = await runScan(scope, liveCfg(), { media: deps.media, collections: deps.collections, bus: deps.bus }, progress)
     } catch (err) {
       errors.push((err as Error).message)
       result = {
