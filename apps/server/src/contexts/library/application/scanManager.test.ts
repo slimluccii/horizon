@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import * as probeMod from '../infrastructure/probe/probe.ts'
 import { openDatabase } from '../../../platform/db/connection.ts'
 import { migrate } from '../../../platform/db/migrations.ts'
 import { createMediaRepo } from '../infrastructure/persistence/media.ts'
@@ -25,10 +29,72 @@ function setup() {
     // Live roots thunk — returns the static baseCfg roots so the manager scans
     // the same paths the old static-cfg version did.
     getRoots: () => ({ movies: baseCfg.moviesRoots, shows: baseCfg.showsRoots }),
+    getScanConcurrency: () => baseCfg.scanConcurrency,
   }
 }
 
 describe('ScanManager', () => {
+  describe('live settings', () => {
+    afterEach(() => { vi.restoreAllMocks() })
+
+    it('keeps the library when a root from settings turns up empty', async () => {
+      const root = mkdtempSync(path.join(os.tmpdir(), 'horizon-unmounted-'))
+      writeFileSync(path.join(root, 'Tenet (2020).mkv'), '')
+      vi.spyOn(probeMod, 'probe').mockImplementation(async () => (
+        { duration: 1, resolution: '', videoCodec: 'h264', videoBitrate: 1, hdr: { dv: false, hdr10: false, hdr10plus: false }, audioTracks: [], subtitleTracks: [], container: 'matroska' } as any
+      ))
+      const deps = setup()
+      const mgr = createScanManager({ cacheDir: baseCfg.cacheDir, scanConcurrency: 1 }, {
+        ...deps,
+        getRoots: () => ({ movies: [root], shows: [] }),
+      })
+      try {
+        await mgr.request({ trigger: 'boot', paths: [] })
+        expect(deps.media.listMovies()).toHaveLength(1)
+
+        rmSync(root, { recursive: true })
+        mkdirSync(root)
+        const result = await mgr.request({ trigger: 'cron', paths: [] })
+
+        expect(deps.media.listMovies()).toHaveLength(1)
+        expect(result).toMatchObject({ itemsRemoved: 0, unavailableRoots: [root] })
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+
+    it('reads the scan concurrency again for every scan', async () => {
+      const root = mkdtempSync(path.join(os.tmpdir(), 'horizon-conc-'))
+      for (let i = 0; i < 6; i++) writeFileSync(path.join(root, `Movie ${i} (200${i}).mkv`), '')
+      let inFlight = 0
+      let peak = 0
+      vi.spyOn(probeMod, 'probe').mockImplementation(async () => {
+        peak = Math.max(peak, ++inFlight)
+        await new Promise(r => setTimeout(r, 10))
+        inFlight--
+        return { duration: 1, resolution: '', videoCodec: 'h264', videoBitrate: 1, hdr: { dv: false, hdr10: false, hdr10plus: false }, audioTracks: [], subtitleTracks: [], container: 'matroska' } as any
+      })
+
+      let concurrency = 1
+      const mgr = createScanManager(baseCfg, {
+        ...setup(),
+        getRoots: () => ({ movies: [root], shows: [] }),
+        getScanConcurrency: () => concurrency,
+      })
+      try {
+        await mgr.request({ trigger: 'manual', paths: [] })
+        expect(peak).toBe(1)
+
+        concurrency = 3
+        peak = 0
+        await mgr.request({ trigger: 'manual', paths: [] })
+        expect(peak).toBe(3)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+  })
+
   it('runs a full scan when paths is empty', async () => {
     const deps = setup()
     const mgr = createScanManager(baseCfg, deps)

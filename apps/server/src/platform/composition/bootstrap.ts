@@ -139,6 +139,7 @@ export async function bootstrap() {
     // provider's concurrency cap + per-item backoff keep it well-behaved.
     onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false, drain: true }) },
     getRoots,
+    getScanConcurrency: () => serverSettings.get().scanConcurrency,
     bus: activityBus,
   })
 
