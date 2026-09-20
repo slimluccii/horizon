@@ -352,6 +352,12 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       deleted_at      = NULL
   `)
 
+  // file_path is UNIQUE, so a row stored under another id has to give the file up before the upsert.
+  const releasePathStmt = db.prepare(
+    `UPDATE media_items SET file_path = NULL, deleted_at = COALESCE(deleted_at, ?)
+      WHERE file_path = ? AND id != ?`,
+  )
+
   // Domain getById hides soft-deleted rows from wire/business callers.
   // getInternalRow returns them so the scanner / tests can inspect deletion state.
   const getById = (id: string): MediaItem | null => {
@@ -370,6 +376,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
     getInternalRow,
     upsertMovie(input) {
       const now = Date.now()
+      releasePathStmt.run(now, input.filePath, input.id)
       upsertMovieStmt.run(
         input.id, input.title, input.sortYear,
         input.filePath, input.durationSec, input.resolution, input.videoCodec, input.videoBitrate ?? null, input.container,
@@ -393,6 +400,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
 
     upsertEpisode(input) {
       const now = Date.now()
+      releasePathStmt.run(now, input.filePath, input.id)
       upsertEpisodeStmt.run(
         input.id, input.parentId, input.title, input.season, input.episode,
         input.filePath, input.durationSec, input.resolution, input.videoCodec, input.videoBitrate ?? null, input.container,

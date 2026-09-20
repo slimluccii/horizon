@@ -65,6 +65,17 @@ A named grouping of MediaItems (currently movies only). Detected during a Scan
 from on-disk folder structure; replaced wholesale per scan. See
 [server/src/repos/collections.ts](server/src/repos/collections.ts).
 
+### Media identity
+What a MediaItem id is derived from. Never the file path, so a rename, a
+quality upgrade or a moved library root keeps watch progress and metadata. A
+movie is its `{tmdb-…}` tag, else `{imdb-…}`, else normalized title plus year.
+A show is its `{tvdb-…}` tag, else `{tmdb-…}`, else `{imdb-…}`, else normalized
+folder title plus year. An episode is its show id plus season and episode.
+Adding a tag to an untagged item changes its id once. When several files
+resolve to one id, the largest file wins and the rest are reported as
+`ScanResult.duplicates`. See
+[apps/server/src/contexts/library/domain/identity.ts](apps/server/src/contexts/library/domain/identity.ts).
+
 ### Scan
 The pipeline that walks `HORIZON_MOVIES_ROOT` / `HORIZON_SHOWS_ROOT`, probes
 files with ffprobe, derives IDs, and upserts MediaItems. Triggered on boot,
