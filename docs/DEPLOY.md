@@ -341,7 +341,7 @@ The TV client is a Gradle project under [`tv/`](../tv). Build on your Mac (or an
 
 - **Android Studio** Ladybug or newer (provides Android SDK 35 + platform tools). After install, open Settings → Languages & Frameworks → Android SDK and confirm SDK 35 + build-tools are present.
 - **`adb`** on your shell PATH. Either install platform-tools standalone or add `~/Library/Android/sdk/platform-tools` to `PATH`.
-- **JDK 17** (Android Studio bundles one). Verify: `java -version` shows 17.x.
+- **JDK 17 or newer** (Android Studio bundles one; the build is tested on its JDK 25). From a terminal, point `JAVA_HOME` at it: `/Applications/Android Studio.app/Contents/jbr/Contents/Home` on macOS.
 - The Horizon server reachable on the LAN from the Shield (Part 1 done).
 
 ### 1. Enable network ADB on the Shield
