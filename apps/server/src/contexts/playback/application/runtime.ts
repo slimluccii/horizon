@@ -28,7 +28,7 @@ import {
   restartAtSegment as defaultRestartAtSegment,
   restartWithReset as defaultRestartWithReset,
 } from './restart.ts'
-import { headSegment as defaultHeadSegment, pauseFfmpeg, resumeFfmpeg } from '../infrastructure/ffmpeg/ffmpeg.ts'
+import { headSegment as defaultHeadSegment, evictSegmentsBelow, pauseFfmpeg, resumeFfmpeg } from '../infrastructure/ffmpeg/ffmpeg.ts'
 import { createTranscodeThrottle } from './throttle.ts'
 
 /** Lookahead window (segments). A segment request inside `[startSegment,
@@ -86,12 +86,12 @@ export interface SessionRuntime {
   onSegmentRequested(segNum: number): void
 
   /** Sync: classify a segment request against the current run's window. */
-  requestSegment(segNum: number): SegmentDecision
+  requestSegment(segNum: number, rendition?: number): SegmentDecision
 
   /** Apply a restart triggered by an out-of-range segment request (HTTP path).
    *  Re-checks the window inside the lock — concurrent restarts that already
    *  covered `segNum` short-circuit to `{ok:true}`. */
-  applyRestart(segNum: number): Promise<TransitionResult>
+  applyRestart(segNum: number, rendition?: number): Promise<TransitionResult>
 
   /** Apply a seek (WS-driven). Uses restartWithReset (wipes init) so the
    *  client reload of HLS source picks up a fresh init.mp4. */
@@ -127,7 +127,7 @@ export interface SessionRuntimeDeps {
   hwAccel: HwAccel
   doRestart?: RestartFn
   doRestartWithReset?: RestartWithResetFn
-  headSegment?: (session: Session) => number | null
+  headSegment?: (session: Session, rendition?: number) => number | null
 }
 
 export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
@@ -135,7 +135,13 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
   const doRestart = deps.doRestart ?? defaultRestartAtSegment
   const doRestartWithReset = deps.doRestartWithReset ?? defaultRestartWithReset
   const headSegment = deps.headSegment ?? defaultHeadSegment
-  const throttle = createTranscodeThrottle({ session, headSegment, pause: pauseFfmpeg, resume: resumeFfmpeg })
+  const throttle = createTranscodeThrottle({
+    session,
+    headSegment,
+    pause: pauseFfmpeg,
+    resume: resumeFfmpeg,
+    evictBelow: (s, segNum) => { void evictSegmentsBelow(s, segNum) },
+  })
 
   let state: RuntimeState = { kind: 'idle' }
 
@@ -143,10 +149,13 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
     return Math.max(0, Math.floor(ms / 1000 / SEGMENT_DURATION_SEC))
   }
 
-  function inRange(segNum: number): boolean {
+  // Only asked about segments that are missing on disk, so one below the head was evicted and will not come back.
+  function inRange(segNum: number, rendition: number): boolean {
     const start = session.currentStartSegment
     if (segNum < start) return false
-    const head = Math.max(start - 1, headSegment(session) ?? start - 1)
+    const written = headSegment(session, rendition)
+    if (written !== null && segNum < written) return false
+    const head = Math.max(start - 1, written ?? start - 1)
     return segNum <= head + SEEK_LOOKAHEAD_SEGMENTS
   }
 
@@ -188,15 +197,15 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
 
     onSegmentRequested: throttle.onSegmentRequested,
 
-    requestSegment(segNum) {
-      if (inRange(segNum)) return { kind: 'wait' }
+    requestSegment(segNum, rendition = 0) {
+      if (inRange(segNum, rendition)) return { kind: 'wait' }
       return { kind: 'restart', segNum }
     },
 
-    async applyRestart(segNum) {
+    async applyRestart(segNum, rendition = 0) {
       if (state.kind === 'destroyed') return { ok: false, reason: 'destroyed' }
       if (state.kind === 'restarting') return { ok: false, reason: 'busy' }
-      if (inRange(segNum)) return { ok: true }
+      if (inRange(segNum, rendition)) return { ok: true }
       const target: RestartTarget = { segNum, plan: session.plan, withReset: false }
       return transition(target, () =>
         doRestart(session, hwAccel, target.plan, target.segNum),

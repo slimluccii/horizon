@@ -121,10 +121,10 @@ export function registerSegments(
 
       // Out-of-range request = seek. Runtime owns the lock + the re-check;
       // we just translate its decision into an HTTP outcome.
-      const decision = runtime?.requestSegment(segNum) ?? { kind: 'wait' as const }
+      const decision = runtime?.requestSegment(segNum, r) ?? { kind: 'wait' as const }
       if (decision.kind === 'restart') {
         console.log(`Session ${session.id}: seek detected — req seg${segNum}, current start ${runtime!.startSegment()}`)
-        const res = await runtime!.applyRestart(decision.segNum)
+        const res = await runtime!.applyRestart(decision.segNum, r)
         if (!res.ok && res.reason === 'busy') {
           console.log(`Session ${session.id}: seek waiting on in-flight restart (req seg${segNum})`)
         } else if (!res.ok) {
