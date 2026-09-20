@@ -4,6 +4,20 @@
  * messages are dropped silently (logged at debug).
  */
 
+import type { Session } from '../../domain/types.ts'
+import { streamUrl } from '../../domain/urls.ts'
+
+export function sessionReadyMessage(session: Session) {
+  return {
+    type: 'session-ready',
+    method: session.plan.method,
+    streamUrl: streamUrl(session.id, session.plan.method),
+    // Direct play has no renditions.
+    profile: session.plan.renditions[0]?.profile ?? null,
+    reconnectToken: session.reconnectToken,
+  }
+}
+
 export interface HelloMessage {
   type: 'hello'
   reconnectToken?: string

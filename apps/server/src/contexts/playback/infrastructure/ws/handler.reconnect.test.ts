@@ -59,6 +59,24 @@ describe('WS hello handshake / reconnect (#74)', () => {
     expect(sent.find(f => f.type === 'session-ready')).toBeTruthy()
   })
 
+  it('replies session-ready to hello on a direct-play session, which has no renditions', () => {
+    const { session, sent } = fakeSession({ plan: { method: 'direct-play', renditions: [] } as any })
+    handleWsMessage({ type: 'hello' }, session, sessions, cfg, hwAccel)
+    expect(sent).toEqual([{
+      type: 'session-ready',
+      method: 'direct-play',
+      streamUrl: '/api/sessions/sess/direct',
+      profile: null,
+      reconnectToken: 'real-token',
+    }])
+  })
+
+  it('sends the same stream url on hello as the session was created with', () => {
+    const { session, sent } = fakeSession()
+    handleWsMessage({ type: 'hello' }, session, sessions, cfg, hwAccel)
+    expect(sent[0].streamUrl).toBe('/api/sessions/sess/stream.m3u8')
+  })
+
   it('closes the socket with 4401 when the reconnectToken does not match', () => {
     const { session, sent, closed } = fakeSession()
     handleWsMessage({ type: 'hello', reconnectToken: 'forged' }, session, sessions, cfg, hwAccel)

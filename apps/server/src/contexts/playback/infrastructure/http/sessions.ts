@@ -10,6 +10,7 @@ import type { SessionManager } from '../../application/manager.ts'
 import type { PlaybackOrchestrator, StartPlaybackInput } from '../../application/playback.ts'
 import { handleWsMessage, resetWsAuth } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
+import { sessionReadyMessage } from '../ws/messages.ts'
 import { sendNotFound, overCapacity, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
 import { requireReconnectToken } from './segments.ts'
@@ -134,13 +135,7 @@ export function registerSessions(
     ready
       .then(() => {
         const s = sessions.get(info.sessionId)
-        s?.wsSocket?.send(JSON.stringify({
-          type: 'session-ready',
-          method: info.method,
-          streamUrl: info.streamUrl,
-          profile: info.profiles[0],
-          reconnectToken: info.reconnectToken,
-        }))
+        if (s) s.wsSocket?.send(JSON.stringify(sessionReadyMessage(s)))
       })
       .catch(err => req.log.error({ err, sessionId: info.sessionId }, 'playback ready failed'))
 
@@ -203,15 +198,7 @@ export function registerSessions(
     resetWsAuth(session)
 
     if (session.sessionReady) {
-      socket.send(JSON.stringify({
-        type: 'session-ready',
-        method: session.plan.method,
-        streamUrl: session.plan.method === 'direct-play'
-          ? `/api/sessions/${session.id}/direct`
-          : `/api/sessions/${session.id}/stream.m3u8`,
-        profile: session.plan.renditions[0].profile,
-        reconnectToken: session.reconnectToken,
-      }))
+      socket.send(JSON.stringify(sessionReadyMessage(session)))
     }
 
     session._flusher = createProgressFlusher(session, progressRepo)

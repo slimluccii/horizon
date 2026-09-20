@@ -1,5 +1,5 @@
 // app/src/components/VideoPlayer.tsx
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useRef, type ComponentPropsWithoutRef, type RefObject } from 'react'
 import Hls from 'hls.js'
 import type { PlaybackSession, QualityProfile, SubtitleTrack } from '@horizon/sdk'
 
@@ -26,10 +26,11 @@ interface Props {
   videoRef?: RefObject<HTMLVideoElement>
   onBufferUpdate?: (seconds: number) => void
   onQualityChange?: (profile: QualityProfile, reason: string) => void
+  onEnded?: ComponentPropsWithoutRef<'video'>['onEnded']
 }
 
 export default function VideoPlayer({
-  session, reloadKey = 0, resumeAtSec = 0, subtitle, videoRef: externalRef, onBufferUpdate,
+  session, reloadKey = 0, resumeAtSec = 0, subtitle, videoRef: externalRef, onBufferUpdate, onEnded,
 }: Props) {
   const internalRef = useRef<HTMLVideoElement>(null)
   const videoRef = externalRef ?? internalRef
@@ -201,6 +202,7 @@ export default function VideoPlayer({
       controls
       crossOrigin="anonymous"
       playsInline
+      onEnded={onEnded}
     >
       {subtitle && (
         <track

@@ -234,7 +234,7 @@ export class PlaybackSession {
     switch (msg.type) {
       case 'session-ready':
         this._reconnectToken = msg.reconnectToken ?? null
-        this._profile = msg.profile
+        if (msg.profile) this._profile = msg.profile
         this._state = 'active'
         this._opts.onReady?.(this._opts.sessionInfo)
         break
