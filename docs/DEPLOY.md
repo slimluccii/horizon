@@ -134,6 +134,10 @@ In the Dockge web UI:
    HORIZON_TMDB_TOKEN=<your-tmdb-read-access-token>
    ```
 
+   `HORIZON_TMDB_TOKEN`, like every setting that also appears under Settings →
+   Server, is read from the environment on the first boot only. After that the
+   value stored in the database wins, so change it in the web UI, not in `.env`.
+
    `HORIZON_MEDIA_HOST` is the **parent** directory that contains your movies and
    shows folders; it's mounted read-only at `/media` inside the container. You
    pick which subfolders are libraries (and tag each Movies or Shows) in the web

@@ -6,7 +6,7 @@ import { runBackup } from '../db/backup.ts'
 import { createUserRepo, createSessionRepo, createHouseholdRepo, createInviteRepo, ensureHouseholds } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
-import { createTmdbProvider, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../contexts/metadata/index.ts'
+import { keepTmdbInSyncWithSettings, createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../contexts/metadata/index.ts'
 import {
   createMediaRepo,
   createCollectionsRepo,
@@ -39,8 +39,6 @@ export async function bootstrap() {
     console.error('ERROR: HORIZON_DEV_SEED=1 with NODE_ENV=production is not allowed. Dev seed routes cannot be exposed in production.')
     process.exit(1)
   }
-
-  const hwAccel = await detectHwAccel(cfg.forceEncoder)
 
   const db = openDatabase(cfg.dbPath)
   migrate(db)
@@ -86,6 +84,9 @@ export async function bootstrap() {
   // Overlay env values exactly once (fresh install / first boot after upgrade).
   serverSettings.bootstrapFromEnv(cfg)
 
+  // Probed once, so a changed forceEncoder applies on the next restart.
+  const hwAccel = await detectHwAccel(serverSettings.get().forceEncoder ?? undefined)
+
   const progressRepo = createProgressRepo(db, mediaRepo, {
     getWatchedThresholdPct: () => serverSettings.get().watchedThresholdPct,
   })
@@ -93,8 +94,6 @@ export async function bootstrap() {
   const scanRootsRepo = createScanRootsRepo(db)
   const changesCursorRepo = createChangesCursorRepo(db)
   const scanHistoryRepo = createScanHistoryRepo(db)
-
-  const initialTmdb = createTmdbProvider(cfg.tmdbToken, cfg.cacheDir)
 
   // Metadata refresh worker — always created so the tmdbToken change handler
   // can swap the client without restarting the server.
@@ -115,8 +114,10 @@ export async function bootstrap() {
         episode: serverSettings.get().metadataMaxAgeEpDays * DAY_MS,
       },
     }),
-    { media: mediaRepo, tmdb: initialTmdb, changesCursor: changesCursorRepo, bus: activityBus },
+    { media: mediaRepo, tmdb: null, changesCursor: changesCursorRepo, bus: activityBus },
   )
+
+  keepTmdbInSyncWithSettings(serverSettings, refreshWorker, cfg.cacheDir)
 
   // Library roots live in serverSettings now (runtime-settable), so the scanner
   // + watcher read them fresh via these thunks rather than from static cfg.
@@ -234,17 +235,6 @@ export async function bootstrap() {
 
   // Subscribe to settings changes to react to active knobs.
   serverSettings.on('change', ({ patch }) => {
-    // tmdbToken change → swap the TMDB client on the refresh worker.
-    // In-flight requests on the old client complete; subsequent calls use
-    // the new auth header. No process restart needed.
-    if (patch.tmdbToken !== undefined) {
-      // Audit trail — NEVER log the token value, only that it changed.
-      console.log(`Server settings: TMDB token ${patch.tmdbToken ? 'updated' : 'cleared'}`)
-      const newTmdb = createTmdbProvider(patch.tmdbToken ?? undefined, cfg.cacheDir)
-      refreshWorker.setTmdb(newTmdb)
-      console.log(`MetadataRefresh: TMDB client ${newTmdb ? 'updated' : 'cleared'} after token change`)
-    }
-
     // scanCronHour change → reschedule nightly scan.
     if (patch.scanCronHour !== undefined) {
       scheduleHandle.stop()
