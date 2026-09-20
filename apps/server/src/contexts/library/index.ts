@@ -63,5 +63,8 @@ export { probe, parseProbeOutput, type ProbeResult, type AudioTrack, type Subtit
 
 // HTTP adapter.
 export { registerLibrary, sseFrame } from './infrastructure/http/library.ts'
+export { createKeyframeIndexer, type KeyframeIndexer } from './application/keyframeIndexer.ts'
+export { createKeyframeIndexRepo, type KeyframeIndexRepo } from './infrastructure/persistence/keyframeIndex.ts'
+export { extractKeyframes, type Keyframe } from './infrastructure/probe/keyframes.ts'
 export { registerArrWebhook } from './infrastructure/http/arrWebhook.ts'
 export { createWebhookKeyRepo, type WebhookKeyRepo } from './infrastructure/persistence/webhookKey.ts'
