@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { probe } from '../infrastructure/probe/probe.ts'
@@ -139,12 +139,16 @@ async function scanMoviesPath(
   progress.addTotal(candidates.length)
 
   await pMap(candidates, cfg.scanConcurrency, async ({ file, m }) => {
-    const p = await probe(file, cfg.cacheDir).catch(() => null)
-    if (!p) { failed++; progress.tick(); return }
-    const st = await stat(file).catch(() => null)
-    if (!st) { failed++; progress.tick(); return }
     const id = hashId(file)
     const existed = media.getById(id) !== null
+    const p = await probe(file, cfg.cacheDir).catch(() => null)
+    if (!p) {
+      // A file that is still being written or sits on a sleeping disk fails to probe; that is not a removal.
+      if (existed) seen.add(id)
+      failed++; progress.tick(); return
+    }
+    const st = await stat(file).catch(() => null)
+    if (!st) { failed++; progress.tick(); return }
     const upsert: MovieUpsert = {
       id,
       filePath: file,
@@ -226,12 +230,16 @@ async function scanShowsPath(
   await pMap(epCands, cfg.scanConcurrency, async ({ file, base, em, showDir }) => {
     const showId = showIdByDir.get(showDir)!
     const showName = path.basename(showDir)
-    const p = await probe(file, cfg.cacheDir).catch(() => null)
-    if (!p) { failed++; progress.tick(); return }
-    const st = await stat(file).catch(() => null)
-    if (!st) { failed++; progress.tick(); return }
     const id = hashId(file)
     const existed = media.getById(id) !== null
+    const p = await probe(file, cfg.cacheDir).catch(() => null)
+    if (!p) {
+      // A file that is still being written or sits on a sleeping disk fails to probe; that is not a removal.
+      if (existed) seen.add(id)
+      failed++; progress.tick(); return
+    }
+    const st = await stat(file).catch(() => null)
+    if (!st) { failed++; progress.tick(); return }
     const insert: EpisodeUpsert = {
       id,
       parentId: showId,
@@ -261,8 +269,20 @@ async function scanShowsPath(
   return { seen, added, failed, shows: showIdByDir.size, episodes: epCands.length }
 }
 
+// An unmounted Docker bind mount shows up as an empty directory, not as an error.
+async function isAvailable(root: string): Promise<boolean> {
+  const entries = await readdir(root).catch(() => [])
+  return entries.length > 0
+}
+
+function isUnder(p: string, root: string): boolean {
+  return p === root || p.startsWith(`${root}/`)
+}
+
 export interface ScanResult {
   scope: ScanScope
+  /** Configured roots that were unreadable or empty; nothing under them was scanned or removed. */
+  unavailableRoots: string[]
   itemsSeen: number
   itemsAdded: number
   itemsRemoved: number
@@ -294,14 +314,22 @@ export async function runScan(
   let showCount = 0
   let episodeCount = 0
 
-  for (const p of scope.moviesPaths) {
+  const unavailableRoots: string[] = []
+  for (const root of [...(cfg.moviesRoots ?? []), ...(cfg.showsRoots ?? [])]) {
+    if (await isAvailable(root)) continue
+    unavailableRoots.push(root)
+    for (const id of deps.media.idsUnder(root)) seen.add(id)
+  }
+  const scannable = (p: string) => !unavailableRoots.some(root => isUnder(p, root))
+
+  for (const p of scope.moviesPaths.filter(scannable)) {
     const r = await scanMoviesPath(p, cfg, deps.media, progress, deps.bus)
     for (const id of r.seen) seen.add(id)
     added += r.added
     failed += r.failed
     movieCount += r.seen.size
   }
-  for (const p of scope.showsPaths) {
+  for (const p of scope.showsPaths.filter(scannable)) {
     const r = await scanShowsPath(p, cfg, deps.media, progress, deps.bus)
     for (const id of r.seen) seen.add(id)
     added += r.added
@@ -314,7 +342,7 @@ export async function runScan(
   if (scope.fullScope) {
     removed = deps.media.softDeleteMissing(seen)
   } else {
-    for (const p of [...scope.moviesPaths, ...scope.showsPaths]) {
+    for (const p of [...scope.moviesPaths, ...scope.showsPaths].filter(scannable)) {
       removed += deps.media.softDeleteMissingUnder(p, seen)
     }
   }
@@ -335,6 +363,7 @@ export async function runScan(
 
   return {
     scope,
+    unavailableRoots,
     itemsSeen: seen.size,
     itemsAdded: added,
     itemsRemoved: removed,
