@@ -23,7 +23,7 @@ import type { HwAccel } from '../domain/hwaccel.ts'
 import type { Profile } from '../domain/profiles.ts'
 import type { PlaybackPlan } from '../domain/plan.ts'
 import { planWithAudioTrack, planWithBurnIn, planWithProfile } from '../domain/plan.ts'
-import { SEGMENT_DURATION_SEC } from '../domain/segments.ts'
+import { sessionTimeline } from '../domain/timeline.ts'
 import {
   restartAtSegment as defaultRestartAtSegment,
   restartWithReset as defaultRestartWithReset,
@@ -146,7 +146,7 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
   let state: RuntimeState = { kind: 'idle' }
 
   function msToSegment(ms: number): number {
-    return Math.max(0, Math.floor(ms / 1000 / SEGMENT_DURATION_SEC))
+    return sessionTimeline(session).segmentAt(ms / 1000)
   }
 
   // Only asked about segments that are missing on disk, so one below the head was evicted and will not come back.

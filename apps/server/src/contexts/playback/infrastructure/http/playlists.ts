@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import type { SessionManager } from '../../application/manager.ts'
 import type { UserRepo } from '../../../identity/index.ts'
 import { buildRenditionPlaylist, buildMasterPlaylist } from '../../domain/playlist.ts'
+import { sessionTimeline } from '../../domain/timeline.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { requireReconnectToken } from './segments.ts'
 import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
@@ -24,7 +25,7 @@ export function registerPlaylists(app: FastifyInstance, sessions: SessionManager
     // step adds zero value for a single rendition. hls.js treats a
     // variant-as-master equivalently.
     if (session.plan.renditions.length <= 1) {
-      const playlist = buildRenditionPlaylist(session.durationSec, 'renditions/0/')
+      const playlist = buildRenditionPlaylist(sessionTimeline(session), 'renditions/0/')
       return reply.header('Content-Type', HLS_CONTENT_TYPE).send(playlist)
     }
     const master = buildMasterPlaylist(session.id, session.plan.renditions.map(r => r.profile), session.renditionCodecs)
@@ -47,7 +48,7 @@ export function registerPlaylists(app: FastifyInstance, sessions: SessionManager
       }
       // Static VOD playlist for the entire media duration. Listed segments may
       // not yet exist on disk — the segment route produces them on demand.
-      const playlist = buildRenditionPlaylist(session.durationSec, `${req.params.r}/`)
+      const playlist = buildRenditionPlaylist(sessionTimeline(session), `${req.params.r}/`)
       return reply.header('Content-Type', HLS_CONTENT_TYPE).send(playlist)
     },
   )

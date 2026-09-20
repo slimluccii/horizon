@@ -1,8 +1,9 @@
 import type { Profile } from './profiles.ts'
-import { SEGMENT_DURATION_SEC, segmentName } from './segments.ts'
+import { segmentName } from './segments.ts'
+import type { SegmentTimeline } from './timeline.ts'
 
 /**
- * Build a static VOD-style rendition playlist covering the entire media duration.
+ * Build a static VOD-style rendition playlist covering the whole timeline.
  * Segments are listed by their deterministic filename — they may not yet exist
  * on disk; the segment route produces them on demand (restarting ffmpeg if the
  * request lands outside the current run's segment range = seek).
@@ -11,22 +12,17 @@ import { SEGMENT_DURATION_SEC, segmentName } from './segments.ts'
  * both standalone (`prefix=""`) and rewritten under a stream.m3u8 wrapper
  * (`prefix="renditions/0/"`). Same applies to the EXT-X-MAP URI.
  */
-export function buildRenditionPlaylist(durationSec: number, segPathPrefix = ''): string {
-  const totalSegs = Math.max(1, Math.ceil(durationSec / SEGMENT_DURATION_SEC))
+export function buildRenditionPlaylist(timeline: SegmentTimeline, segPathPrefix = ''): string {
   const lines: string[] = [
     '#EXTM3U',
     '#EXT-X-VERSION:6',
-    `#EXT-X-TARGETDURATION:${SEGMENT_DURATION_SEC}`,
+    `#EXT-X-TARGETDURATION:${timeline.targetDurationSec}`,
     '#EXT-X-MEDIA-SEQUENCE:0',
     '#EXT-X-PLAYLIST-TYPE:VOD',
     `#EXT-X-MAP:URI="${segPathPrefix}init.mp4"`,
   ]
-  for (let i = 0; i < totalSegs; i++) {
-    const isLast = i === totalSegs - 1
-    const dur = isLast
-      ? Math.max(0.001, durationSec - i * SEGMENT_DURATION_SEC)
-      : SEGMENT_DURATION_SEC
-    lines.push(`#EXTINF:${dur.toFixed(3)},`)
+  for (let i = 0; i < timeline.count; i++) {
+    lines.push(`#EXTINF:${timeline.durationSec(i).toFixed(3)},`)
     lines.push(`${segPathPrefix}${segmentName(i)}`)
   }
   lines.push('#EXT-X-ENDLIST')
