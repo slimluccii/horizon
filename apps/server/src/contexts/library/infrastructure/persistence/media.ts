@@ -16,7 +16,13 @@ export interface SubtitleTrack {
   codec: string
   language: string
   forced: boolean
+  /** Text-based: extractable to WebVTT. Image-based (PGS/VobSub) tracks are
+   *  false and play via burn-in transcode instead. */
   embeddable: boolean
+  /** True for sidecar subtitle files found next to the media file. */
+  external?: boolean
+  /** Sidecar file name (basename only) for external tracks. */
+  externalFileName?: string
 }
 
 export interface MovieUpsert {
@@ -27,6 +33,9 @@ export interface MovieUpsert {
   durationSec: number
   resolution: string
   videoCodec: string
+  /** Source video bitrate in bits/s from ffprobe. Omit to keep unknown —
+   *  refresh-driven re-upserts pass the stored value through. */
+  videoBitrate?: number | null
   container: string
   hdr: HdrFlags
   audioTracks: AudioTrack[]
@@ -77,6 +86,8 @@ export interface MediaItemBase {
   durationSec: number | null
   resolution: string | null
   videoCodec: string | null
+  /** Source video bitrate in bits/s (null = probed before v4 migration). */
+  videoBitrate: number | null
   container: string | null
   hdr: HdrFlags | null
   audioTracks: AudioTrack[] | null
@@ -147,6 +158,8 @@ export interface MediaRepo {
   softDeleteMissingUnder(pathPrefix: string, seenIds: Set<string>): number
   listMovies(): MediaItem[]
   listShows(): MediaItem[]
+  /** Case-insensitive title search over movies, shows and episodes. */
+  search(query: string, limit?: number): MediaItem[]
   getEpisodes(showId: string): MediaItem[]
   getById(id: string): MediaItem | null
   /**
@@ -200,6 +213,7 @@ function rowToInternal(row: any): MediaItemRow {
     durationSec: row.duration_sec,
     resolution: row.resolution,
     videoCodec: row.video_codec,
+    videoBitrate: row.video_bitrate ?? null,
     container: row.container,
     hdr: row.hdr ? JSON.parse(row.hdr) : null,
     audioTracks: row.audio_tracks ? JSON.parse(row.audio_tracks) : null,
@@ -232,6 +246,7 @@ function rowToDomain(row: MediaItemBase): MediaItem {
     durationSec: row.durationSec,
     resolution: row.resolution,
     videoCodec: row.videoCodec,
+    videoBitrate: row.videoBitrate,
     container: row.container,
     hdr: row.hdr,
     audioTracks: row.audioTracks,
@@ -249,12 +264,12 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
   const upsertMovieStmt = db.prepare(`
     INSERT INTO media_items (
       id, kind, parent_id, title, sort_year, season, episode,
-      file_path, duration_sec, resolution, video_codec, container,
+      file_path, duration_sec, resolution, video_codec, video_bitrate, container,
       hdr, audio_tracks, subtitle_tracks, mtime_ms, size_bytes,
       external_ids, metadata, first_seen_at, last_seen_at, deleted_at
     ) VALUES (
       ?, 'movie', NULL, ?, ?, NULL, NULL,
-      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, NULL
     )
@@ -265,6 +280,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       duration_sec    = excluded.duration_sec,
       resolution      = excluded.resolution,
       video_codec     = excluded.video_codec,
+      video_bitrate   = excluded.video_bitrate,
       container       = excluded.container,
       hdr             = excluded.hdr,
       audio_tracks    = excluded.audio_tracks,
@@ -297,12 +313,12 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
   const upsertEpisodeStmt = db.prepare(`
     INSERT INTO media_items (
       id, kind, parent_id, title, season, episode,
-      file_path, duration_sec, resolution, video_codec, container,
+      file_path, duration_sec, resolution, video_codec, video_bitrate, container,
       hdr, audio_tracks, subtitle_tracks, mtime_ms, size_bytes,
       external_ids, metadata, first_seen_at, last_seen_at, deleted_at
     ) VALUES (
       ?, 'episode', ?, ?, ?, ?,
-      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, NULL
     )
@@ -315,6 +331,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       duration_sec    = excluded.duration_sec,
       resolution      = excluded.resolution,
       video_codec     = excluded.video_codec,
+      video_bitrate   = excluded.video_bitrate,
       container       = excluded.container,
       hdr             = excluded.hdr,
       audio_tracks    = excluded.audio_tracks,
@@ -347,7 +364,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       const now = Date.now()
       upsertMovieStmt.run(
         input.id, input.title, input.sortYear,
-        input.filePath, input.durationSec, input.resolution, input.videoCodec, input.container,
+        input.filePath, input.durationSec, input.resolution, input.videoCodec, input.videoBitrate ?? null, input.container,
         JSON.stringify(input.hdr), JSON.stringify(input.audioTracks), JSON.stringify(input.subtitleTracks),
         input.mtimeMs, input.sizeBytes,
         JSON.stringify(input.externalIds), input.metadata ? JSON.stringify(input.metadata) : null,
@@ -370,7 +387,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       const now = Date.now()
       upsertEpisodeStmt.run(
         input.id, input.parentId, input.title, input.season, input.episode,
-        input.filePath, input.durationSec, input.resolution, input.videoCodec, input.container,
+        input.filePath, input.durationSec, input.resolution, input.videoCodec, input.videoBitrate ?? null, input.container,
         JSON.stringify(input.hdr), JSON.stringify(input.audioTracks), JSON.stringify(input.subtitleTracks),
         input.mtimeMs, input.sizeBytes,
         JSON.stringify(input.externalIds), input.metadata ? JSON.stringify(input.metadata) : null,
@@ -446,6 +463,23 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
           WHERE kind = 'movie' AND deleted_at IS NULL
           ORDER BY title ASC`,
       ).all()
+      return rows.map(rowToMedia)
+    },
+
+    search(query, limit = 50) {
+      const q = query.trim()
+      if (!q) return []
+      // Escape LIKE wildcards in the user's input so `%`/`_` match literally.
+      const escaped = q.replace(/[\\%_]/g, ch => `\\${ch}`)
+      const rows = db.prepare(
+        `SELECT * FROM media_items
+          WHERE deleted_at IS NULL
+            AND title LIKE ? ESCAPE '\\'
+          ORDER BY
+            CASE kind WHEN 'movie' THEN 0 WHEN 'show' THEN 1 ELSE 2 END,
+            title ASC
+          LIMIT ?`,
+      ).all(`%${escaped}%`, limit)
       return rows.map(rowToMedia)
     },
 

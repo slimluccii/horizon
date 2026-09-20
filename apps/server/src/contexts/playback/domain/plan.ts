@@ -21,6 +21,7 @@ import type { HwAccel } from './hwaccel.ts'
 import type { ToneMapConfig } from './tonemap.ts'
 import {
   PROFILES,
+  h264CodecString,
   type Profile,
 } from './profiles.ts'
 
@@ -55,6 +56,10 @@ export interface PlaybackPlan {
   audioTrackIndex: number
   audioStrategy: 'copy' | 'aac'
   videoStrategy: 'copy' | 'transcode'
+  /** ffmpeg subtitle-stream index (`0:s:N`) of an image-based subtitle track
+   *  (PGS / VobSub) to burn into the video. Non-null forces full transcode —
+   *  image subs cannot be extracted to WebVTT, only composited. */
+  burnInSubtitleIndex: number | null
 }
 
 export interface PlanInput {
@@ -64,6 +69,8 @@ export interface PlanInput {
   audioTrackIndex: number
   maxRenditions: number
   toneMap: ToneMapConfig
+  /** See PlaybackPlan.burnInSubtitleIndex. Omit / null = no burn-in. */
+  burnInSubtitleIndex?: number | null
 }
 
 /** Build the PlaybackPlan from inputs. Pure function — same inputs always
@@ -71,8 +78,17 @@ export interface PlanInput {
  *  overrides profile or audio track. */
 export function buildPlan(input: PlanInput): PlaybackPlan {
   const { probe, capabilities: caps, audioTrackIndex, maxRenditions, toneMap } = input
+  const burnInSubtitleIndex = input.burnInSubtitleIndex ?? null
 
-  const decision = decidePlayback(probe, caps)
+  let decision = decidePlayback(probe, caps)
+  // Burning in an image subtitle recomposites the video, so every copy-based
+  // method is off the table regardless of client capabilities. The transcode
+  // ladder is SDR H.264, so an HDR source must be tone-mapped on this path
+  // even when the client itself could have handled HDR.
+  if (burnInSubtitleIndex != null) {
+    const sourceIsHdr = probe.hdr.dv || probe.hdr.hdr10 || probe.hdr.hdr10plus
+    decision = { method: 'transcode', needsToneMap: decision.needsToneMap || sourceIsHdr }
+  }
 
   // Direct-play emits no ffmpeg — renditions are irrelevant.
   if (decision.method === 'direct-play') {
@@ -84,6 +100,7 @@ export function buildPlan(input: PlanInput): PlaybackPlan {
       audioTrackIndex,
       audioStrategy: 'copy',
       videoStrategy: 'copy',
+      burnInSubtitleIndex: null,
     }
   }
 
@@ -100,10 +117,11 @@ export function buildPlan(input: PlanInput): PlaybackPlan {
 
   const renditions: Rendition[] = ladder.map(profile => ({
     profile,
-    // Pinned: hevc_videotoolbox can't carry per-stream -sc_threshold / -bufsize
-    // in var_stream_map mode, breaking fMP4 on macOS. H.264 High@4.0 is
-    // universal and avc1.640028 matches that on the wire.
-    videoCodec: 'avc1.640028',
+    // Pinned to H.264 High: hevc_videotoolbox can't carry per-stream
+    // -sc_threshold / -bufsize in var_stream_map mode, breaking fMP4 on
+    // macOS. The level (and so the codec string) is per-profile — Level 4.0
+    // can't legally carry 4K, so the ladder ranges 3.1 (480p) to 5.2 (4K).
+    videoCodec: h264CodecString(profile.h264Level),
   }))
 
   return {
@@ -114,6 +132,7 @@ export function buildPlan(input: PlanInput): PlaybackPlan {
     audioTrackIndex,
     audioStrategy: decision.method === 'direct-stream' ? 'copy' : 'aac',
     videoStrategy: decision.method === 'transcode' ? 'transcode' : 'copy',
+    burnInSubtitleIndex,
   }
 }
 
@@ -123,13 +142,23 @@ export function buildPlan(input: PlanInput): PlaybackPlan {
 export function planWithProfile(prev: PlaybackPlan, profile: Profile): PlaybackPlan {
   return {
     ...prev,
-    renditions: [{ profile, videoCodec: 'avc1.640028' }],
+    renditions: [{ profile, videoCodec: h264CodecString(profile.h264Level) }],
   }
 }
 
 /** Rebuild a plan for an audio-track change. Source index → new -map target. */
 export function planWithAudioTrack(prev: PlaybackPlan, audioTrackIndex: number): PlaybackPlan {
   return { ...prev, audioTrackIndex }
+}
+
+/** Rebuild a plan for an image-subtitle burn-in change mid-session.
+ *
+ *  Only valid on sessions that are ALREADY transcoding — a copy-based session
+ *  that needs burn-in must be recreated (its playlist advertises copied
+ *  streams; callers enforce this). Switching burn-in on/off keeps the ladder,
+ *  audio and tone-map as they are; only the filter graph changes. */
+export function planWithBurnIn(prev: PlaybackPlan, burnInSubtitleIndex: number | null): PlaybackPlan {
+  return { ...prev, burnInSubtitleIndex }
 }
 
 // ============================================================================
@@ -186,7 +215,7 @@ function decidePlayback(probe: ProbeResult, caps: ClientCapabilities): InternalD
 // ============================================================================
 
 const TONEMAP_CAP_720P: Profile = {
-  name: '720p', videoBitrate: 4000, audioBitrate: 160, width: 1280, height: 720,
+  name: '720p', videoBitrate: 4000, audioBitrate: 160, width: 1280, height: 720, h264Level: '4.0',
 }
 
 /** Highest-quality profile within (a) client's bitrate ceiling and (b) source

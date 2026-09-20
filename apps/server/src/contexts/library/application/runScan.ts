@@ -6,6 +6,7 @@ import { buildCollections } from '../domain/collection.ts'
 import { parseIdsFromPath, parseIds, mergeIds } from '../domain/ids.ts'
 import { pMap } from './concurrency.ts'
 import { walkVideoFiles } from '../infrastructure/fs/walker.ts'
+import { discoverSidecarSubtitles, mergeSidecarTracks } from '../infrastructure/fs/sidecars.ts'
 import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../infrastructure/persistence/media.ts'
 import type { CollectionsRepo, Collection } from '../infrastructure/persistence/collections.ts'
 import type { ActivityBus } from '../../activity/index.ts'
@@ -152,10 +153,11 @@ async function scanMoviesPath(
       durationSec: p.duration,
       resolution: p.resolution,
       videoCodec: p.videoCodec,
+      videoBitrate: p.videoBitrate,
       container: p.container,
       hdr: p.hdr,
       audioTracks: p.audioTracks,
-      subtitleTracks: p.subtitleTracks,
+      subtitleTracks: mergeSidecarTracks(p.subtitleTracks, await discoverSidecarSubtitles(file)),
       mtimeMs: st.mtimeMs,
       sizeBytes: st.size,
       externalIds: parseIdsFromPath(file),
@@ -240,10 +242,11 @@ async function scanShowsPath(
       durationSec: p.duration,
       resolution: p.resolution,
       videoCodec: p.videoCodec,
+      videoBitrate: p.videoBitrate,
       container: p.container,
       hdr: p.hdr,
       audioTracks: p.audioTracks,
-      subtitleTracks: p.subtitleTracks,
+      subtitleTracks: mergeSidecarTracks(p.subtitleTracks, await discoverSidecarSubtitles(file)),
       mtimeMs: st.mtimeMs,
       sizeBytes: st.size,
       externalIds: mergeIds(parseIds(showName), parseIds(base)),

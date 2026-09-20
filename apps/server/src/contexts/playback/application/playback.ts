@@ -40,6 +40,19 @@ import { extractSubtitles as defaultExtractSubtitles } from '../infrastructure/f
 import { getFfmpegStderrTail } from '../infrastructure/ffmpeg/ffmpeg.ts'
 import { createSessionRuntime } from './runtime.ts'
 import { TranscodeError } from '../domain/errors.ts'
+import { statfsSync } from 'node:fs'
+
+/** Free bytes on the volume holding `dir`. Returns Infinity when statfs is
+ *  unavailable (unsupported platform) so the guard fails open — a wrong
+ *  rejection would block playback entirely on such hosts. */
+function freeDiskBytes(dir: string): number {
+  try {
+    const s = statfsSync(dir)
+    return s.bavail * s.bsize
+  } catch {
+    return Infinity
+  }
+}
 
 export interface StartPlaybackInput {
   mediaId: string
@@ -101,6 +114,7 @@ type PlaybackErrorCode =
   | typeof ErrorCodes.MEDIA_NOT_FOUND
   | typeof ErrorCodes.USER_NOT_FOUND
   | typeof ErrorCodes.MAX_SESSIONS
+  | typeof ErrorCodes.DISK_FULL
   | typeof ErrorCodes.AUDIO_TRACK_INVALID
   | typeof ErrorCodes.INVALID_INPUT
 
@@ -163,8 +177,26 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         throw new PlaybackError(ErrorCodes.MAX_SESSIONS, 'Server at session capacity')
       }
 
+      // Refuse to start a transcode when the cache volume is nearly full — a
+      // VOD-style HLS run keeps every segment for the session's lifetime, so an
+      // unchecked session can fill the disk and take the whole server (and its
+      // SQLite DB, which shares the volume) down with it.
+      if (freeDiskBytes(cfg.cacheDir) < cfg.minFreeDiskMb * 1024 * 1024) {
+        throw new PlaybackError(ErrorCodes.DISK_FULL, 'Not enough free disk space for a new session')
+      }
+
       const audioTrackIndex = requestedAudioTrack
       const subtitleTrackIndex = input.subtitleTrackIndex ?? null
+
+      // Image-based subtitle selected (PGS/VobSub)? It can't be extracted to
+      // WebVTT — burn it into the video, which forces the transcode path.
+      // External sidecars and embedded text subs render client-side instead.
+      const selectedSub = subtitleTrackIndex != null && subtitleTrackIndex >= 0
+        ? mediaItem.subtitleTracks?.[subtitleTrackIndex]
+        : undefined
+      const burnInSubtitleIndex = selectedSub && !selectedSub.embeddable && !selectedSub.external
+        ? selectedSub.index
+        : null
 
       const plan = buildPlan({
         probe: mediaItemToProbeView(mediaItem),
@@ -173,6 +205,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         audioTrackIndex,
         maxRenditions: liveSettings.maxRenditions,
         toneMap: settingsToToneMap(liveSettings),
+        burnInSubtitleIndex,
       })
 
       const session = sessions.create({
@@ -182,11 +215,29 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         selectedSubtitleTrack: subtitleTrackIndex,
         audioTrackCount,
         subtitleTrackCount: mediaItem.subtitleTracks?.length ?? 0,
+        imageSubtitleIndexes: (mediaItem.subtitleTracks ?? [])
+          .filter(t => !t.embeddable && !t.external)
+          .map(t => t.index),
         renditionCodecs: [],
         sessionDir: '',
         sessionReady: false,
         durationSec: mediaItem.durationSec ?? 0,
         userId: input.userId ?? undefined,
+      })
+
+      // Bandwidth-demote support: the WS layer can't rebuild a plan (it holds
+      // no probe/capabilities), so hand the session a rebuild closure. Reads
+      // the CURRENT audio/burn-in selection from session.plan at call time so
+      // a demote after a track switch keeps the user's choices.
+      session.sourceVideoKbps = Math.round(sourceVideoBitrate(mediaItem) / 1000)
+      session.rebuildPlanForBitrate = (maxBitrateKbps) => buildPlan({
+        probe: mediaItemToProbeView(mediaItem),
+        capabilities: { ...input.capabilities, maxBitrate: maxBitrateKbps },
+        hwAccel,
+        audioTrackIndex: session.plan.audioTrackIndex,
+        maxRenditions: serverSettings.get().maxRenditions,
+        toneMap: settingsToToneMap(serverSettings.get()),
+        burnInSubtitleIndex: session.plan.burnInSubtitleIndex,
       })
 
       const profiles = plan.renditions.map(r => r.profile)
@@ -209,7 +260,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
       sessions.attachRuntime(session.id, runtime)
 
       const ready = (async () => {
-        session.sessionDir = await createSessionDir(session.id)
+        session.sessionDir = await createSessionDir(cfg.cacheDir, session.id)
 
         // Seek-on-create: prepare ffmpeg to begin output at the requested
         // segment so the client can resume mid-stream without a separate
@@ -276,19 +327,29 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
 }
 
 /** Project a MediaItemRow into the ProbeResult shape `buildPlan` consumes.
- *  videoBitrate isn't stored in media_items — default 0 so the bitrate check
- *  is permissive. */
+ *  Rows scanned before the v4 migration have no stored video bitrate — fall
+ *  back to total-file bitrate (size/duration), which overestimates slightly
+ *  (audio + container overhead) but keeps the bandwidth check meaningful. */
 function mediaItemToProbeView(item: MediaItemRow): ProbeResult {
   return {
     duration: item.durationSec ?? 0,
     resolution: item.resolution ?? '1920x1080',
     videoCodec: item.videoCodec ?? '',
-    videoBitrate: 0,
+    videoBitrate: sourceVideoBitrate(item),
     hdr: item.hdr ?? { dv: false, hdr10: false, hdr10plus: false },
     audioTracks: item.audioTracks ?? [],
     subtitleTracks: item.subtitleTracks ?? [],
     container: item.container ?? '',
   }
+}
+
+/** Source video bitrate in bits/s; estimated from file size when un-probed. */
+function sourceVideoBitrate(item: MediaItemRow): number {
+  if (item.videoBitrate && item.videoBitrate > 0) return item.videoBitrate
+  if (item.sizeBytes && item.durationSec && item.durationSec > 0) {
+    return Math.round((item.sizeBytes * 8) / item.durationSec)
+  }
+  return 0
 }
 
 /** Build a ToneMapConfig from the live ServerSettings row.

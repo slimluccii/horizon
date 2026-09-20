@@ -9,6 +9,9 @@ export interface ExternalIds {
 
 export interface MediaItem {
   id: string
+  /** Present on search results and single-item fetches; older list endpoints
+   *  imply the kind from context. */
+  kind?: 'movie' | 'show' | 'episode'
   title: string
   year?: number
   /** Episode only — season number in the show. */
@@ -18,6 +21,8 @@ export interface MediaItem {
   duration: number
   resolution: string
   videoCodec: string
+  /** Source video bitrate in bits/s; null/absent when not yet probed. */
+  videoBitrate?: number | null
   hdr: { dv: boolean; hdr10: boolean; hdr10plus: boolean }
   audioTracks: AudioTrack[]
   subtitleTracks: SubtitleTrack[]

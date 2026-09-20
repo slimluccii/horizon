@@ -22,6 +22,7 @@ export const ErrorCodes = {
   INVITE_EXPIRED: 'invite-expired',
   INVITE_NOT_FOUND: 'invite-not-found',
   MAX_SESSIONS: 'max-sessions',
+  DISK_FULL: 'disk-full',
   MEDIA_NOT_FOUND: 'media-not-found',
   NAME_TAKEN: 'name-taken',
   NO_USER: 'no-user',

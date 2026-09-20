@@ -76,6 +76,40 @@ export function registerLibrary(
     return media.listMovies()
   })
 
+  // Title search across the whole library. Case-insensitive substring match;
+  // movies first, then shows, then episodes.
+  app.get<{ Querystring: { q?: string } }>('/library/search', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
+    const q = (req.query.q ?? '').trim()
+    if (q.length < 2) return []
+    return media.search(q)
+  })
+
+  // Single item by id, any kind (movie / show / episode). The player uses this
+  // to load track lists + metadata without fetching a whole library listing.
+  app.get<{ Params: { id: string } }>('/library/media/:id', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
+    const item = media.getById(req.params.id)
+    if (!item) return sendNotFound(reply, ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
+    return item
+  })
+
+  // Next episode in airing order after :id (crossing season boundaries).
+  // `{ next: null }` for the last episode or non-episode media — a JSON body
+  // rather than a 404 so clients can tell "no next" apart from "bad id".
+  app.get<{ Params: { id: string } }>('/library/media/:id/next', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
+    const item = media.getById(req.params.id)
+    if (!item) return sendNotFound(reply, ErrorCodes.MEDIA_NOT_FOUND, 'Media not found')
+    if (item.kind !== 'episode' || !item.parentId) return { next: null }
+    const episodes = media.getEpisodes(item.parentId)
+    const idx = episodes.findIndex(e => e.id === item.id)
+    return { next: idx >= 0 ? episodes[idx + 1] ?? null : null }
+  })
+
   app.get('/library/movies/collections', async (req, reply) => {
     const caller = resolveCallerRole(req)
     if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')

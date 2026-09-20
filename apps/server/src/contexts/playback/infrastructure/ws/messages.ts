@@ -40,6 +40,9 @@ export interface SubtitleTrackMessage {
   type: 'subtitle-track'
   /** null = subtitles off */
   index: number | null
+  /** Playback position in ms to resume at when the switch needs an ffmpeg
+   *  restart (image-subtitle burn-in). Omit to keep current seek offset. */
+  positionMs?: number
 }
 
 export interface ParkMessage { type: 'park' }
@@ -101,9 +104,11 @@ export function parseWsMessage(raw: unknown): WsMessage | null {
       const positionMs = typeof m.positionMs === 'number' && m.positionMs >= 0 ? m.positionMs : undefined
       return { type: 'audio-track', index: m.index, positionMs }
     }
-    case 'subtitle-track':
+    case 'subtitle-track': {
       if (m.index !== null && (typeof m.index !== 'number' || m.index < 0)) return null
-      return { type: 'subtitle-track', index: m.index as number | null }
+      const positionMs = typeof m.positionMs === 'number' && m.positionMs >= 0 ? m.positionMs : undefined
+      return { type: 'subtitle-track', index: m.index as number | null, positionMs }
+    }
     case 'park': return { type: 'park' }
     case 'resume': return { type: 'resume' }
     case 'progress': {

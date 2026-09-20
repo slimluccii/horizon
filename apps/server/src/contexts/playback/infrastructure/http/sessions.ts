@@ -50,7 +50,30 @@ export function registerSessions(
   orchestrator: PlaybackOrchestrator,
   serverSettings: ServerSettings,
   users: UserRepo,
+  media?: MediaRepo,
 ) {
+  // Admin now-playing view: every live session with who/what/how. Owner/admin
+  // only — it exposes other members' viewing activity.
+  app.get('/sessions', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
+    if (caller.role !== 'owner' && caller.role !== 'admin') {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Owner or admin only')
+    }
+    return sessions.list().map(s => ({
+      id: s.id,
+      userId: s.userId ?? null,
+      userName: s.userId ? users.get(s.userId)?.name ?? null : null,
+      mediaId: s.mediaId,
+      mediaTitle: media?.getById(s.mediaId)?.title ?? null,
+      method: s.plan.method,
+      state: s.state,
+      profile: s.plan.renditions[0]?.profile.name ?? null,
+      positionMs: s.lastProgress?.positionMs ?? null,
+      durationMs: s.durationSec > 0 ? s.durationSec * 1000 : null,
+      startedAt: s.createdAt,
+    }))
+  })
   app.post<{ Body: StartPlaybackInput }>('/sessions', async (req, reply) => {
     // Syntactic validation first — reject malformed bodies before any auth or
     // domain work so the client gets a clear 400 rather than a deep ffmpeg
@@ -99,6 +122,7 @@ export function registerSessions(
       if (code === ErrorCodes.AUDIO_TRACK_INVALID) return badRequest(reply, ErrorCodes.AUDIO_TRACK_INVALID, 'Audio track not available for this media')
       if (code === ErrorCodes.INVALID_INPUT) return badRequest(reply, ErrorCodes.INVALID_INPUT, (err as Error).message)
       if (code === ErrorCodes.MAX_SESSIONS) return overCapacity(reply, ErrorCodes.MAX_SESSIONS, 'Server at capacity')
+      if (code === ErrorCodes.DISK_FULL) return overCapacity(reply, ErrorCodes.DISK_FULL, 'Not enough free disk space for a new session')
       throw err
     }
 

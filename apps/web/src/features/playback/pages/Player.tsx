@@ -7,9 +7,8 @@ import VideoPlayer from '../components/VideoPlayer.tsx'
 import QualityOverlay from '../components/QualityOverlay.tsx'
 import TrackSelector from '../components/TrackSelector.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
+import { pickInitialTracks, isImageSubtitle, preferredQualityMaxBitrate } from '@horizon/sdk'
 import type { PlaybackSession, QualityProfile, MediaItem } from '@horizon/sdk'
-import './Player.css'
-
 /** Delay (ms) after a reloadKey bump before clearing resumeAtSec. Must outlast
  *  VideoPlayer applying the value to the fresh hls.js instance (which happens
  *  synchronously on the reload render) yet be short enough that a subsequent
@@ -19,7 +18,7 @@ const RESUME_CLEAR_MS = 150
 export default function Player() {
   const { mediaId } = useParams<{ mediaId: string }>()
   const navigate = useNavigate()
-  const { userId } = useActiveUser()
+  const { user, userId, loading: userLoading } = useActiveUser()
   const [session, setSession] = useState<PlaybackSession | null>(null)
   const [media, setMedia] = useState<MediaItem | null>(null)
   const [currentProfile, setCurrentProfile] = useState<QualityProfile | null>(null)
@@ -58,8 +57,23 @@ export default function Player() {
   const [resume, setResume] = useState<{ positionMs: number; durationMs: number } | null>(null)
   const [decision, setDecision] = useState<'pending' | 'resume' | 'start-over' | null>(null)
 
+  // Next-episode auto-advance: fetched once the media loads (episodes only);
+  // `postPlay` shows the up-next prompt after playback ends. The ref mirrors
+  // the state for the onEnded callback, which closes over stale state.
+  const [nextEpisode, setNextEpisode] = useState<MediaItem | null>(null)
+  const [postPlay, setPostPlay] = useState(false)
+  const nextEpisodeRef = useRef<MediaItem | null>(null)
+  useEffect(() => { nextEpisodeRef.current = nextEpisode }, [nextEpisode])
+
   const sessionRef = useRef<PlaybackSession | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  // Bumped to tear down + recreate the whole session (not just hls.js). Needed
+  // when an image subtitle is selected on a copy-based session: burn-in forces
+  // the transcode path, which only a fresh session can advertise. The override
+  // ref carries the tracks + position the recreated session should start from.
+  const [sessionEpoch, setSessionEpoch] = useState(0)
+  const recreateRef = useRef<{ subtitleTrackIndex: number | null; audioTrackIndex: number; startPositionMs: number } | null>(null)
 
   // Fetch saved progress; show resume toast if applicable.
   useEffect(() => {
@@ -79,8 +93,29 @@ export default function Player() {
     return () => { cancelled = true }
   }, [mediaId, userId])
 
+  // Load the media item (movie or episode) first — the session create needs
+  // its track lists to apply preference-based track selection.
   useEffect(() => {
     if (!mediaId) return
+    let cancelled = false
+    setPostPlay(false)
+    setNextEpisode(null)
+    horizon.library.getMedia(mediaId)
+      .then(m => {
+        if (cancelled) return
+        setMedia(m)
+        if (m.kind === 'episode') {
+          horizon.library.getNextEpisode(mediaId)
+            .then(next => { if (!cancelled) setNextEpisode(next) })
+            .catch(() => {/* up-next is an enhancement — ignore failures */})
+        }
+      })
+      .catch(err => { if (!cancelled) setError(String(err.message ?? err)) })
+    return () => { cancelled = true }
+  }, [mediaId])
+
+  useEffect(() => {
+    if (!mediaId || !media || userLoading) return
     // Wait until the user has made a resume decision (or there's nothing to resume).
     if (decision === null || decision === 'pending') return
 
@@ -89,10 +124,6 @@ export default function Player() {
     const t0 = performance.now()
     const stamp = (label: string) => console.log(`[cold-start] ${label} +${Math.round(performance.now() - t0)}ms`)
     stamp('player mount')
-
-    horizon.library.listMovies()
-      .then(movies => { if (!cancelled) setMedia(movies.find(m => m.id === mediaId) ?? null) })
-      .catch(() => {})
 
     // Defer the actual session creation by a microtask so React StrictMode's
     // synchronous double-mount (mount → unmount → mount) no-ops on the first
@@ -105,9 +136,19 @@ export default function Player() {
     })
 
     function startSession() {
-      const startPositionMs = decision === 'resume' ? resume?.positionMs : undefined
+      // A pending recreate (burn-in switch) dictates tracks + position; else
+      // start from the profile's preferences.
+      const recreate = recreateRef.current
+      recreateRef.current = null
+      const prefTracks = pickInitialTracks(media!, user?.preferences)
+      const startPositionMs = recreate?.startPositionMs
+        ?? (decision === 'resume' ? resume?.positionMs : undefined)
+      const maxBitrate = preferredQualityMaxBitrate(user?.preferences.preferredQuality)
       horizon.play(mediaId!, {
         startPositionMs,
+        audioTrackIndex: recreate?.audioTrackIndex ?? prefTracks.audioTrackIndex,
+        subtitleTrackIndex: recreate?.subtitleTrackIndex ?? prefTracks.subtitleTrackIndex,
+        capabilities: maxBitrate > 0 ? { maxBitrate } : undefined,
         onReady: (info) => {
           if (cancelled) return
           stamp('session-ready')
@@ -120,10 +161,17 @@ export default function Player() {
           if (cancelled) return
           setCurrentProfile(profile)
           setQualityLog(log => [...log, { profile, reason, time: new Date() }])
+          // Server-initiated switches (bandwidth demote) arrive without the
+          // client having captured a resume position — grab it now, before the
+          // reload tears the video element's state down. User-initiated
+          // switches already set resumeAtSec; overwriting with the current
+          // time is equivalent (both were read moments apart).
+          const posSec = videoRef.current?.currentTime ?? 0
+          if (posSec > 0) setResumeAtSec(posSec)
           // Quality switches restart ffmpeg → reload HLS to pick up new init.mp4
           setReloadKey(k => k + 1)
         },
-        onTrackChange: ({ audio, subtitle }) => {
+        onTrackChange: ({ audio, subtitle, restarted }) => {
           if (cancelled) return
           if (typeof audio === 'number') {
             setSelectedAudio(audio)
@@ -132,14 +180,22 @@ export default function Player() {
           }
           if (subtitle !== undefined) {
             setSelectedSubtitle(subtitle)
-            // Subtitle is a separate VTT file; no HLS reload needed
+            // Text/sidecar subtitle = separate VTT file, no reload. A burn-in
+            // switch (image subtitle) restarted ffmpeg → reload the HLS source.
+            if (restarted) setReloadKey(k => k + 1)
           }
         },
         onError: (err) => {
           if (cancelled) return
           setError(err.message)
         },
-        onEnded: () => { if (!cancelled) navigate('/') },
+        onEnded: () => {
+          if (cancelled) return
+          // Episode with a follow-up → post-play prompt (auto-advance);
+          // otherwise back to the library.
+          if (nextEpisodeRef.current) setPostPlay(true)
+          else navigate('/')
+        },
       }).then(s => {
         stamp('session created (POST /sessions resolved)')
         if (cancelled) {
@@ -161,46 +217,53 @@ export default function Player() {
       setSession(null)
       setReady(false)
     }
-  }, [mediaId, decision])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaId, decision, media, userLoading, sessionEpoch])
 
   if (error) return (
-    <div className="player player--error">
-      <div className="player__err-title">Playback error</div>
-      <div className="player__err-msg">{error}</div>
-      <button className="player__err-back" onClick={() => navigate('/')}>Back to library</button>
+    <div>
+      <div>Playback error</div>
+      <div>{error}</div>
+      <button onClick={() => navigate('/')}>Back to library</button>
     </div>
   )
 
   const subtitleTrack = (selectedSubtitle != null && media)
     ? media.subtitleTracks.find(t => t.index === selectedSubtitle) ?? null
     : null
+  // Only text/sidecar tracks render as a client-side <track>; image subs are
+  // burned into the video by the server.
+  const textSubtitleTrack = subtitleTrack && subtitleTrack.embeddable ? subtitleTrack : null
 
   return (
-    <div className="player">
+    <div>
       <button
-        className="player__back"
         onClick={() => { sessionRef.current?.disconnect(); navigate('/') }}
       >
         <Icon name="back" size={14} /> Library
       </button>
 
       {decision === 'pending' && resume && (
-        <div className="player__toast">
-          <div className="player__toast-text">
-            <div className="eyebrow">Continue</div>
-            <div className="player__toast-msg">Resume from {fmtMs(resume.positionMs)}?</div>
-          </div>
-          <button className="player__toast-primary" onClick={() => setDecision('resume')}>Resume</button>
-          <button className="player__toast-ghost" onClick={() => setDecision('start-over')}>Start over</button>
-        </div>
+        <section aria-label="Resume playback">
+          <h2>Continue</h2>
+          <p>Resume from {fmtMs(resume.positionMs)}?</p>
+          <button onClick={() => setDecision('resume')}>Resume</button>
+          <button onClick={() => setDecision('start-over')}>Start over</button>
+        </section>
       )}
 
       {!ready && (
-        <div className="player__loading">
-          <div className="player__spinner" />
-          <div className="player__loading-msg">Starting playback…</div>
-          {media && <div className="player__loading-title">{media.title}</div>}
-        </div>
+        <p role="status">
+          Starting playback…{media && <> {media.title}</>}
+        </p>
+      )}
+
+      {postPlay && nextEpisode && (
+        <PostPlayPrompt
+          next={nextEpisode}
+          onPlayNext={() => navigate(`/play/${nextEpisode.id}`)}
+          onCancel={() => { setPostPlay(false); navigate('/') }}
+        />
       )}
 
       {ready && session && (
@@ -209,7 +272,7 @@ export default function Player() {
           videoRef={videoRef}
           reloadKey={reloadKey}
           resumeAtSec={resumeAtSec}
-          subtitle={subtitleTrack}
+          subtitle={textSubtitleTrack}
           onBufferUpdate={setBufferSeconds}
           onQualityChange={(profile, reason) => {
             setCurrentProfile(profile)
@@ -242,8 +305,28 @@ export default function Player() {
             session.setAudioTrack(idx, posMs)
           }}
           onSubtitleChange={(idx) => {
+            const newTrack = idx != null ? media.subtitleTracks.find(t => t.index === idx) : undefined
+            const leavingBurnIn = subtitleTrack != null && isImageSubtitle(subtitleTrack)
+            const enteringBurnIn = !!newTrack && isImageSubtitle(newTrack)
+            const posMs = Math.floor((videoRef.current?.currentTime ?? 0) * 1000)
+
+            if (enteringBurnIn && session.method !== 'transcode') {
+              // Copy-based session can't grow a burned-in subtitle — recreate
+              // the session with the subtitle chosen at create.
+              recreateRef.current = { subtitleTrackIndex: idx, audioTrackIndex: selectedAudio, startPositionMs: posMs }
+              setReady(false)
+              setSessionEpoch(k => k + 1)
+              return
+            }
+
             setSelectedSubtitle(idx)      // optimistic
-            session.setSubtitleTrack(idx)
+            if (enteringBurnIn || leavingBurnIn) {
+              // Burn-in switch restarts ffmpeg — resume from the current spot.
+              setResumeAtSec(posMs / 1000)
+              session.setSubtitleTrack(idx, posMs)
+            } else {
+              session.setSubtitleTrack(idx)
+            }
           }}
           onQualityChange={(bitrate) => {
             // Capture playback position before the server kills the encoder.
@@ -266,4 +349,36 @@ function fmtMs(ms: number): string {
   const s = totalSec % 60
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+const POST_PLAY_COUNTDOWN_SEC = 10
+
+/** Up-next prompt shown when an episode finishes. Counts down and
+ *  auto-advances; the user can start immediately or bail to the library. */
+function PostPlayPrompt({ next, onPlayNext, onCancel }: {
+  next: MediaItem
+  onPlayNext: () => void
+  onCancel: () => void
+}) {
+  const [remaining, setRemaining] = useState(POST_PLAY_COUNTDOWN_SEC)
+
+  useEffect(() => {
+    if (remaining <= 0) { onPlayNext(); return }
+    const timer = setTimeout(() => setRemaining(r => r - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [remaining, onPlayNext])
+
+  const epLabel = next.season != null && next.episode != null
+    ? `S${String(next.season).padStart(2, '0')}E${String(next.episode).padStart(2, '0')} · `
+    : ''
+
+  return (
+    <section aria-label="Up next">
+      <h2>Up next</h2>
+      <p>{epLabel}{next.title}</p>
+      <p role="status">Playing in {remaining}s…</p>
+      <button autoFocus onClick={onPlayNext}>Play now</button>
+      <button onClick={onCancel}>Back to library</button>
+    </section>
+  )
 }

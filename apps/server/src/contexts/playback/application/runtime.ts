@@ -22,7 +22,7 @@ import type { Session } from '../domain/types.ts'
 import type { HwAccel } from '../domain/hwaccel.ts'
 import type { Profile } from '../domain/profiles.ts'
 import type { PlaybackPlan } from '../domain/plan.ts'
-import { planWithAudioTrack, planWithProfile } from '../domain/plan.ts'
+import { planWithAudioTrack, planWithBurnIn, planWithProfile } from '../domain/plan.ts'
 import { SEGMENT_DURATION_SEC } from '../domain/segments.ts'
 import {
   restartAtSegment as defaultRestartAtSegment,
@@ -96,6 +96,14 @@ export interface SessionRuntime {
 
   /** Change profile (quality override). Preserves init. Rebuilds plan. */
   changeProfile(profile: Profile, positionMs?: number): Promise<TransitionResult>
+
+  /** Switch image-subtitle burn-in on/off/to another track. Wipes init (the
+   *  filter graph changes). Only valid on transcode sessions. */
+  changeBurnInSubtitle(burnInSubtitleIndex: number | null, positionMs?: number): Promise<TransitionResult>
+
+  /** Swap in a completely rebuilt plan (bandwidth demote to transcode).
+   *  Wipes init — the method/codec config changes wholesale. */
+  applyPlanSwap(newPlan: PlaybackPlan, positionMs?: number): Promise<TransitionResult>
 
   /** Orchestrator hook: seed initial startSegment + seekPositionMs from a
    *  startPositionMs on session create. No restart spawned — orchestrator
@@ -194,6 +202,29 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
 
     async changeAudioTrack(index, positionMs) {
       const newPlan = planWithAudioTrack(session.plan, index)
+      session.plan = newPlan
+      const segNum = positionMs !== undefined
+        ? msToSegment(positionMs)
+        : msToSegment(session.seekPositionMs)
+      const target: RestartTarget = { segNum, plan: newPlan, withReset: true }
+      return transition(target, () =>
+        doRestartWithReset(session, hwAccel, target.plan, target.segNum),
+      )
+    },
+
+    async applyPlanSwap(newPlan, positionMs) {
+      session.plan = newPlan
+      const segNum = positionMs !== undefined
+        ? msToSegment(positionMs)
+        : msToSegment(session.seekPositionMs)
+      const target: RestartTarget = { segNum, plan: newPlan, withReset: true }
+      return transition(target, () =>
+        doRestartWithReset(session, hwAccel, target.plan, target.segNum),
+      )
+    },
+
+    async changeBurnInSubtitle(burnInSubtitleIndex, positionMs) {
+      const newPlan = planWithBurnIn(session.plan, burnInSubtitleIndex)
       session.plan = newPlan
       const segNum = positionMs !== undefined
         ? msToSegment(positionMs)

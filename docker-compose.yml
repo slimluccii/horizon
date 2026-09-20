@@ -41,7 +41,11 @@ services:
       HORIZON_CORS_ORIGINS: "${HORIZON_CORS_ORIGINS:-}"
       # Set to 0 to run headless (no bundled web UI).
       HORIZON_SERVE_WEB: "${HORIZON_SERVE_WEB:-1}"
+      # Set to 1 behind a reverse proxy / tunnel (trust X-Forwarded-* headers).
+      HORIZON_TRUST_PROXY: "${HORIZON_TRUST_PROXY:-0}"
       HORIZON_MAX_SESSIONS: "${HORIZON_MAX_SESSIONS:-4}"
+      # Refuse new playback sessions when /config has less free space (MB).
+      HORIZON_MIN_FREE_DISK_MB: "${HORIZON_MIN_FREE_DISK_MB:-2048}"
       HORIZON_MAX_RENDITIONS: "${HORIZON_MAX_RENDITIONS:-3}"
       HORIZON_FORCE_ENCODER: "${HORIZON_FORCE_ENCODER:-}"
       HORIZON_TONEMAP_OPERATOR: "${HORIZON_TONEMAP_OPERATOR:-hable}"

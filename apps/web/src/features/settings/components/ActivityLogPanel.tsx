@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import './ActivityLogPanel.css'
 
 /** Live raw activity log. Auto-scrolls to the bottom unless the user scrolls up. */
 export default function ActivityLogPanel({ lines }: { lines: string[] }) {
@@ -18,17 +17,17 @@ export default function ActivityLogPanel({ lines }: { lines: string[] }) {
   }
 
   return (
-    <div className="actlog">
-      <div className="actlog__head">
-        <span className={`actlog__dot ${stick ? 'is-live' : ''}`} />
+    <section aria-label="Activity log">
+      <p role="status">
         <span>{stick ? 'Live' : 'Paused (scroll to bottom to resume)'}</span>
-        <span className="actlog__count">{lines.length} lines</span>
-      </div>
-      <div className="actlog__body" ref={boxRef} onScroll={onScroll}>
+        {' · '}
+        <span>{lines.length} lines</span>
+      </p>
+      <div ref={boxRef} onScroll={onScroll}>
         {lines.length === 0
-          ? <div className="actlog__empty">No activity yet.</div>
-          : lines.map((l, i) => <div className="actlog__line" key={i}>{l}</div>)}
+          ? <p>No activity yet.</p>
+          : <ol>{lines.map((l, i) => <li key={i}>{l}</li>)}</ol>}
       </div>
-    </div>
+    </section>
   )
 }

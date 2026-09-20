@@ -403,11 +403,11 @@ describe('PATCH /settings/server — playback knobs', () => {
         method: 'direct-play', needsToneMap: false,
         toneMap: { operator: 'hable', postCorrection: true },
         renditions: [], audioTrackIndex: 0,
-        audioStrategy: 'copy', videoStrategy: 'copy',
+        audioStrategy: 'copy', videoStrategy: 'copy', burnInSubtitleIndex: null,
       },
       renditionCodecs: [], sessionDir: '', sessionReady: false,
       durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
-      audioTrackCount: 0, subtitleTrackCount: 0,
+      audioTrackCount: 0, subtitleTrackCount: 0, imageSubtitleIndexes: [],
     })
 
     // Second create should fail at limit=1
@@ -417,11 +417,11 @@ describe('PATCH /settings/server — playback knobs', () => {
         method: 'direct-play', needsToneMap: false,
         toneMap: { operator: 'hable', postCorrection: true },
         renditions: [], audioTrackIndex: 0,
-        audioStrategy: 'copy', videoStrategy: 'copy',
+        audioStrategy: 'copy', videoStrategy: 'copy', burnInSubtitleIndex: null,
       },
       renditionCodecs: [], sessionDir: '', sessionReady: false,
       durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
-      audioTrackCount: 0, subtitleTrackCount: 0,
+      audioTrackCount: 0, subtitleTrackCount: 0, imageSubtitleIndexes: [],
     })).toThrow(expect.objectContaining({ code: 'max-sessions' }))
 
     // Raise the limit live — no restart
@@ -434,11 +434,11 @@ describe('PATCH /settings/server — playback knobs', () => {
         method: 'direct-play', needsToneMap: false,
         toneMap: { operator: 'hable', postCorrection: true },
         renditions: [], audioTrackIndex: 0,
-        audioStrategy: 'copy', videoStrategy: 'copy',
+        audioStrategy: 'copy', videoStrategy: 'copy', burnInSubtitleIndex: null,
       },
       renditionCodecs: [], sessionDir: '', sessionReady: false,
       durationSec: 0, userId: undefined, selectedSubtitleTrack: null,
-      audioTrackCount: 0, subtitleTrackCount: 0,
+      audioTrackCount: 0, subtitleTrackCount: 0, imageSubtitleIndexes: [],
     })).not.toThrow()
   })
 })

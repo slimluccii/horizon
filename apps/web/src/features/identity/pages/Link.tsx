@@ -5,8 +5,6 @@ import type { HouseholdView } from '@horizon/sdk'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import HorizonMark from '../../../shared/ui/chrome/HorizonMark.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
-import './Link.css'
-
 /** Normalise the typed code to the server's `ABCD-1234` shape: upper-case,
  *  strip everything but A–Z/0–9, re-insert the dash after 4 chars. Lets the
  *  user paste with or without the dash and in any case. */
@@ -67,37 +65,34 @@ export default function Link() {
   }
 
   return (
-    <div className="link">
-      <div className="link__bg" />
-      <div className="link__content">
-        <HorizonMark size={56} withText />
+    <main>
+      <HorizonMark size={56} withText />
 
-        <div className="link__card">
+        <div>
           {done ? (
             <>
-              <div className="link__icon link__icon--ok">
-                <Icon name="check" size={28} color="var(--accent)" />
+              <div>
+                <Icon name="check" size={28} />
               </div>
-              <h1 className="link__title">Device linked</h1>
-              <p className="link__subtitle">
+              <h1>Device linked</h1>
+              <p>
                 Your TV is signing in as {user?.name ?? 'you'}. You can close this page.
               </p>
-              <button className="link__submit" onClick={() => navigate('/', { replace: true })}>
+              <button onClick={() => navigate('/', { replace: true })}>
                 Back to Horizon
               </button>
             </>
           ) : (
             <>
-              <div className="link__icon">
-                <Icon name="tv" size={28} color="var(--muted-hi)" />
+              <div>
+                <Icon name="tv" size={28} />
               </div>
-              <h1 className="link__title">Link a TV</h1>
-              <p className="link__subtitle">
+              <h1>Link a TV</h1>
+              <p>
                 Enter the code shown on your TV to sign it in as {user?.name ?? 'you'}.
               </p>
 
               <input
-                className="link__input"
                 value={code}
                 onChange={e => setCode(formatCode(e.target.value))}
                 placeholder="ABCD-1234"
@@ -110,10 +105,10 @@ export default function Link() {
               />
 
               {isHouseholdOwner && household && (
-                <fieldset className="link__grant">
-                  <legend className="link__grant-legend">Which profiles can use this TV?</legend>
+                <fieldset>
+                  <legend>Which profiles can use this TV?</legend>
                   {household.members.map(m => (
-                    <label key={m.id} className="link__grant-row">
+                    <label key={m.id}>
                       <input
                         type="checkbox"
                         checked={granted.has(m.id)}
@@ -129,19 +124,17 @@ export default function Link() {
                 </fieldset>
               )}
 
-              {error && <div className="link__error">{error}</div>}
+              {error && <p role="alert">{error}</p>}
 
               <button
-                className="link__submit"
                 disabled={busy || code.replace('-', '').length < 8}
                 onClick={approve}
               >
-                {busy ? 'Linking…' : <>Link device <Icon name="chevron-right" size={14} color="#000" /></>}
+                {busy ? 'Linking…' : <>Link device <Icon name="chevron-right" size={14} /></>}
               </button>
             </>
           )}
         </div>
-      </div>
-    </div>
+    </main>
   )
 }

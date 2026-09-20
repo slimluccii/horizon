@@ -191,7 +191,7 @@ function seedSession(
     plan: { method: 'transcode', renditions: [{ profile: { name: '1080p' } }] },
     selectedSubtitleTrack: null,
     audioTrackCount: 1,
-    subtitleTrackCount: 0,
+    subtitleTrackCount: 0, imageSubtitleIndexes: [],
     renditionCodecs: [],
     sessionDir: '/tmp/sess-del',
     sessionReady: true,

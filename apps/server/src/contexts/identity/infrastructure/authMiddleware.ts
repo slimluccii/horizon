@@ -6,13 +6,12 @@ import type { UserRepo } from './persistence/userRepo.ts'
 /** Name of the httpOnly session cookie set on web logins. */
 export const SESSION_COOKIE = 'hz_session'
 
-/** Is this request running over TLS (so the cookie may be marked Secure)? We
- *  trust X-Forwarded-Proto because the documented deployment is behind a TLS
- *  reverse proxy; a direct-TLS listener also reports `req.protocol === 'https'`. */
+/** Is this request running over TLS (so the cookie may be marked Secure)?
+ *  `req.protocol` reflects X-Forwarded-Proto only when the server was built
+ *  with `trustProxy` (HORIZON_TRUST_PROXY=1) — Fastify does the header
+ *  handling, so an untrusted direct client cannot spoof the flag. A
+ *  direct-TLS listener also reports `req.protocol === 'https'`. */
 export function isHttps(req: FastifyRequest): boolean {
-  const xfp = req.headers['x-forwarded-proto']
-  const proto = Array.isArray(xfp) ? xfp[0] : xfp
-  if (proto) return proto.split(',')[0].trim() === 'https'
   return req.protocol === 'https'
 }
 

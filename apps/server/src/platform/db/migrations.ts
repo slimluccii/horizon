@@ -220,10 +220,20 @@ CREATE TABLE invites (
 );
 `
 
+// Source video bitrate (bits/s) from ffprobe. Needed by playback decisions:
+// without it the "does the client's bandwidth fit the source" check is
+// vacuous (unknown = 0 = always fits), so remuxes direct-play over links that
+// can't carry them. Rows scanned before this migration hold NULL until their
+// next scan; consumers fall back to size/duration as an estimate.
+const V4_SQL = `
+ALTER TABLE media_items ADD COLUMN video_bitrate INTEGER;
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
   { version: 3, sql: V3_SQL },
+  { version: 4, sql: V4_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

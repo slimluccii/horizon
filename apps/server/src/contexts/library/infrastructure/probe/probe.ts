@@ -30,7 +30,13 @@ export interface SubtitleTrack {
   codec: string
   language: string
   forced: boolean
+  /** Text-based: extractable to WebVTT. Image-based (PGS/VobSub) tracks are
+   *  false and play via burn-in transcode instead. */
   embeddable: boolean
+  /** True for sidecar subtitle files found next to the media file. */
+  external?: boolean
+  /** Sidecar file name (basename only) for external tracks. */
+  externalFileName?: string
 }
 
 export interface HdrInfo {

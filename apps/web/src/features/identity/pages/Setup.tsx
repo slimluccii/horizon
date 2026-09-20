@@ -5,8 +5,6 @@ import { useActiveUser } from '../hooks/useActiveUser.ts'
 import HorizonMark from '../../../shared/ui/chrome/HorizonMark.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
 import { FolderBrowser, type LibraryTag } from '../../../shared/ui/FolderBrowser/FolderBrowser.tsx'
-import './Setup.css'
-
 const AVATARS = ['🐱', '🐶', '🦊', '🐼', '🐸', '🚀', '🎮', '🎬', '🎨', '👤']
 
 type StepId = 'owner' | 'folders' | 'tmdb' | 'finish'
@@ -156,34 +154,23 @@ export default function Setup() {
   const totalFolders = moviesRoots.length + showsRoots.length
 
   return (
-    <div className="setup">
-      <div className="setup__bg" />
-      <div className="setup__content">
-        <HorizonMark size={56} withText />
+    <main>
+      <HorizonMark size={56} withText />
 
-        <div className="setup__card">
-          <div className="setup__steps" aria-hidden="true">
-            {STEPS.map((s, i) => (
-              <span
-                key={s}
-                className={`setup__step-dot ${i === stepIndex ? 'is-active' : ''} ${i < stepIndex ? 'is-done' : ''}`}
-              />
-            ))}
-          </div>
+        <div>
+          <p>Step {stepIndex + 1} of {STEPS.length}</p>
 
           {step === 'owner' && (
             <>
-              <div className="eyebrow">First run · step 1 of 4</div>
-              <h1 className="setup__title">Welcome to Horizon</h1>
-              <p className="setup__subtitle">Create the owner profile and set its password.</p>
-              <p className="setup__subtitle">
+                            <h1>Welcome to Horizon</h1>
+              <p>Create the owner profile and set its password.</p>
+              <p>
                 You'll be the household owner — the account that can never be removed.
               </p>
 
-              <label className="setup__field">
-                <span className="setup__label">Name</span>
+              <label>
+                <span>Name</span>
                 <input
-                  className="setup__input"
                   value={name}
                   onChange={e => setName(e.target.value)}
                   maxLength={40}
@@ -192,26 +179,23 @@ export default function Setup() {
                 />
               </label>
 
-              <div className="setup__field">
-                <span className="setup__label">Avatar</span>
-                <div className="setup__avatars">
-                  {AVATARS.map(a => (
-                    <button
-                      key={a}
-                      className={`setup__avatar ${avatar === a ? 'is-selected' : ''}`}
-                      onClick={() => setAvatar(a === avatar ? null : a)}
-                      type="button"
-                    >
-                      {a}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <fieldset>
+                <legend>Avatar</legend>
+                {AVATARS.map(a => (
+                  <button
+                    key={a}
+                    aria-pressed={a === avatar}
+                    onClick={() => setAvatar(a === avatar ? null : a)}
+                    type="button"
+                  >
+                    {a}
+                  </button>
+                ))}
+              </fieldset>
 
-              <label className="setup__field">
-                <span className="setup__label">Password</span>
+              <label>
+                <span>Password</span>
                 <input
-                  className="setup__input"
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -220,10 +204,9 @@ export default function Setup() {
                 />
               </label>
 
-              <label className="setup__field">
-                <span className="setup__label">Confirm password</span>
+              <label>
+                <span>Confirm password</span>
                 <input
-                  className="setup__input"
                   type="password"
                   value={confirm}
                   onChange={e => setConfirm(e.target.value)}
@@ -233,42 +216,40 @@ export default function Setup() {
                 />
               </label>
 
-              {error && <div className="setup__error">{error}</div>}
+              {error && <p role="alert">{error}</p>}
 
               <button
-                className="setup__submit"
                 disabled={busy || !name.trim() || !password || !confirm}
                 onClick={createOwner}
               >
-                {busy ? 'Creating…' : <>Continue <Icon name="chevron-right" size={14} color="#000" /></>}
+                {busy ? 'Creating…' : <>Continue <Icon name="chevron-right" size={14} /></>}
               </button>
             </>
           )}
 
           {step === 'folders' && (
             <>
-              <div className="eyebrow">First run · step 2 of 4</div>
-              <h1 className="setup__title">Add your library</h1>
-              <p className="setup__subtitle">
+              <div>First run · step 2 of 4</div>
+              <h1>Add your library</h1>
+              <p>
                 Browse the mounted media and tag each folder as Movies or Shows. You can add more later in
                 Settings.
               </p>
 
-              <div className="setup__field">
+              <div>
                 <FolderBrowser browse={path => horizon.library.browse(path)} onPick={addFolder} />
               </div>
 
               {totalFolders > 0 && (
-                <div className="setup__field">
-                  <span className="setup__label">Selected folders</span>
-                  <ul className="setup__roots">
+                <div>
+                  <span>Selected folders</span>
+                  <ul>
                     {moviesRoots.map(p => (
-                      <li key={`m:${p}`} className="setup__root">
-                        <span className="setup__root-kind">Movies</span>
-                        <span className="setup__root-path" title={p}>{p}</span>
+                      <li key={`m:${p}`}>
+                        <span>Movies</span>
+                        <span title={p}>{p}</span>
                         <button
                           type="button"
-                          className="setup__root-remove"
                           aria-label={`Remove ${p}`}
                           onClick={() => removeFolder(p, 'movies')}
                         >
@@ -277,12 +258,11 @@ export default function Setup() {
                       </li>
                     ))}
                     {showsRoots.map(p => (
-                      <li key={`s:${p}`} className="setup__root">
-                        <span className="setup__root-kind">Shows</span>
-                        <span className="setup__root-path" title={p}>{p}</span>
+                      <li key={`s:${p}`}>
+                        <span>Shows</span>
+                        <span title={p}>{p}</span>
                         <button
                           type="button"
-                          className="setup__root-remove"
                           aria-label={`Remove ${p}`}
                           onClick={() => removeFolder(p, 'shows')}
                         >
@@ -294,16 +274,15 @@ export default function Setup() {
                 </div>
               )}
 
-              {error && <div className="setup__error">{error}</div>}
+              {error && <p role="alert">{error}</p>}
 
               <button
-                className="setup__submit"
                 disabled={busy}
                 onClick={saveFoldersAndContinue}
               >
-                {busy ? 'Saving…' : <>Continue <Icon name="chevron-right" size={14} color="#000" /></>}
+                {busy ? 'Saving…' : <>Continue <Icon name="chevron-right" size={14} /></>}
               </button>
-              <button className="setup__skip" type="button" disabled={busy} onClick={() => goTo('tmdb')}>
+              <button type="button" disabled={busy} onClick={() => goTo('tmdb')}>
                 Skip — set up later
               </button>
             </>
@@ -311,17 +290,16 @@ export default function Setup() {
 
           {step === 'tmdb' && (
             <>
-              <div className="eyebrow">First run · step 3 of 4</div>
-              <h1 className="setup__title">Artwork &amp; metadata</h1>
-              <p className="setup__subtitle">
+              <div>First run · step 3 of 4</div>
+              <h1>Artwork &amp; metadata</h1>
+              <p>
                 Add a TMDB API read token to fetch posters, descriptions and cast. Optional — you can add it
                 anytime in Settings.
               </p>
 
-              <label className="setup__field">
-                <span className="setup__label">TMDB token</span>
+              <label>
+                <span>TMDB token</span>
                 <input
-                  className="setup__input"
                   value={tmdbToken}
                   onChange={e => setTmdbToken(e.target.value)}
                   placeholder="eyJhbGciOiJ…"
@@ -330,16 +308,15 @@ export default function Setup() {
                 />
               </label>
 
-              {error && <div className="setup__error">{error}</div>}
+              {error && <p role="alert">{error}</p>}
 
               <button
-                className="setup__submit"
                 disabled={busy}
                 onClick={saveTokenAndContinue}
               >
-                {busy ? 'Saving…' : <>Continue <Icon name="chevron-right" size={14} color="#000" /></>}
+                {busy ? 'Saving…' : <>Continue <Icon name="chevron-right" size={14} /></>}
               </button>
-              <button className="setup__skip" type="button" disabled={busy} onClick={() => goTo('finish')}>
+              <button type="button" disabled={busy} onClick={() => goTo('finish')}>
                 Skip — no metadata
               </button>
             </>
@@ -347,35 +324,34 @@ export default function Setup() {
 
           {step === 'finish' && (
             <>
-              <div className="eyebrow">First run · step 4 of 4</div>
-              <h1 className="setup__title">You're all set</h1>
+              <div>First run · step 4 of 4</div>
+              <h1>You're all set</h1>
               {totalFolders > 0 ? (
-                <p className="setup__subtitle">
+                <p>
                   Horizon will scan {totalFolders} folder{totalFolders === 1 ? '' : 's'} now. Your library
                   fills in as titles are indexed.
                 </p>
               ) : (
-                <p className="setup__subtitle">
+                <p>
                   No library folders yet — you'll land in an empty library. Add folders anytime from Settings.
                 </p>
               )}
               {!ownerCreated && (
-                <p className="setup__subtitle">
+                <p>
                   You skipped creating a profile. You can create one from the profile picker.
                 </p>
               )}
 
-              {error && <div className="setup__error">{error}</div>}
+              {error && <p role="alert">{error}</p>}
 
-              <button className="setup__submit" disabled={busy} onClick={finish}>
-                {busy ? 'Finishing…' : <>Enter Horizon <Icon name="chevron-right" size={14} color="#000" /></>}
+              <button disabled={busy} onClick={finish}>
+                {busy ? 'Finishing…' : <>Enter Horizon <Icon name="chevron-right" size={14} /></>}
               </button>
             </>
           )}
         </div>
 
-        <div className="setup__footer">horizon.local · self-hosted media</div>
-      </div>
-    </div>
+        <p>horizon.local · self-hosted media</p>
+    </main>
   )
 }

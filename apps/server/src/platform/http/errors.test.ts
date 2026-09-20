@@ -18,6 +18,7 @@ const EXPECTED_CODES = [
   'account-locked',
   'audio-track-invalid',
   'caller-forbidden',
+  'disk-full',
   'fetch-failed',
   'ffmpeg-spawn-failed',
   'grant-forbidden',

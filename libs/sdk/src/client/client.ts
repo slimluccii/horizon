@@ -1,5 +1,5 @@
 // sdk/src/client/client.ts
-import type { SessionInfo } from '../playback/session.ts'
+import type { SessionInfo, ActiveSessionSummary } from '../playback/session.ts'
 import type { ClientCapabilities } from '../playback/capabilities.ts'
 import type { MediaItem, ShowSummary, SeasonSummary } from '../library/mediaItem.ts'
 import type { User, AuthSession, SetPasswordResult, PairStartResult, PairPollResult } from '../identity/user.ts'
@@ -9,6 +9,7 @@ import type { Preferences } from '../identity/preferences.ts'
 import type { CollectionSummary } from '../library/collections.ts'
 import { ErrorCodes } from '../shared/errors.ts'
 import { detectCapabilities } from '../playback/capabilities.ts'
+import { effectiveMaxBitrate } from '../playback/bandwidth.ts'
 import { PlaybackSession, type PlaybackSessionOptions } from '../playback/session.ts'
 
 export interface HorizonClientOptions {
@@ -148,6 +149,10 @@ export class HorizonClient {
         path === undefined ? '/library/browse' : `/library/browse?path=${encodeURIComponent(path)}`,
       ),
     listMovies: () => this.fetch<MediaItem[]>('/library/movies'),
+    getMedia: (id: string) => this.fetch<MediaItem>(`/library/media/${id}`),
+    search: (query: string) => this.fetch<MediaItem[]>(`/library/search?q=${encodeURIComponent(query)}`),
+    getNextEpisode: (id: string) =>
+      this.fetch<{ next: MediaItem | null }>(`/library/media/${id}/next`).then(r => r.next),
     listCollections: () => this.fetch<CollectionSummary[]>('/library/movies/collections'),
     getCollection: (id: string) => this.fetch<CollectionSummary>(`/library/movies/collections/${id}`),
     listShows: () => this.fetch<ShowSummary[]>('/library/shows'),
@@ -188,6 +193,11 @@ export class HorizonClient {
       this.fetch<void>(`/users/${id}`, { method: 'DELETE' }),
     /** Server owner/admin: profiles with no household (orphans). */
     orphans: () => this.fetch<User[]>('/users/orphans'),
+  }
+
+  readonly sessions = {
+    /** Owner/admin: every live playback session (the now-playing view). */
+    listActive: () => this.fetch<ActiveSessionSummary[]>('/sessions'),
   }
 
   readonly households = {
@@ -316,6 +326,10 @@ export class HorizonClient {
 
   async play(mediaId: string, opts: PlayOptions): Promise<PlaybackSession> {
     const caps = detectCapabilities(opts.capabilities)
+    // Never claim unlimited bandwidth blindly: combine the caller's cap (user
+    // preference) with the last measured estimate so the server can pick a
+    // realistic initial method/quality. 0 still means "no data — unlimited".
+    caps.maxBitrate = effectiveMaxBitrate(caps.maxBitrate)
     const sessionInfo = await this.fetch<SessionInfo>('/sessions', {
       method: 'POST',
       body: JSON.stringify({

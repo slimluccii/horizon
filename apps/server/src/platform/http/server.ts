@@ -54,7 +54,10 @@ export async function buildServer(
   identity: Identity,
   db?: DatabaseSync,
 ) {
-  const app = Fastify({ logger: true })
+  // trustProxy makes Fastify derive req.ip / req.protocol from X-Forwarded-*
+  // headers. Only enable behind a reverse proxy you control — with it off, a
+  // direct client could spoof its IP past the login rate limits.
+  const app = Fastify({ logger: true, trustProxy: cfg.trustProxy })
 
   await app.register(fastifyCors, {
     // '*' → reflect any origin; a non-empty list → allow exactly those;
@@ -93,7 +96,7 @@ export async function buildServer(
 
     registerHealth(api, hwAccel, identity)
     registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
-    registerSessions(api, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo)
+    registerSessions(api, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo, repos.mediaRepo)
     registerPlaylists(api, sessions, repos.userRepo)
     registerSegments(api, hwAccel, sessions, repos.mediaRepo, repos.userRepo)
     registerMetadata(api, cfg)

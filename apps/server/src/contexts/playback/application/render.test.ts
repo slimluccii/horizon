@@ -22,12 +22,13 @@ const transcodePlan: PlaybackPlan = {
   needsToneMap: false,
   toneMap: { operator: 'hable', postCorrection: true },
   renditions: [
-    { profile: { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080 }, videoCodec: 'avc1.640028' },
-    { profile: { name: '720p',  videoBitrate: 4000, audioBitrate: 128, width: 1280, height: 720 },  videoCodec: 'avc1.640028' },
+    { profile: { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080, h264Level: '4.2' }, videoCodec: 'avc1.640028' },
+    { profile: { name: '720p', videoBitrate: 4000, audioBitrate: 128, width: 1280, height: 720, h264Level: '4.0' },  videoCodec: 'avc1.640028' },
   ],
   audioTrackIndex: 0,
   audioStrategy: 'aac',
   videoStrategy: 'transcode',
+  burnInSubtitleIndex: null,
 }
 
 const directStreamPlan: PlaybackPlan = {
@@ -36,6 +37,7 @@ const directStreamPlan: PlaybackPlan = {
   renditions: [],
   audioStrategy: 'copy',
   videoStrategy: 'copy',
+  burnInSubtitleIndex: null,
 }
 
 const partialPlan: PlaybackPlan = {
@@ -43,6 +45,7 @@ const partialPlan: PlaybackPlan = {
   method: 'partial-transcode',
   renditions: [transcodePlan.renditions[1]],
   videoStrategy: 'copy',
+  burnInSubtitleIndex: null,
 }
 
 const tonemapPlan: PlaybackPlan = {
@@ -50,11 +53,12 @@ const tonemapPlan: PlaybackPlan = {
   needsToneMap: true,
   toneMap: { operator: 'hable', postCorrection: true },
   renditions: [
-    { profile: { name: '720p', videoBitrate: 4000, audioBitrate: 160, width: 1280, height: 720 }, videoCodec: 'avc1.640028' },
+    { profile: { name: '720p', videoBitrate: 4000, audioBitrate: 160, width: 1280, height: 720, h264Level: '4.0' }, videoCodec: 'avc1.640028' },
   ],
   audioTrackIndex: 0,
   audioStrategy: 'aac',
   videoStrategy: 'transcode',
+  burnInSubtitleIndex: null,
 }
 
 const directPlayPlan: PlaybackPlan = {
@@ -65,6 +69,7 @@ const directPlayPlan: PlaybackPlan = {
   audioTrackIndex: 0,
   audioStrategy: 'copy',
   videoStrategy: 'copy',
+  burnInSubtitleIndex: null,
 }
 
 describe('renderArgs', () => {

@@ -16,6 +16,7 @@ export {
 
 // Session management.
 export { createSessionManager, type SessionManager } from './application/manager.ts'
+export { sweepSessionDirs } from './infrastructure/ffmpeg/ffmpeg.ts'
 
 // Playback orchestration.
 export {

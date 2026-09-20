@@ -2,8 +2,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { flushSync } from 'react-dom'
 import { horizon } from '../../../shared/horizon.ts'
 import type { HouseholdView } from '@horizon/sdk'
-import './HouseholdPanel.css'
-
 interface Props {
   viewerId: string
   viewerRole: 'owner' | 'admin' | 'member'
@@ -63,54 +61,54 @@ export default function HouseholdPanel({ viewerId, viewerRole }: Props) {
   }
 
   if (loadError) return (
-    <section className="settings__section">
-      <p className="settings__section-title">Household</p>
-      <p className="settings__profile-error">Couldn’t load your household.</p>
+    <section>
+      <p>Household</p>
+      <p>Couldn’t load your household.</p>
     </section>
   )
   if (!household) return (
-    <section className="settings__section">
-      <p className="settings__section-title">Household</p>
-      <p className="hh__muted">Loading…</p>
+    <section>
+      <p>Household</p>
+      <p>Loading…</p>
     </section>
   )
 
   return (
-    <section className="settings__section">
-      <p className="settings__section-title">Household</p>
+    <section>
+      <p>Household</p>
 
-      <div className="hh__name-row">
+      <div>
         {renaming ? (
           <>
-            <input className="settings__input" value={nameDraft} onChange={e => setNameDraft(e.target.value)} aria-label="Household name" />
-            <button className="settings__token-replace" disabled={busy} onClick={rename}>Save</button>
-            <button className="settings__token-cancel" onClick={() => setRenaming(false)}>Cancel</button>
+            <input value={nameDraft} onChange={e => setNameDraft(e.target.value)} aria-label="Household name" />
+            <button disabled={busy} onClick={rename}>Save</button>
+            <button onClick={() => setRenaming(false)}>Cancel</button>
           </>
         ) : (
           <>
-            <span className="hh__name">{household.name}</span>
+            <span>{household.name}</span>
             {isHouseholdOwner && (
-              <button className="settings__token-replace" onClick={() => { setNameDraft(household.name); setRenaming(true) }}>Rename</button>
+              <button onClick={() => { setNameDraft(household.name); setRenaming(true) }}>Rename</button>
             )}
           </>
         )}
       </div>
 
-      <ul className="hh__members">
+      <ul>
         {household.members.map(m => {
           const removable = isHouseholdOwner && m.id !== viewerId && m.id !== household.ownerUserId
           return (
-            <li key={m.id} className="hh__member">
-              <span className="hh__member-name">{m.name}</span>
-              <span className="hh__member-role">{m.role}</span>
+            <li key={m.id}>
+              <span>{m.name}</span>
+              <span>{m.role}</span>
               {removable && (
                 confirmRemove === m.id ? (
-                  <span className="hh__confirm">
-                    <button className="settings__token-replace" disabled={busy} onClick={() => remove(m.id)}>Confirm</button>
-                    <button className="settings__token-cancel" onClick={() => setConfirmRemove(null)}>Cancel</button>
+                  <span>
+                    <button disabled={busy} onClick={() => remove(m.id)}>Confirm</button>
+                    <button onClick={() => setConfirmRemove(null)}>Cancel</button>
                   </span>
                 ) : (
-                  <button className="settings__token-cancel" aria-label={`Remove ${m.name}`} onClick={() => flushSync(() => setConfirmRemove(m.id))}>Remove</button>
+                  <button aria-label={`Remove ${m.name}`} onClick={() => flushSync(() => setConfirmRemove(m.id))}>Remove</button>
                 )
               )}
             </li>
@@ -118,23 +116,23 @@ export default function HouseholdPanel({ viewerId, viewerRole }: Props) {
         })}
       </ul>
 
-      <div className="hh__invites">
+      <div>
         {isHouseholdOwner && (
-          <button className="settings__token-replace" disabled={busy} onClick={() => generate('join')}>Invite a member</button>
+          <button disabled={busy} onClick={() => generate('join')}>Invite a member</button>
         )}
         {isServerAdmin && (
-          <button className="settings__token-replace" disabled={busy} onClick={() => generate('new_household')}>Invite a new household</button>
+          <button disabled={busy} onClick={() => generate('new_household')}>Invite a new household</button>
         )}
         {link && (
-          <div className="hh__link">
+          <div>
             <code>{link}</code>
-            <button className="settings__token-replace" onClick={() => navigator.clipboard?.writeText(link)}>Copy</button>
-            <span className="hh__muted">Expires in 24h</span>
+            <button onClick={() => navigator.clipboard?.writeText(link)}>Copy</button>
+            <span>Expires in 24h</span>
           </div>
         )}
       </div>
 
-      {actionError && <p className="settings__profile-error">{actionError}</p>}
+      {actionError && <p>{actionError}</p>}
     </section>
   )
 }

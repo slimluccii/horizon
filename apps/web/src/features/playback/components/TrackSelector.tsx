@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import type { AudioTrack, SubtitleTrack, QualityProfile } from '@horizon/sdk'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
-import './TrackSelector.css'
-
 interface QualityOption {
   label: string
   bitrate: number | 'auto'
@@ -38,8 +36,14 @@ function audioLabel(t: AudioTrack): string {
 
 function subtitleLabel(t: SubtitleTrack): string {
   const lang = t.language && t.language !== 'und' ? t.language.toUpperCase() : 'UND'
-  const tag = t.forced ? ' (forced)' : ''
-  return `${lang}${tag}`
+  const tags = [
+    t.forced ? 'forced' : null,
+    t.external ? 'external' : null,
+    // Image-based (PGS/VobSub): server burns it into the video — selecting it
+    // switches the session to transcode.
+    !t.embeddable && !t.external ? 'burned in' : null,
+  ].filter(Boolean)
+  return tags.length ? `${lang} (${tags.join(', ')})` : lang
 }
 
 type OpenMenu = 'audio' | 'subtitle' | 'quality' | null
@@ -60,17 +64,17 @@ export default function TrackSelector({
   const currentSub = selectedSubtitle == null ? null : subtitleTracks.find(t => t.index === selectedSubtitle)
 
   return (
-    <div className="ts">
+    <div>
       {/* Quality */}
       {isTranscode && (
-        <div className="ts__group">
-          <button className="ts__btn" onClick={() => toggle('quality')}>
+        <div>
+          <button aria-expanded={open === 'quality'} onClick={() => toggle('quality')}>
             <Icon name="settings-slider" size={14} /> {currentQualityLabel}
-            <Icon name="chevron-down" size={12} color="var(--muted-hi)" />
+            <Icon name="chevron-down" size={12} />
           </button>
           {open === 'quality' && (
-            <div className="ts__menu">
-              <div className="ts__menu-title">Quality</div>
+            <div>
+              <p>Quality</p>
               {QUALITY_OPTIONS.map(opt => {
                 const active = opt.bitrate === 'auto'
                   ? false
@@ -78,11 +82,11 @@ export default function TrackSelector({
                 return (
                   <button
                     key={opt.label}
-                    className={`ts__item ${active ? 'is-active' : ''}`}
+                    aria-pressed={active}
                     onClick={() => { onQualityChange(opt.bitrate); setOpen(null) }}
                   >
                     {opt.label}
-                    {active && <Icon name="check" size={12} color="var(--accent)" />}
+                    {active && <Icon name="check" size={12} />}
                   </button>
                 )
               })}
@@ -93,22 +97,22 @@ export default function TrackSelector({
 
       {/* Audio */}
       {audioTracks.length > 1 && (
-        <div className="ts__group">
-          <button className="ts__btn" onClick={() => toggle('audio')}>
+        <div>
+          <button aria-expanded={open === 'audio'} onClick={() => toggle('audio')}>
             <Icon name="audio" size={14} /> {currentAudio ? (currentAudio.language || 'Audio').toUpperCase() : 'Audio'}
-            <Icon name="chevron-down" size={12} color="var(--muted-hi)" />
+            <Icon name="chevron-down" size={12} />
           </button>
           {open === 'audio' && (
-            <div className="ts__menu">
-              <div className="ts__menu-title">Audio track</div>
+            <div>
+              <p>Audio track</p>
               {audioTracks.map(t => (
                 <button
                   key={t.index}
-                  className={`ts__item ${t.index === selectedAudio ? 'is-active' : ''}`}
+                  aria-pressed={t.index === selectedAudio}
                   onClick={() => { onAudioChange(t.index); setOpen(null) }}
                 >
                   {audioLabel(t)}
-                  {t.index === selectedAudio && <Icon name="check" size={12} color="var(--accent)" />}
+                  {t.index === selectedAudio && <Icon name="check" size={12} />}
                 </button>
               ))}
             </div>
@@ -118,29 +122,29 @@ export default function TrackSelector({
 
       {/* Subtitles */}
       {subtitleTracks.length > 0 && (
-        <div className="ts__group">
-          <button className="ts__btn" onClick={() => toggle('subtitle')}>
+        <div>
+          <button aria-expanded={open === 'subtitle'} onClick={() => toggle('subtitle')}>
             <Icon name="subtitle" size={14} /> {currentSub ? (currentSub.language || 'On').toUpperCase() : 'Off'}
-            <Icon name="chevron-down" size={12} color="var(--muted-hi)" />
+            <Icon name="chevron-down" size={12} />
           </button>
           {open === 'subtitle' && (
-            <div className="ts__menu">
-              <div className="ts__menu-title">Subtitles</div>
+            <div>
+              <p>Subtitles</p>
               <button
-                className={`ts__item ${selectedSubtitle == null ? 'is-active' : ''}`}
+                aria-pressed={selectedSubtitle == null}
                 onClick={() => { onSubtitleChange(null); setOpen(null) }}
               >
                 Off
-                {selectedSubtitle == null && <Icon name="check" size={12} color="var(--accent)" />}
+                {selectedSubtitle == null && <Icon name="check" size={12} />}
               </button>
-              {subtitleTracks.filter(t => t.embeddable).map(t => (
+              {subtitleTracks.map(t => (
                 <button
                   key={t.index}
-                  className={`ts__item ${t.index === selectedSubtitle ? 'is-active' : ''}`}
+                  aria-pressed={t.index === selectedSubtitle}
                   onClick={() => { onSubtitleChange(t.index); setOpen(null) }}
                 >
                   {subtitleLabel(t)}
-                  {t.index === selectedSubtitle && <Icon name="check" size={12} color="var(--accent)" />}
+                  {t.index === selectedSubtitle && <Icon name="check" size={12} />}
                 </button>
               ))}
             </div>

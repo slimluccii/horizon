@@ -11,7 +11,7 @@ import type { HwAccel } from '../domain/hwaccel.ts'
 
 const hwAccel = { name: 'cpu' } as unknown as HwAccel
 
-const sampleProfile = { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080 }
+const sampleProfile = { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080, h264Level: '4.2' }
 
 function fakePlan(overrides: Partial<import('../domain/plan.ts').PlaybackPlan> = {}): import('../domain/plan.ts').PlaybackPlan {
   return {
@@ -22,6 +22,7 @@ function fakePlan(overrides: Partial<import('../domain/plan.ts').PlaybackPlan> =
     audioTrackIndex: 0,
     audioStrategy: 'aac',
     videoStrategy: 'transcode',
+    burnInSubtitleIndex: null,
     ...overrides,
   }
 }
@@ -272,7 +273,7 @@ describe('SessionRuntime', () => {
         doRestartWithReset: vi.fn() as unknown as RestartWithResetFn,
       })
 
-      const newProfile = { name: '720p', videoBitrate: 4000, audioBitrate: 160, width: 1280, height: 720 }
+      const newProfile = { name: '720p', videoBitrate: 4000, audioBitrate: 160, width: 1280, height: 720, h264Level: '4.0' }
       const res = await runtime.changeProfile(newProfile)
       expect(res.ok).toBe(true)
       expect(session.plan.renditions).toEqual([{ profile: newProfile, videoCodec: 'avc1.640028' }])

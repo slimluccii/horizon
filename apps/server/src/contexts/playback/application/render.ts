@@ -149,8 +149,10 @@ function hlsMuxerArgs(ctx: RenderContext, renditionCount: number, varStreamMap: 
   return args
 }
 
-/** Build the filter_complex string. Scale first, then tonemap (tonemap is
- *  CPU-bound, ~quadratic in pixel count). For n=1 skip degenerate split=1. */
+/** Build the filter_complex string. Burn-in (if any) composites the image
+ *  subtitle onto the full-resolution source first, so subs scale down with the
+ *  video for every rendition. Then scale, then tonemap (tonemap is CPU-bound,
+ *  ~quadratic in pixel count). For n=1 skip degenerate split=1. */
 function filterGraph(plan: PlaybackPlan, _hwAccel: HwAccel): string {
   const profiles = plan.renditions.map(r => r.profile)
   const n = profiles.length
@@ -159,17 +161,26 @@ function filterGraph(plan: PlaybackPlan, _hwAccel: HwAccel): string {
 
   const toneMapPrefix = plan.needsToneMap ? buildToneMapPrefix(plan.toneMap) : ''
 
+  // Source label for the scale/tonemap chain: raw video, or video with the
+  // image subtitle stream composited on top (PGS/VobSub burn-in).
+  let sourceLabel = '[0:v]'
+  let burnNode = ''
+  if (plan.burnInSubtitleIndex != null) {
+    burnNode = `[0:v][0:s:${plan.burnInSubtitleIndex}]overlay[burned];`
+    sourceLabel = '[burned]'
+  }
+
   if (n === 1) {
     const p = profiles[0]
     if (plan.needsToneMap) {
       // toneMapPrefix has trailing `,` by contract; strip before label.
-      return `[0:v]${scaleChain(p.width, p.height)},${toneMapPrefix.replace(/,$/, '')}[sv0]`
+      return `${burnNode}${sourceLabel}${scaleChain(p.width, p.height)},${toneMapPrefix.replace(/,$/, '')}[sv0]`
     }
-    return `[0:v]${scaleChain(p.width, p.height)}[sv0]`
+    return `${burnNode}${sourceLabel}${scaleChain(p.width, p.height)}[sv0]`
   }
   // Multi-rendition: tonemap once, split, scale per rendition.
   const splitLabels = profiles.map((_, i) => `[tv${i}]`).join('')
-  const splitNode = `[0:v]${toneMapPrefix}split=${n}${splitLabels}`
+  const splitNode = `${burnNode}${sourceLabel}${toneMapPrefix}split=${n}${splitLabels}`
   const scaleNodes = profiles.map((p, i) => `[tv${i}]${scaleChain(p.width, p.height)}[sv${i}]`).join(';')
   return `${splitNode};${scaleNodes}`
 }
@@ -193,7 +204,8 @@ function codecArgs(rendition: Rendition, i: number, hwAccel: HwAccel): string[] 
     `-colorspace:v:${i}`, 'bt709',
     `-color_range:v:${i}`, 'tv',
     `-profile:v:${i}`, 'high',
-    `-level:v:${i}`, '4.0',
+    // Per-profile level: 4.0 can't legally carry 1080p60 or 4K — see profiles.ts.
+    `-level:v:${i}`, p.h264Level,
     `-g:v:${i}`, String(SEGMENT_DURATION_SEC * 24),
     `-force_key_frames:v:${i}`, `expr:gte(t,n_forced*${SEGMENT_DURATION_SEC})`,
     `-sc_threshold:v:${i}`, '0',

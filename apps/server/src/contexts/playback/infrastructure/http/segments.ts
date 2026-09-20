@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -47,11 +48,29 @@ export function requireReconnectToken(
   const headerToken = Array.isArray(provided) ? provided[0] : provided
   const queryToken = (req.query as { token?: string } | undefined)?.token
   const token = headerToken ?? queryToken
-  if (token !== session.reconnectToken) {
+  if (typeof token !== 'string' || !timingSafeStringEqual(token, session.reconnectToken)) {
     badRequest(reply, ErrorCodes.INVALID_RECONNECT_TOKEN, 'Invalid reconnect token')
     return false
   }
   return true
+}
+
+/** Constant-time string comparison. Hash both sides first so differing lengths
+ *  neither throw (timingSafeEqual requires equal length) nor leak length. */
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const ha = crypto.createHash('sha256').update(a).digest()
+  const hb = crypto.createHash('sha256').update(b).digest()
+  return crypto.timingSafeEqual(ha, hb)
+}
+
+/** Content-Type for the direct-play byte stream, from the ffprobe container
+ *  string. Direct-play only ever serves the source file as-is. */
+function directPlayContentType(container: string | undefined): string {
+  if (!container) return 'application/octet-stream'
+  if (container.includes('matroska')) return 'video/x-matroska'
+  if (container.includes('webm')) return 'video/webm'
+  if (container.includes('mp4') || container.includes('mov')) return 'video/mp4'
+  return 'application/octet-stream'
 }
 
 export function registerSegments(
@@ -129,6 +148,7 @@ export function registerSegments(
     }
 
     const { size } = statSync(session.filePath)
+    const contentType = directPlayContentType(media.getById(session.mediaId)?.container ?? undefined)
     const range = req.headers.range
     if (range) {
       const [startStr, endStr] = range.replace('bytes=', '').split('-')
@@ -141,10 +161,10 @@ export function registerSegments(
         .header('Content-Range', `bytes ${start}-${end}/${size}`)
         .header('Accept-Ranges', 'bytes')
         .header('Content-Length', end - start + 1)
-        .header('Content-Type', 'video/x-matroska')
+        .header('Content-Type', contentType)
       return reply.send(createReadStream(session.filePath, { start, end }))
     }
-    reply.header('Content-Type', 'video/x-matroska').header('Content-Length', size)
+    reply.header('Content-Type', contentType).header('Content-Length', size)
     return reply.send(createReadStream(session.filePath))
   })
 

@@ -20,6 +20,18 @@ export interface Session {
   /** Number of subtitle tracks the source media exposes. Stamped at create.
    *  Bounds-checks mid-session subtitle switches over the WS. */
   subtitleTrackCount: number
+  /** Indexes of image-based (PGS/VobSub) subtitle tracks. Stamped at create.
+   *  A mid-session switch to one of these needs a burn-in ffmpeg restart
+   *  rather than a client-side VTT swap. */
+  imageSubtitleIndexes: number[]
+  /** Source video bitrate in kbps, stamped at create from the probe. The
+   *  bandwidth-demote check compares client reports against this. */
+  sourceVideoKbps?: number
+  /** Rebuild the plan for a lower client bandwidth ceiling (kbps). Assigned by
+   *  the orchestrator (it holds the probe + capabilities); the WS layer calls
+   *  it to demote a copy-video session to transcode when measured bandwidth
+   *  can't sustain the source bitrate. */
+  rebuildPlanForBitrate?: (maxBitrateKbps: number) => import('./plan.ts').PlaybackPlan
   /** Codec strings for each rendition, written by spawnFfmpeg from the
    *  rendered args. Used by the master playlist + WS notify. */
   renditionCodecs: string[]

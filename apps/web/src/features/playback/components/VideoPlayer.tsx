@@ -200,7 +200,6 @@ export default function VideoPlayer({
       ref={videoRef}
       controls
       crossOrigin="anonymous"
-      style={{ width: '100%', height: '100%', background: '#000' }}
       playsInline
     >
       {subtitle && (

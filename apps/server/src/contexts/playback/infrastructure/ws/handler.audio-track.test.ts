@@ -21,7 +21,7 @@ function fakeSession(overrides: Partial<Session> = {}): { session: Session; sent
     },
     selectedSubtitleTrack: null,
     audioTrackCount: 2,
-    subtitleTrackCount: 0,
+    subtitleTrackCount: 0, imageSubtitleIndexes: [],
     renditionCodecs: [],
     sessionDir: '/x',
     sessionReady: true,

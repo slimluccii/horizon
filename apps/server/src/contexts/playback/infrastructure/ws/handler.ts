@@ -73,6 +73,49 @@ function handleTransition(
 // WeakMap: auto-GC'd when session object is released from manager.
 const sessionAbrState = new WeakMap<Session, AbrState>()
 
+// ---------------------------------------------------------------------------
+// Bandwidth demote — copy-video sessions (direct-stream / partial-transcode)
+// have no rendition ladder, so when the measured bandwidth can't sustain the
+// source bitrate the only fix is rebuilding the session's plan as a transcode
+// sized to what the link can carry. hls.js handles switching WITHIN a
+// transcode ladder on its own; this path only ever fires once per session.
+// (direct-play sessions stream through <video src> and send no reports —
+// their protection is the client's measured maxBitrate at session create.)
+// ---------------------------------------------------------------------------
+
+/** Consecutive under-bandwidth reports required before demoting. Reports ride
+ *  segment loads (~every few seconds), so 3 ≈ 10–15 s of sustained shortfall —
+ *  enough to skip transient dips without letting the buffer fully drain. */
+export const DEMOTE_CONSECUTIVE_REPORTS = 3
+/** Only demote when the buffer is actually at risk. A healthy buffer with a
+ *  slow link just means the client is pacing its fetches. */
+export const DEMOTE_BUFFER_SECONDS = 15
+/** Floor for the demote target so pathological estimates still produce a
+ *  playable stream (480p profile is 2000 kbps). */
+export const MIN_DEMOTE_KBPS = 1500
+
+interface DemoteState { lowCount: number; demoted: boolean }
+const sessionDemoteState = new WeakMap<Session, DemoteState>()
+
+/** Pure decision: should this report advance/trigger a demote? Exported for
+ *  tests. Returns the updated state and whether to demote now. */
+export function computeDemote(
+  report: { kbps: number; bufferSeconds: number },
+  sourceVideoKbps: number,
+  state: DemoteState,
+): { state: DemoteState; demote: boolean } {
+  if (state.demoted) return { state, demote: false }
+  const low = sourceVideoKbps > 0 &&
+    report.kbps > 0 &&
+    report.kbps < sourceVideoKbps * 1.1 &&
+    report.bufferSeconds < DEMOTE_BUFFER_SECONDS
+  const lowCount = low ? state.lowCount + 1 : 0
+  if (lowCount >= DEMOTE_CONSECUTIVE_REPORTS) {
+    return { state: { lowCount: 0, demoted: true }, demote: true }
+  }
+  return { state: { lowCount, demoted: false }, demote: false }
+}
+
 // Tracks whether a socket has completed the `hello` handshake. A freshly
 // attached socket is unauthenticated and ONLY the `hello` handler runs; every
 // other command (seek, quality-override, park, progress, …) is dropped until
@@ -125,15 +168,44 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
     })
   },
 
-  'bandwidth-report'() {
-    // Server-driven ABR is currently disabled. Each ABR-triggered restart
-    // rewrites init.mp4 with a new codec config; MSE has already cached the
-    // first init's bytes and rejects new segments with VTDecompression errors.
-    // Re-enable when we either:
-    //   • generate a stable init shared across qualities, or
-    //   • run multi-rendition encodes so the client can switch via HLS.
-    // The reports themselves are still useful as telemetry for the future
-    // implementation; we just don't act on them.
+  'bandwidth-report'(msg, { session, runtime }) {
+    if (msg.type !== 'bandwidth-report') return
+    // Within a transcode ladder, hls.js switches renditions client-side — the
+    // per-quality server restart approach is dead (each restart rewrites
+    // init.mp4 and MSE rejects the new segments). The server acts only on
+    // copy-video HLS sessions: sustained bandwidth below the source bitrate
+    // demotes the whole session to a transcode sized to the measured link.
+    const method = session.plan.method
+    if (method !== 'direct-stream' && method !== 'partial-transcode') return
+    if (!session.rebuildPlanForBitrate || !runtime) return
+
+    const prev = sessionDemoteState.get(session) ?? { lowCount: 0, demoted: false }
+    const { state, demote } = computeDemote(
+      { kbps: msg.kbps, bufferSeconds: msg.bufferSeconds },
+      session.sourceVideoKbps ?? 0,
+      prev,
+    )
+    sessionDemoteState.set(session, state)
+    if (!demote) return
+
+    const targetKbps = Math.max(Math.floor(msg.kbps * 0.8), MIN_DEMOTE_KBPS)
+    const newPlan = session.rebuildPlanForBitrate(targetKbps)
+    if (newPlan.method !== 'transcode' || newPlan.renditions.length === 0) return
+
+    const posMs = session.lastProgress?.positionMs ?? session.seekPositionMs
+    console.log(
+      `Session ${session.id}: bandwidth demote — measured ${msg.kbps} kbps < source ` +
+      `${session.sourceVideoKbps} kbps, rebuilding as transcode @ ${newPlan.renditions[0].profile.name}`,
+    )
+    runtime.applyPlanSwap(newPlan, posMs).then(res =>
+      handleTransition(session, res, 'bandwidth-demote', () =>
+        send(session, {
+          type: 'quality-changed',
+          profile: newPlan.renditions[0].profile,
+          reason: 'bandwidth',
+        }),
+      ),
+    )
   },
 
   seek(msg, { session, runtime }) {
@@ -199,9 +271,35 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
     )
   },
 
-  'subtitle-track'(msg, { session }) {
+  'subtitle-track'(msg, { session, runtime }) {
     if (msg.type !== 'subtitle-track') return
+    if (msg.index != null && (msg.index < 0 || msg.index >= session.subtitleTrackCount)) {
+      sendError(session, ErrorCodes.INVALID_INPUT, 'Subtitle track index out of range')
+      return
+    }
     session.selectedSubtitleTrack = msg.index
+
+    // Image-based tracks (PGS/VobSub) are burned into the video, so switching
+    // to/away from one changes the filter graph and needs an ffmpeg restart.
+    // Text/sidecar tracks are client-side VTT swaps — no restart.
+    const wantsBurnIn = msg.index != null && (session.imageSubtitleIndexes ?? []).includes(msg.index)
+    const hasBurnIn = session.plan.burnInSubtitleIndex != null
+    if (session.plan.method === 'transcode' && runtime && (wantsBurnIn || hasBurnIn)) {
+      const newBurnIn = wantsBurnIn ? msg.index : null
+      runtime.changeBurnInSubtitle(newBurnIn, msg.positionMs).then(res =>
+        handleTransition(session, res, 'subtitle-track', () =>
+          send(session, { type: 'track-changed', subtitleTrackIndex: msg.index, restarted: true }),
+        ),
+      )
+      return
+    }
+    if (wantsBurnIn) {
+      // Copy-based session: the advertised stream can't grow a burned-in sub
+      // mid-flight. The client recreates the session with the subtitle chosen
+      // at create (the web player does exactly that); reply as a plain change
+      // so an out-of-date client at least keeps a consistent selection.
+      console.warn(`Session ${session.id}: image subtitle selected on ${session.plan.method} session — needs session recreate`)
+    }
     send(session, { type: 'track-changed', subtitleTrackIndex: msg.index })
   },
 

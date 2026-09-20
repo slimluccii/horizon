@@ -14,7 +14,7 @@ function partial(): Omit<Session, 'id' | 'reconnectToken' | 'createdAt' | 'state
     plan: { method: 'direct' } as any,
     selectedSubtitleTrack: null,
     audioTrackCount: 1,
-    subtitleTrackCount: 0,
+    subtitleTrackCount: 0, imageSubtitleIndexes: [],
     renditionCodecs: [],
     sessionDir: '/tmp/s',
     sessionReady: false,

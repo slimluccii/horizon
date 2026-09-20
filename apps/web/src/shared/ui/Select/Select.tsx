@@ -1,11 +1,8 @@
 import { type ComponentPropsWithRef } from "react";
-import clsx from "clsx";
-import './Select.css';
-
 type Props = ComponentPropsWithRef<"select">;
 
-export const Select = ({ className, ...rest }: Props) => {
+export const Select = (props: Props) => {
   return (
-    <select className={clsx('select', className)} {...rest} />
+    <select {...props} />
   );
 };

@@ -132,6 +132,43 @@ emits ffmpeg argv. Pure function — no Session reads, no IO. See
 `direct-play | direct-stream | partial-transcode | transcode`. Drives whether
 ffmpeg spawns at all, and which rendition ladder applies.
 
+### Sidecar subtitle
+An external subtitle file (`Movie (2010).en.srt`) next to the media file.
+Discovered during Scan (`discoverSidecarSubtitles` +
+`mergeSidecarTracks`) and appended AFTER the embedded tracks so embedded
+indexes keep doubling as ffmpeg `0:s:N` positions. Marked `external: true`
+with `externalFileName` (basename only) on the wire SubtitleTrack. Converted
+per-file to WebVTT at session create. See
+[apps/server/src/contexts/library/infrastructure/fs/sidecars.ts](apps/server/src/contexts/library/infrastructure/fs/sidecars.ts).
+
+### Burn-in subtitle
+An image-based subtitle track (PGS/VobSub — `embeddable: false`,
+`external` unset) composited onto the video by ffmpeg (`overlay` before
+scale/split in the filter graph). Selecting one forces `method: 'transcode'`
+(and tone-maps HDR sources — the transcode ladder is SDR). Carried on the
+plan as `burnInSubtitleIndex`. Mid-session switches on a transcode session go
+through `SessionRuntime.changeBurnInSubtitle` (restart-with-reset + a
+`track-changed { restarted: true }` WS notify → client reloads HLS); on a
+copy-based session the web client recreates the whole session instead.
+
+### Bandwidth demote
+The server-side reaction to sustained under-bandwidth `bandwidth-report`s on a
+copy-video HLS session (direct-stream / partial-transcode): after
+`DEMOTE_CONSECUTIVE_REPORTS` low reports with a draining buffer, the session's
+plan is rebuilt as a transcode sized to the measured link
+(`Session.rebuildPlanForBitrate`, a closure stamped by the orchestrator) and
+swapped in via `SessionRuntime.applyPlanSwap`. Fires at most once per session.
+Within a transcode ladder, rendition switching is client-side (hls.js) — the
+old per-quality server-restart ABR stays dead (init.mp4 rewrites break MSE).
+Initial quality is bandwidth-aware on the client: the SDK persists the last
+measured estimate (localStorage, 24 h TTL) and folds it into
+`capabilities.maxBitrate` at session create, combined with the profile's
+`preferredQuality` cap. The bitrate fit check is real because `video_bitrate`
+is stored on media rows (v4 migration; size/duration estimate for rows
+scanned before it). See
+[apps/server/src/contexts/playback/infrastructure/ws/handler.ts](apps/server/src/contexts/playback/infrastructure/ws/handler.ts)
+(`computeDemote`).
+
 ### Profile
 A named encode target: `{ name, videoBitrate, audioBitrate, width, height }`.
 Renditions are Profiles chosen for the current Session's ladder. See
