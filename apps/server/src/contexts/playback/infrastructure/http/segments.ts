@@ -110,6 +110,8 @@ export function registerSegments(
       const m = SEGMENT_NAME_RE.exec(segReq)
       if (!m) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid segment name')
       const segNum = parseInt(m[1], 10)
+      const runtime = sessions.getRuntime(session.id)
+      runtime?.onSegmentRequested(segNum)
 
       // Fast path: segment already on disk
       if (existsSync(segPath)) {
@@ -119,7 +121,6 @@ export function registerSegments(
 
       // Out-of-range request = seek. Runtime owns the lock + the re-check;
       // we just translate its decision into an HTTP outcome.
-      const runtime = sessions.getRuntime(session.id)
       const decision = runtime?.requestSegment(segNum) ?? { kind: 'wait' as const }
       if (decision.kind === 'restart') {
         console.log(`Session ${session.id}: seek detected — req seg${segNum}, current start ${runtime!.startSegment()}`)
