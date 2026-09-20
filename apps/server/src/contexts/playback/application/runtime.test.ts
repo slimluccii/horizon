@@ -62,6 +62,40 @@ function deferred(): Deferred {
 }
 
 describe('SessionRuntime', () => {
+  describe('lookahead window follows the encoder', () => {
+    it('waits for the next segment during continuous playback past the first window', () => {
+      const session = fakeSession({ currentStartSegment: 0 })
+      const runtime = createSessionRuntime({ session, hwAccel, headSegment: () => 29 })
+      expect(runtime.requestSegment(30).kind).toBe('wait')
+      expect(runtime.requestSegment(29 + SEEK_LOOKAHEAD_SEGMENTS).kind).toBe('wait')
+      expect(runtime.requestSegment(30 + SEEK_LOOKAHEAD_SEGMENTS).kind).toBe('restart')
+    })
+
+    it('still treats a request behind the current run as a seek', () => {
+      const session = fakeSession({ currentStartSegment: 100 })
+      const runtime = createSessionRuntime({ session, hwAccel, headSegment: () => 400 })
+      expect(runtime.requestSegment(99).kind).toBe('restart')
+    })
+
+    it('uses the run start while nothing has been written yet', () => {
+      const session = fakeSession({ currentStartSegment: 100 })
+      const runtime = createSessionRuntime({ session, hwAccel, headSegment: () => null })
+      expect(runtime.requestSegment(100 + SEEK_LOOKAHEAD_SEGMENTS - 1).kind).toBe('wait')
+      expect(runtime.requestSegment(100 + SEEK_LOOKAHEAD_SEGMENTS).kind).toBe('restart')
+    })
+
+    it('does not restart for a segment the encoder has reached by the time the lock is taken', async () => {
+      const session = fakeSession({ currentStartSegment: 0 })
+      const doRestart = vi.fn(async () => {})
+      let head = 10
+      const runtime = createSessionRuntime({ session, hwAccel, doRestart, headSegment: () => head })
+      expect(runtime.requestSegment(45).kind).toBe('restart')
+      head = 20
+      expect(await runtime.applyRestart(45)).toEqual({ ok: true })
+      expect(doRestart).not.toHaveBeenCalled()
+    })
+  })
+
   describe('requestSegment / applyRestart', () => {
     it('classifies in-range as wait, out-of-range as restart', () => {
       const session = fakeSession({ currentStartSegment: 100 })
