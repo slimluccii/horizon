@@ -80,7 +80,7 @@ export function createChangesCursorRepo(db: DatabaseSync): ChangesCursorRepo {
 }
 
 /** Append-only scan history. Worker prunes old rows. */
-export type ScanTrigger = 'boot' | 'cron' | 'manual' | 'watcher' | 'metadata'
+export type ScanTrigger = 'boot' | 'cron' | 'manual' | 'watcher' | 'metadata' | 'webhook'
 
 export interface ScanHistoryRow {
   id: number

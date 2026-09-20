@@ -97,7 +97,7 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
       return
     }
     // Already pending — promote trigger if this one is "stronger" (manual > cron > watcher).
-    const order: Record<ScanTrigger, number> = { manual: 4, boot: 3, cron: 2, watcher: 1, metadata: 0 }
+    const order: Record<ScanTrigger, number> = { manual: 4, boot: 3, cron: 2, watcher: 1, webhook: 1, metadata: 0 }
     if (order[req.trigger] > order[pending.trigger]) pending.trigger = req.trigger
 
     if (req.paths.length === 0 || pending.full) {

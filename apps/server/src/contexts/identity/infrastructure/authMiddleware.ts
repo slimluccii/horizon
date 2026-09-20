@@ -88,6 +88,8 @@ export const AUTH_ALLOWLIST_PREFIXES: ReadonlyArray<string> = [
  */
 export const AUTH_ALLOWLIST_BY_METHOD: Readonly<Record<string, ReadonlyArray<string>>> = {
   GET: ['/users'],
+  // Sonarr and Radarr cannot hold a session; the route checks its own key.
+  POST: ['/webhooks/arr'],
 }
 
 /** Is `path` exempt from auth? Compares against the route path (no query). When

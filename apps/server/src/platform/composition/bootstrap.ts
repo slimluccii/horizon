@@ -16,6 +16,7 @@ import {
   createScanManager,
   startWatcher,
   type WatcherHandle,
+  createWebhookKeyRepo,
 } from '../../contexts/library/index.ts'
 import { startDailySchedule, type DailyScheduleHandle } from '../scheduler/scheduler.ts'
 import { createSessionManager, sweepSessionDirs } from '../../contexts/playback/index.ts'
@@ -152,7 +153,7 @@ export async function bootstrap() {
   const app = await buildServer(
     cfg,
     hwAccel,
-    { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, inviteRepo, progressRepo, serverSettings },
+    { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, inviteRepo, progressRepo, serverSettings, webhookKeyRepo: createWebhookKeyRepo(db) },
     sessions,
     { scanManager, refreshWorker, scanHistory: scanHistoryRepo, activityBus },
     orchestrator,

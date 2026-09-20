@@ -4,7 +4,7 @@ import { registerHealth } from './health.ts'
 import { buildServer } from './server.ts'
 import { openDatabase } from '../db/connection.ts'
 import { migrate } from '../db/migrations.ts'
-import { createMediaRepo, createCollectionsRepo, createScanHistoryRepo } from '../../contexts/library/index.ts'
+import { createMediaRepo, createCollectionsRepo, createScanHistoryRepo, createWebhookKeyRepo } from '../../contexts/library/index.ts'
 import { createUserRepo, createSessionRepo, createHouseholdRepo, createInviteRepo } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
@@ -64,7 +64,7 @@ describe('buildServer wiring → /health', () => {
     return buildServer(
       cfg,
       fakeHw,
-      { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, inviteRepo, progressRepo, serverSettings },
+      { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, inviteRepo, progressRepo, serverSettings, webhookKeyRepo: createWebhookKeyRepo(db) },
       {} as any,
       { scanManager: {} as any, refreshWorker: {} as any, scanHistory, activityBus: createActivityBus() },
       {} as any,
