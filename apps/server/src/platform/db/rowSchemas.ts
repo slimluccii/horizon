@@ -35,6 +35,7 @@ export const MediaItemRowSchema = z.object({
   sort_year: z.number().int().nullable(),
   season: z.number().int().nullable(),
   episode: z.number().int().nullable(),
+  episode_end: z.number().int().nullable(),
 
   file_path: z.string().nullable(),
   duration_sec: z.number().nullable(),

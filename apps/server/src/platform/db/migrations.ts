@@ -229,11 +229,16 @@ const V4_SQL = `
 ALTER TABLE media_items ADD COLUMN video_bitrate INTEGER;
 `
 
+const V5_SQL = `
+ALTER TABLE media_items ADD COLUMN episode_end INTEGER;
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
   { version: 3, sql: V3_SQL },
   { version: 4, sql: V4_SQL },
+  { version: 5, sql: V5_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

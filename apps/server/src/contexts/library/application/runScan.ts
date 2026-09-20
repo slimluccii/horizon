@@ -2,8 +2,9 @@ import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { probe } from '../infrastructure/probe/probe.ts'
 import { buildCollections } from '../domain/collection.ts'
-import { parseIdsFromPath, parseIds, mergeIds } from '../domain/ids.ts'
+import { parseIdsFromPath, parseIds, mergeIds, type ExternalIds } from '../domain/ids.ts'
 import { movieId, showId, episodeId } from '../domain/identity.ts'
+import { parseMovieFile, parseEpisodeFile, isExtra, type EpisodeName } from '../domain/naming.ts'
 import { pMap } from './concurrency.ts'
 import { walkVideoFiles } from '../infrastructure/fs/walker.ts'
 import { discoverSidecarSubtitles, mergeSidecarTracks } from '../infrastructure/fs/sidecars.ts'
@@ -51,9 +52,6 @@ export interface ScanCounts {
   durationMs: number
 }
 
-const MOVIE_RE = /^(.+?)\s*\((\d{4})\)/
-const EPISODE_RE = /S(\d{2})E(\d{2})/i
-
 /** Strip trailing metadata tags like `{tvdb-123}` / `[source]` + year parens
  *  from a directory or filename title. */
 function cleanTitle(raw: string): string {
@@ -62,15 +60,6 @@ function cleanTitle(raw: string): string {
     .replace(/\s*\[[^\]]+\]/g, '')     // [source], [HMAX]
     .replace(/\s*\(\d{4}\)/, '')       // year
     .trim()
-}
-
-/** Derive an episode display title from its filename. Looks for the segment
- *  immediately following `SxxExx - `; falls back to a cleaned-up basename. */
-function episodeTitle(basename: string): string {
-  const stripped = basename.replace(/\.[^.]+$/, '')
-  const m = /S\d{2}E\d{2}\s*-\s*([^[]+?)(?:\s*\[|\s*-\s*\[|$)/i.exec(stripped)
-  if (m) return m[1].trim()
-  return cleanTitle(stripped)
 }
 
 function folderYear(name: string): number | null {
@@ -156,26 +145,25 @@ async function scanMoviesPath(
   media: MediaRepo,
   progress: ScanProgressReporter,
   bus?: ActivityBus,
-): Promise<{ seen: Set<string>; added: number; failed: number; duplicates: string[] }> {
+): Promise<{ seen: Set<string>; added: number; failed: number; duplicates: string[]; unmatched: string[] }> {
   const seen = new Set<string>()
   let added = 0
   let failed = 0
   const { files } = await walkVideoFiles(pathToScan).catch(() => ({ files: [], dirsSeen: 0 }))
-  const matched = files
-    .map(file => {
-      const base = path.basename(file, path.extname(file))
-      const m = MOVIE_RE.exec(base)
-      if (!m) return null
-      const externalIds = parseIdsFromPath(file)
-      const id = movieId({ externalIds, title: m[1].trim(), year: parseInt(m[2], 10) })
-      return { file, m, externalIds, id }
-    })
-    .filter((x): x is NonNullable<typeof x> => !!x)
+  const unmatched: string[] = []
+  const matched: { file: string; title: string; year: number; externalIds: ExternalIds; id: string }[] = []
+  for (const file of files) {
+    if (isExtra(file)) continue
+    const name = parseMovieFile(file)
+    if (!name) { unmatched.push(file); continue }
+    const externalIds = parseIdsFromPath(file)
+    matched.push({ file, ...name, externalIds, id: movieId({ externalIds, ...name }) })
+  }
   const { winners: candidates, keptExisting, duplicates } = await pickLargestPerId(matched, media)
   for (const id of keptExisting) seen.add(id)
   progress.addTotal(candidates.length)
 
-  await pMap(candidates, cfg.scanConcurrency, async ({ file, m, externalIds, id }) => {
+  await pMap(candidates, cfg.scanConcurrency, async ({ file, title, year, externalIds, id }) => {
     const existed = media.getById(id) !== null
     const p = await probe(file, cfg.cacheDir).catch(() => null)
     if (!p) {
@@ -188,8 +176,8 @@ async function scanMoviesPath(
     const upsert: MovieUpsert = {
       id,
       filePath: file,
-      title: m[1].trim(),
-      sortYear: parseInt(m[2], 10),
+      title,
+      sortYear: year,
       durationSec: p.duration,
       resolution: p.resolution,
       videoCodec: p.videoCodec,
@@ -206,10 +194,10 @@ async function scanMoviesPath(
     media.upsertMovie(upsert)
     seen.add(id)
     if (!existed) added++
-    bus?.emit({ kind: 'scan:detected', mediaKind: 'movie', title: m[1].trim(), message: `Detected movie "${m[1].trim()}"` })
+    bus?.emit({ kind: 'scan:detected', mediaKind: 'movie', title, message: `Detected movie "${title}"` })
     progress.tick()
   })
-  return { seen, added, failed, duplicates }
+  return { seen, added, failed, duplicates, unmatched }
 }
 
 async function scanShowsPath(
@@ -218,7 +206,7 @@ async function scanShowsPath(
   media: MediaRepo,
   progress: ScanProgressReporter,
   bus?: ActivityBus,
-): Promise<{ seen: Set<string>; added: number; failed: number; shows: number; episodes: number; duplicates: string[] }> {
+): Promise<{ seen: Set<string>; added: number; failed: number; shows: number; episodes: number; duplicates: string[]; unmatched: string[] }> {
   const seen = new Set<string>()
   let added = 0
   let failed = 0
@@ -229,23 +217,24 @@ async function scanShowsPath(
   const roots = new Set(cfg.showsRoots ?? [])
   const { files } = await walkVideoFiles(pathToScan).catch(() => ({ files: [], dirsSeen: 0 }))
 
-  type EpCand = { id: string; file: string; base: string; em: RegExpExecArray; showDir: string }
+  type EpCand = { id: string; file: string; name: EpisodeName; showDir: string }
+  const unmatched: string[] = []
   const matched: EpCand[] = []
   const showIdByDir = new Map<string, string>()
   for (const file of files) {
-    const base = path.basename(file)
-    const em = EPISODE_RE.exec(base)
-    if (!em) continue
+    if (isExtra(file)) continue
+    const name = parseEpisodeFile(file)
+    if (!name) { unmatched.push(file); continue }
     const showDir = showDirForEpisode(file)
     // A loose episode sitting directly in a configured root has no real show
     // folder — skip it rather than naming a show after the root.
-    if (roots.has(showDir)) { failed++; continue }
+    if (roots.has(showDir)) { unmatched.push(file); continue }
     if (!showIdByDir.has(showDir)) {
       const showName = path.basename(showDir)
       showIdByDir.set(showDir, showId({ externalIds: parseIds(showName), title: cleanTitle(showName), year: folderYear(showName) }))
     }
-    const id = episodeId(showIdByDir.get(showDir)!, parseInt(em[1], 10), parseInt(em[2], 10))
-    matched.push({ id, file, base, em, showDir })
+    const id = episodeId(showIdByDir.get(showDir)!, name.season, name.episode)
+    matched.push({ id, file, name, showDir })
   }
   const { winners: epCands, keptExisting, duplicates } = await pickLargestPerId(matched, media)
   for (const id of keptExisting) seen.add(id)
@@ -271,7 +260,7 @@ async function scanShowsPath(
     bus?.emit({ kind: 'scan:detected', mediaKind: 'show', title: cleanTitle(showName), message: `Detected series "${cleanTitle(showName)}"` })
   }
 
-  await pMap(epCands, cfg.scanConcurrency, async ({ id, file, base, em, showDir }) => {
+  await pMap(epCands, cfg.scanConcurrency, async ({ id, file, name, showDir }) => {
     const parentId = showIdByDir.get(showDir)!
     const showName = path.basename(showDir)
     const existed = media.getById(id) !== null
@@ -287,9 +276,10 @@ async function scanShowsPath(
       id,
       parentId,
       filePath: file,
-      title: episodeTitle(base),
-      season: parseInt(em[1], 10),
-      episode: parseInt(em[2], 10),
+      title: name.title ?? cleanTitle(path.basename(file, path.extname(file))),
+      season: name.season,
+      episode: name.episode,
+      episodeEnd: name.episodeEnd,
       durationSec: p.duration,
       resolution: p.resolution,
       videoCodec: p.videoCodec,
@@ -300,7 +290,7 @@ async function scanShowsPath(
       subtitleTracks: mergeSidecarTracks(p.subtitleTracks, await discoverSidecarSubtitles(file)),
       mtimeMs: st.mtimeMs,
       sizeBytes: st.size,
-      externalIds: mergeIds(parseIds(showName), parseIds(base)),
+      externalIds: mergeIds(parseIds(showName), parseIds(path.basename(file))),
       metadata: null,
     }
     media.upsertEpisode(insert)
@@ -309,7 +299,7 @@ async function scanShowsPath(
     progress.tick()
   })
 
-  return { seen, added, failed, shows: upsertedShows.size, episodes: epCands.length, duplicates }
+  return { seen, added, failed, shows: upsertedShows.size, episodes: epCands.length, duplicates, unmatched }
 }
 
 // An unmounted Docker bind mount shows up as an empty directory, not as an error.
@@ -328,6 +318,8 @@ export interface ScanResult {
   unavailableRoots: string[]
   /** Files skipped because a larger file resolved to the same item. */
   duplicates: string[]
+  /** Video files that are not extras and whose name could not be placed as a movie or episode. */
+  unmatched: string[]
   itemsSeen: number
   itemsAdded: number
   itemsRemoved: number
@@ -359,6 +351,7 @@ export async function runScan(
   let showCount = 0
   let episodeCount = 0
   const duplicates: string[] = []
+  const unmatched: string[] = []
 
   const unavailableRoots: string[] = []
   for (const root of [...(cfg.moviesRoots ?? []), ...(cfg.showsRoots ?? [])]) {
@@ -374,6 +367,7 @@ export async function runScan(
     added += r.added
     failed += r.failed
     duplicates.push(...r.duplicates)
+    unmatched.push(...r.unmatched)
     movieCount += r.seen.size
   }
   for (const p of scope.showsPaths.filter(scannable)) {
@@ -382,6 +376,7 @@ export async function runScan(
     added += r.added
     failed += r.failed
     duplicates.push(...r.duplicates)
+    unmatched.push(...r.unmatched)
     showCount += r.shows
     episodeCount += r.episodes
   }
@@ -413,6 +408,7 @@ export async function runScan(
     scope,
     unavailableRoots,
     duplicates,
+    unmatched: unmatched.sort(),
     itemsSeen: seen.size,
     itemsAdded: added,
     itemsRemoved: removed,

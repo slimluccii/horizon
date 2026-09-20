@@ -452,4 +452,87 @@ describe('rescan (integration)', () => {
       expect(media.listMovies()[0].id).not.toBe(before)
     })
   })
+
+  describe('naming', () => {
+    function setup() {
+      const moviesRoot = path.join(tmpRoot, 'movies')
+      const showsRoot = path.join(tmpRoot, 'shows')
+      mkdirSync(moviesRoot, { recursive: true })
+      mkdirSync(showsRoot, { recursive: true })
+      const db = openDatabase(':memory:')
+      migrate(db)
+      const media = createMediaRepo(db)
+      const collections = createCollectionsRepo(db)
+      const cfg = { moviesRoots: [moviesRoot], showsRoots: [showsRoot], cacheDir: tmpRoot, scanConcurrency: 2 }
+      const scan = () => runScan(fullScope(cfg), cfg, { media, collections })
+      const touch = (...parts: string[]) => {
+        const file = path.join(...parts)
+        mkdirSync(path.dirname(file), { recursive: true })
+        writeFileSync(file, '')
+        return file
+      }
+      return { moviesRoot, showsRoot, db, media, scan, touch }
+    }
+
+    it('skips extras and reports files it cannot place', async () => {
+      const { moviesRoot, showsRoot, media, scan, touch } = setup()
+      touch(moviesRoot, 'Dune (2021)', 'Dune (2021).mkv')
+      touch(moviesRoot, 'Dune (2021)', 'Dune (2021)-trailer.mkv')
+      touch(moviesRoot, 'Dune (2021)', 'Featurettes', 'Sandworms.mkv')
+      const homeVideo = touch(moviesRoot, 'holiday-video.mkv')
+      touch(showsRoot, 'The Daily Show', 'Season 2024', 'The Daily Show - S2024E01.mkv')
+      const daily = touch(showsRoot, 'The Daily Show', 'Season 2024', 'The Daily Show - 2024-05-01 - Guest.mkv')
+
+      const result = await scan()
+
+      expect(media.listMovies().map(m => m.title)).toEqual(['Dune'])
+      expect(result.unmatched).toEqual([homeVideo, daily].sort())
+    })
+
+    it('scans a movie whose year is only on its folder', async () => {
+      const { moviesRoot, media, scan, touch } = setup()
+      touch(moviesRoot, 'Tenet (2020)', 'tenet.1080p.bluray.x264.mkv')
+      await scan()
+      expect(media.listMovies().map(m => [m.title, m.year])).toEqual([['Tenet', 2020]])
+    })
+
+    it('reads three-digit episode numbers and multi-episode files', async () => {
+      const { showsRoot, media, scan, touch } = setup()
+      touch(showsRoot, 'One Piece', 'Season 01', 'One Piece - S01E100 - Title.mkv')
+      touch(showsRoot, 'One Piece', 'Season 01', 'One Piece - S01E01-E02 - Two Parter.mkv')
+      await scan()
+
+      const episodes = media.getEpisodes(media.listShows()[0].id)
+      expect(episodes.map(e => [e.episode, e.episodeEnd, e.title])).toEqual([
+        [1, 2, 'Two Parter'],
+        [100, 100, 'Title'],
+      ])
+    })
+
+    it('keeps the TMDB episode title across a rescan', async () => {
+      const { showsRoot, db, media, scan, touch } = setup()
+      touch(showsRoot, 'Breaking Bad {tmdb-1396}', 'Season 01', 'Breaking Bad - S01E01 - pilot.mkv')
+      await scan()
+
+      const tmdb = {
+        async showByTmdbId(id: number) { return { tmdbId: id, title: 'Breaking Bad' } },
+        async showByTvdbId() { return null },
+        async searchShow() { return null },
+        async episode() { return { tmdbId: 62085, title: 'Pilot' } },
+        async changedMovieIds() { return [] },
+        async changedShowIds() { return [] },
+      } as any
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, changesFeedExtraCap: 0 },
+        { media, tmdb, changesCursor: createChangesCursorRepo(db) },
+      )
+      await worker.run({ useChangesFeed: false, drain: true })
+      const show = media.listShows()[0].id
+      expect(media.getEpisodes(show)[0].title).toBe('Pilot')
+
+      await scan()
+
+      expect(media.getEpisodes(show)[0].title).toBe('Pilot')
+    })
+  })
 })
