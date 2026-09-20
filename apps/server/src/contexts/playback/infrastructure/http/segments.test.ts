@@ -492,3 +492,47 @@ describe('segment routes userId ownership (#41)', () => {
     })
   })
 })
+
+describe('files that ffmpeg is still writing', () => {
+  async function appWithDir() {
+    const ctx = setup({ renditionCount: 1 })
+    const { mkdirSync } = await import('node:fs')
+    const dir = path.join(ctx.sessionDir, 'r0')
+    mkdirSync(dir, { recursive: true })
+    app = await buildApp(ctx.db, ctx.sessions, ctx.media, ctx.users)
+    const get = (file: string) => app!.inject({
+      method: 'GET',
+      url: `/sessions/${ctx.session.id}/renditions/0/${file}`,
+      headers: tokenHeader(ctx.db, ctx.owner.id, ctx.session.reconnectToken),
+    })
+    return { dir, get }
+  }
+
+  it('does not serve an init segment that exists but is still empty', async () => {
+    const { dir, get } = await appWithDir()
+    writeFileSync(path.join(dir, 'init.mp4'), '')
+    setTimeout(() => writeFileSync(path.join(dir, 'init.mp4'), 'complete-init'), 150)
+    const res = await get('init.mp4')
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toBe('complete-init')
+  })
+
+  it('does not serve the newest segment while it is still growing', async () => {
+    const { dir, get } = await appWithDir()
+    writeFileSync(path.join(dir, 'seg00000.m4s'), 'half')
+    setTimeout(() => writeFileSync(path.join(dir, 'seg00000.m4s'), 'half-and-the-rest'), 50)
+    const res = await get('seg00000.m4s')
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toBe('half-and-the-rest')
+  })
+
+  it('serves a segment at once when a later one exists, because ffmpeg has moved on', async () => {
+    const { dir, get } = await appWithDir()
+    writeFileSync(path.join(dir, 'seg00000.m4s'), 'done')
+    writeFileSync(path.join(dir, 'seg00001.m4s'), 'x')
+    const t0 = Date.now()
+    const res = await get('seg00000.m4s')
+    expect(res.body).toBe('done')
+    expect(Date.now() - t0).toBeLessThan(80)
+  })
+})
