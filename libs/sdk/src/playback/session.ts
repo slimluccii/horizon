@@ -166,6 +166,10 @@ export class PlaybackSession {
     return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(this._reconnectToken)}`
   }
 
+  /** Where this session starts, in seconds; 0 for a start from the beginning. An
+   *  HLS player must open at this position, the playlist itself always lists from 0. */
+  get startPositionSec(): number { return (this._opts.startPositionMs ?? 0) / 1000 }
+
   // The server owns the path prefix, so sibling urls hang off the stream url it handed out.
   private get _sessionUrl(): string {
     return this._streamUrl.slice(0, this._streamUrl.lastIndexOf('/'))
@@ -183,8 +187,7 @@ export class PlaybackSession {
     // rides the cookie (web); the URL no longer carries a caller id. transcode
     // manifests are fetched by hls.js, which sets the token header via xhrSetup.
     if (this.method !== 'direct-play') return this._streamUrl
-    const startSec = (this._opts.startPositionMs ?? 0) / 1000
-    return this._withToken(this._streamUrl) + (startSec > 0 ? `#t=${startSec}` : '')
+    return this._withToken(this._streamUrl) + (this.startPositionSec > 0 ? `#t=${this.startPositionSec}` : '')
   }
 
   private _connect() {

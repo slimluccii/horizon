@@ -50,15 +50,17 @@ export default function globalSetup(): void {
   try {
     execFileSync('ffmpeg', [
       '-loglevel', 'error', '-y',
-      '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=15:duration=30',
-      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=30',
+      '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=15:duration=90',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=90',
       // HEVC video so an h264-only client forces a full transcode (not direct-play).
-      // Keyframe every 15 frames (1s @ 15fps) + exact 30s so the server's static
+      // 90 s, because the last 30 s of any title count as watched and the resume
+      // spec needs a position that does not. Keyframe every 15 frames (1s @ 15fps)
+      // + an exact length so the server's static
       // VOD playlist (ceil(duration / 1s) segments) matches what ffmpeg emits —
       // otherwise the final segment 404s and hls.js stalls at the end.
       '-c:v', 'libx265', '-pix_fmt', 'yuv420p', '-tag:v', 'hvc1',
       '-g', '15', '-keyint_min', '15',
-      '-c:a', 'aac', '-t', '30', '-shortest',
+      '-c:a', 'aac', '-t', '90', '-shortest',
       E2E_MOVIE_FILE,
     ], { stdio: 'ignore' })
   } catch {
