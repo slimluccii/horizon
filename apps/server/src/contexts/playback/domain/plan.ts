@@ -71,6 +71,9 @@ export interface PlanInput {
   toneMap: ToneMapConfig
   /** See PlaybackPlan.burnInSubtitleIndex. Omit / null = no burn-in. */
   burnInSubtitleIndex?: number | null
+  /** True when the file has a usable keyframe index. A stream copy can only cut
+   *  at source keyframes, so without one its playlist cannot be built. */
+  streamCopyAllowed?: boolean
 }
 
 /** Build the PlaybackPlan from inputs. Pure function — same inputs always
@@ -81,6 +84,8 @@ export function buildPlan(input: PlanInput): PlaybackPlan {
   const burnInSubtitleIndex = input.burnInSubtitleIndex ?? null
 
   let decision = decidePlayback(probe, caps)
+  const copiesVideo = decision.method === 'direct-stream' || decision.method === 'partial-transcode'
+  if (copiesVideo && !input.streamCopyAllowed) decision = { method: 'transcode', needsToneMap: decision.needsToneMap }
   // Burning in an image subtitle recomposites the video, so every copy-based
   // method is off the table regardless of client capabilities. The transcode
   // ladder is SDR H.264, so an HDR source must be tone-mapped on this path

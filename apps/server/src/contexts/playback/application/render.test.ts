@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderArgs, type RenderContext } from './render.ts'
+import { keyframeTimeline } from '../domain/timeline.ts'
 import type { PlaybackPlan } from '../domain/plan.ts'
 import type { HwAccel } from '../domain/hwaccel.ts'
 
@@ -160,5 +161,51 @@ describe('renderArgs', () => {
       const { args } = renderArgs(plan, ctx, hwAccel)
       expect(args).toEqual(expect.arrayContaining(['-map', '0:a:2']))
     })
+  })
+})
+
+describe('stream copy follows the source keyframes', () => {
+  // Timestamps from the irregular B-frame file this was validated against with real ffmpeg.
+  const keyframes = [
+    { ptsSec: 0, dtsSec: -0.083 }, { ptsSec: 0.5, dtsSec: 0.417 }, { ptsSec: 3.5, dtsSec: 3.417 },
+    { ptsSec: 9, dtsSec: 8.917 }, { ptsSec: 9.25, dtsSec: 9.167 }, { ptsSec: 15, dtsSec: 14.917 },
+  ]
+  const copyCtx = (startSegment: number): RenderContext => ({
+    ...ctx, startSegment, seekPositionMs: keyframes[startSegment].ptsSec * 1000, copyTimeline: keyframeTimeline(keyframes, 20),
+  })
+  const valueAfter = (args: string[], flag: string, from = 0) => args[args.indexOf(flag, from) + 1]
+
+  it('cuts a segment at every keyframe, since that is the only cut that survives a restart', () => {
+    const { args } = renderArgs(directStreamPlan, copyCtx(0), hwAccel)
+    expect(valueAfter(args, '-hls_time')).toBe('0.001')
+  })
+
+  it('keeps source timestamps from the first run, so every run shares one clock', () => {
+    const { args } = renderArgs(directStreamPlan, copyCtx(0), hwAccel)
+    expect(args).toContain('-copyts')
+    expect(args).not.toContain('-ss')
+  })
+
+  it('restarts by seeking one keyframe early and trimming to just before the decode time of the wanted one', () => {
+    const { args } = renderArgs(directStreamPlan, copyCtx(3), hwAccel)
+    const input = args.indexOf('-i')
+    expect(args.indexOf('-ss')).toBeLessThan(input)
+    expect(valueAfter(args, '-ss')).toBe('3.500')
+    expect(valueAfter(args, '-ss', input)).toBe('8.916')
+    expect(valueAfter(args, '-start_number')).toBe('3')
+  })
+
+  it('does the same when only the audio is transcoded', () => {
+    const { args } = renderArgs(partialPlan, copyCtx(4), hwAccel)
+    const input = args.indexOf('-i')
+    expect(valueAfter(args, '-hls_time')).toBe('0.001')
+    expect(valueAfter(args, '-ss')).toBe('9.000')
+    expect(valueAfter(args, '-ss', input)).toBe('9.166')
+  })
+
+  it('leaves an encode on fixed one-second segments', () => {
+    const { args } = renderArgs(transcodePlan, ctxSeek, hwAccel)
+    expect(valueAfter(args, '-hls_time')).toBe('1')
+    expect(args.filter(a => a === '-ss')).toHaveLength(1)
   })
 })

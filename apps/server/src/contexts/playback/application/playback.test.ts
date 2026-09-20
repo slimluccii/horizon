@@ -472,3 +472,56 @@ describe('PlaybackOrchestrator', () => {
     expect(s.currentStartSegment).toBeGreaterThan(0)
   })
 })
+
+describe('stream copy needs a keyframe index', () => {
+  const mkv = { ...sampleMovie, container: 'matroska,webm' }
+  const spaced = Array.from({ length: 1800 }, (_, i) => ({ ptsSec: i * 2, dtsSec: i * 2 - 0.083 }))
+
+  function start(keyframes: { get: (id: string) => typeof spaced | null; request: (id: string) => void }) {
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: mkv }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles, keyframes,
+    })
+    const { info } = orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps })
+    return { info, session: sessions.get(info.sessionId)! }
+  }
+
+  it('copies the video of an indexed file and gives the session its keyframes', () => {
+    const { info, session } = start({ get: () => spaced, request: () => {} })
+    expect(info.method).toBe('direct-stream')
+    expect(session.keyframes).toBe(spaced)
+  })
+
+  it('transcodes a file without an index and asks for it to be indexed', () => {
+    const requested: string[] = []
+    const { info, session } = start({ get: () => null, request: id => { requested.push(id) } })
+    expect(info.method).toBe('transcode')
+    expect(session.keyframes).toBeUndefined()
+    expect(requested).toEqual(['m1'])
+  })
+
+  it('transcodes a file whose keyframes are unusable, without asking again', () => {
+    const requested: string[] = []
+    const allIntra = Array.from({ length: 5000 }, (_, i) => ({ ptsSec: i * 0.04, dtsSec: i * 0.04 }))
+    const { info } = start({ get: () => allIntra, request: id => { requested.push(id) } })
+    expect(info.method).toBe('transcode')
+    expect(requested).toEqual([])
+  })
+
+  it('does not ask for an index when the file direct-plays', () => {
+    const requested: string[] = []
+    const { cfg, sessions, serverSettings, spawner, extractSubtitles } = harness()
+    const orch = createPlaybackOrchestrator({
+      cfg, hwAccel,
+      media: fakeMedia({ m1: sampleMovie }),
+      users: fakeUsers(new Set()),
+      sessions, serverSettings, spawner, extractSubtitles,
+      keyframes: { get: () => null, request: id => { requested.push(id) } },
+    })
+    expect(orch.startPlayback({ mediaId: 'm1', capabilities: browserCaps }).info.method).toBe('direct-play')
+    expect(requested).toEqual([])
+  })
+})

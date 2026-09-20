@@ -1,10 +1,7 @@
+import type { Keyframe } from '../../library/index.ts'
 import { SEGMENT_DURATION_SEC } from './segments.ts'
 
-export interface Keyframe {
-  ptsSec: number
-  /** Decode time. ffmpeg trims a stream copy against this, not against the presentation time. */
-  dtsSec: number
-}
+export type { Keyframe }
 
 /** Where each HLS segment of a session starts and how long it lasts. */
 export interface SegmentTimeline {
@@ -21,9 +18,29 @@ export interface KeyframeTimeline extends SegmentTimeline {
   startDtsSec(segNum: number): number
 }
 
+interface TimedSession {
+  durationSec: number
+  keyframes?: Keyframe[]
+  plan?: { method: string; videoStrategy: string }
+}
+
+const timelines = new WeakMap<Keyframe[], KeyframeTimeline>()
+
+/** The keyframe timeline of a session whose current plan copies the video; undefined for an encode or direct play. */
+export function copyTimelineOf(session: TimedSession): KeyframeTimeline | undefined {
+  const copies = session.plan?.videoStrategy === 'copy' && session.plan.method !== 'direct-play'
+  if (!copies || !session.keyframes) return undefined
+  let timeline = timelines.get(session.keyframes)
+  if (!timeline) {
+    timeline = keyframeTimeline(session.keyframes, session.durationSec)
+    timelines.set(session.keyframes, timeline)
+  }
+  return timeline
+}
+
 /** An encode cuts fixed-length segments; a stream copy follows the source keyframes. */
-export function sessionTimeline(session: { durationSec: number; copyTimeline?: KeyframeTimeline }): SegmentTimeline {
-  return session.copyTimeline ?? uniformTimeline(session.durationSec)
+export function sessionTimeline(session: TimedSession): SegmentTimeline {
+  return copyTimelineOf(session) ?? uniformTimeline(session.durationSec)
 }
 
 const MIN_AVERAGE_GAP_SEC = 0.5
