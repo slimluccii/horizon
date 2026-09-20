@@ -2,17 +2,6 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useActiveUser } from '../../../features/identity/hooks/useActiveUser.ts'
 import { horizon } from '../../horizon.ts'
-import './ProfileBadgeButton.css'
-
-/** Derive a stable accent color per user by hashing their name. Keeps each
- *  profile visually distinct without storing an extra field. */
-function userColor(name: string): string {
-  const palette = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
-  return palette[Math.abs(hash) % palette.length]
-}
-
 /** Top-nav profile control. Circular coloured initial; dropdown on click with
  *  sign-out / delete. Hidden when no active user — the Guard redirects to /login
  *  before any screen that shows this chrome mounts. */
@@ -33,7 +22,6 @@ export default function ProfileBadgeButton() {
 
   if (!user) return null
 
-  const color = userColor(user.name)
   const initial = user.avatar ?? user.name.charAt(0).toUpperCase()
 
   // Sign out → revoke the session, then land on the login screen (the profile
@@ -55,32 +43,31 @@ export default function ProfileBadgeButton() {
   }
 
   return (
-    <div ref={ref} className="pb-badge">
+    <div ref={ref}>
       <button
-        className="pb-badge__btn"
-        style={{ background: color, boxShadow: `0 6px 18px ${color}66` }}
         onClick={() => setOpen(o => !o)}
         aria-label={user.name}
+        aria-expanded={open}
+        aria-haspopup="menu"
       >
         {initial}
       </button>
       {open && (
-        <div className="pb-badge__menu">
-          <div className="pb-badge__header">
-            <div className="pb-badge__avatar" style={{ background: color }}>{initial}</div>
-            <div>
-              <div className="pb-badge__name">{user.name}</div>
-              <div className="pb-badge__role">Active profile</div>
-            </div>
-          </div>
-          <button className="pb-badge__item" onClick={() => { setOpen(false); navigate('/settings') }}>
+        <div role="menu" aria-label="Profile menu">
+          <p>
+            <span aria-hidden="true">{initial}</span>
+            {' '}
+            <span>{user.name}</span>
+            {' · Active profile'}
+          </p>
+          <button onClick={() => { setOpen(false); navigate('/settings') }}>
             Settings
           </button>
-          <button className="pb-badge__item" onClick={signOut}>
+          <button onClick={signOut}>
             Sign out
           </button>
           {user.role !== 'owner' && (
-            <button className="pb-badge__item pb-badge__item--danger" onClick={deleteProfile}>
+            <button onClick={deleteProfile}>
               Delete profile
             </button>
           )}

@@ -52,6 +52,8 @@ function baseCfg(overrides: Partial<Config> = {}): Config {
     serveWeb: false,
     serverName: undefined,
     mdnsEnabled: true,
+    trustProxy: false,
+    minFreeDiskMb: 2048,
     ...overrides,
   }
 }

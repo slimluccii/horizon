@@ -5,8 +5,6 @@ import { tmdbImageUrl } from '@horizon/sdk'
 import type { ShowSummary, MediaItem, EpisodeMetadata } from '@horizon/sdk'
 import LargeTopNav from '../../../shared/ui/chrome/LargeTopNav.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
-import './Show.css'
-
 export default function Show() {
   const { showId } = useParams<{ showId: string }>()
   const navigate = useNavigate()
@@ -38,14 +36,14 @@ export default function Show() {
   }, [showId, season])
 
   if (error) return (
-    <div className="show show--error">
-      <div className="show__err-title">Error loading show</div>
-      <div className="show__err-msg">{error}</div>
-      <button className="show__err-back" onClick={() => navigate('/?tab=shows')}>Back</button>
+    <div>
+      <div>Error loading show</div>
+      <div>{error}</div>
+      <button onClick={() => navigate('/?tab=shows')}>Back</button>
     </div>
   )
 
-  if (!show) return <div className="show show--loading">Loading show…</div>
+  if (!show) return <div>Loading show…</div>
 
   const meta = show.metadata
   const backdrop = tmdbImageUrl(meta?.backdropPath, 'w780')
@@ -54,52 +52,51 @@ export default function Show() {
   const totalEps = show.seasons.reduce((a, s) => a + s.episodeCount, 0)
 
   return (
-    <div className="show">
+    <div>
       <LargeTopNav active="Series" transparent={!!backdrop} back="/?tab=shows" />
 
-      <section className="show__hero" style={backdrop ? { backgroundImage: `url(${backdrop})` } : undefined}>
-        <div className="show__hero-scrim" />
-        <div className="show__hero-content">
+      <main>
+        <section aria-label="Series details">
           {poster && (
-            <img className="show__poster" src={poster} alt={show.title} loading="lazy" />
+            <img src={poster} alt={show.title} width={342} loading="lazy" />
           )}
-          <div className="show__hero-text">
-            <div className="eyebrow">Series</div>
-            <h1 className="show__title">{meta?.title ?? show.title}</h1>
-            {meta?.tagline && <div className="show__tagline">{meta.tagline}</div>}
-            <div className="show__meta">
-              {year && <span>{year}</span>}
-              <span className="show__dot">·</span>
-              <span>{show.seasons.length} season{show.seasons.length === 1 ? '' : 's'}</span>
-              <span className="show__dot">·</span>
-              <span>{totalEps} episode{totalEps === 1 ? '' : 's'}</span>
-              {meta?.status && <><span className="show__dot">·</span><span>{meta.status}</span></>}
-              {meta?.network && <><span className="show__dot">·</span><span>{meta.network}</span></>}
-              {meta?.rating && <><span className="show__dot">·</span><span className="show__rating">★ {meta.rating.toFixed(1)}</span></>}
-            </div>
-            {meta?.overview && <p className="show__overview">{meta.overview}</p>}
-          </div>
-        </div>
-      </section>
+          <p>Series</p>
+          <h1>{meta?.title ?? show.title}</h1>
+          {meta?.tagline && <p>{meta.tagline}</p>}
+          <p>
+            {year && <span>{year} · </span>}
+            <span>{show.seasons.length} season{show.seasons.length === 1 ? '' : 's'}</span>
+            <span> · {totalEps} episode{totalEps === 1 ? '' : 's'}</span>
+            {meta?.status && <span> · {meta.status}</span>}
+            {meta?.network && <span> · {meta.network}</span>}
+            {meta?.rating && <span> · ★ {meta.rating.toFixed(1)}</span>}
+          </p>
+          {meta?.overview && <p>{meta.overview}</p>}
+        </section>
 
-      <section className="show__body">
-        <div className="show__seasons">
-          {show.seasons.map(s => (
-            <button
-              key={s.number}
-              className={`show__season ${season === s.number ? 'is-active' : ''}`}
-              onClick={() => setSeason(s.number)}
-            >
-              Season {s.number} <span className="show__season-count">· {s.episodeCount}</span>
-            </button>
-          ))}
-        </div>
+        <section aria-label="Episodes">
+          <nav aria-label="Seasons">
+            {show.seasons.map(s => (
+              <button
+                key={s.number}
+                aria-pressed={season === s.number}
+                onClick={() => setSeason(s.number)}
+              >
+                Season {s.number} <span>· {s.episodeCount}</span>
+              </button>
+            ))}
+          </nav>
 
-        <div className="show__episodes">
-          {episodes.length === 0 && <div className="show__empty">No episodes in this season.</div>}
-          {episodes.map(ep => <EpisodeRow key={ep.id} episode={ep} onPlay={() => navigate(`/play/${ep.id}`)} />)}
-        </div>
-      </section>
+          <ul>
+            {episodes.length === 0 && <li>No episodes in this season.</li>}
+            {episodes.map(ep => (
+              <li key={ep.id}>
+                <EpisodeRow episode={ep} onPlay={() => navigate(`/play/${ep.id}`)} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      </main>
     </div>
   )
 }
@@ -110,29 +107,23 @@ function EpisodeRow({ episode, onPlay }: { episode: MediaItem; onPlay: () => voi
   const epNum = typeof episode.episode === 'number' ? `E${String(episode.episode).padStart(2, '0')}` : ''
   const mins = Math.round(episode.duration / 60)
   return (
-    <button className="ep" onClick={onPlay}>
-      <div
-        className="ep__still"
-        style={still ? { backgroundImage: `url(${still})` } : undefined}
-      >
-        {!still && <div className="ep__still-fallback">No still</div>}
-        <div className="ep__play-badge"><Icon name="play" size={12} color="#000" /></div>
-      </div>
-      <div className="ep__info">
-        <div className="ep__head">
-          {epNum && <span className="ep__num">{epNum}</span>}
-          <span className="ep__title">{episode.title}</span>
-        </div>
-        <div className="ep__meta">
-          <span>{mins}m</span>
-          <span className="ep__dot">·</span>
-          <span>{episode.resolution}</span>
-          {episode.hdr?.dv && <><span className="ep__dot">·</span><span className="ep__dv">Dolby Vision</span></>}
-          {episode.audioTracks?.[0] && <><span className="ep__dot">·</span><span>{episode.audioTracks[0].codec.toUpperCase()}</span></>}
-          {epMeta?.airDate && <><span className="ep__dot">·</span><span>{epMeta.airDate}</span></>}
-        </div>
-        {epMeta?.overview && <p className="ep__overview">{epMeta.overview}</p>}
-      </div>
+    <button onClick={onPlay}>
+      {still
+        ? <img src={still} alt="" width={342} height={192} loading="lazy" />
+        : <span>No still</span>}
+      <Icon name="play" size={12} />
+      <span>
+        {epNum && <span>{epNum} </span>}
+        <span>{episode.title}</span>
+      </span>
+      <span>
+        <span>{mins}m</span>
+        <span> · {episode.resolution}</span>
+        {episode.hdr?.dv && <span> · Dolby Vision</span>}
+        {episode.audioTracks?.[0] && <span> · {episode.audioTracks[0].codec.toUpperCase()}</span>}
+        {epMeta?.airDate && <span> · {epMeta.airDate}</span>}
+      </span>
+      {epMeta?.overview && <span>{epMeta.overview}</span>}
     </button>
   )
 }

@@ -2,6 +2,7 @@ import { loadConfig } from '../config/config.ts'
 import { detectHwAccel } from '../../contexts/playback/index.ts'
 import { openDatabase } from '../db/connection.ts'
 import { migrate } from '../db/migrations.ts'
+import { runBackup } from '../db/backup.ts'
 import { createUserRepo, createSessionRepo, createHouseholdRepo, createInviteRepo, ensureHouseholds } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
@@ -17,7 +18,7 @@ import {
   type WatcherHandle,
 } from '../../contexts/library/index.ts'
 import { startDailySchedule, type DailyScheduleHandle } from '../scheduler/scheduler.ts'
-import { createSessionManager } from '../../contexts/playback/index.ts'
+import { createSessionManager, sweepSessionDirs } from '../../contexts/playback/index.ts'
 import { createPlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import { buildServer } from '../http/server.ts'
 import { createActivityBus } from '../../contexts/activity/index.ts'
@@ -78,6 +79,9 @@ export async function bootstrap() {
   const inviteRepo = createInviteRepo(db)
   // Boot sweep of expired sessions (incremental cleanup also happens on resolve).
   sessionRepo.sweepExpired()
+  // Boot sweep of orphaned HLS session dirs — playback sessions never survive a
+  // restart, so anything under <cacheDir>/sessions is a leak from a crash.
+  await sweepSessionDirs(cfg.cacheDir)
   const serverSettings = createServerSettings(db)
   // Overlay env values exactly once (fresh install / first boot after upgrade).
   serverSettings.bootstrapFromEnv(cfg)
@@ -211,6 +215,17 @@ export async function bootstrap() {
       await scanManager.request({ trigger: 'cron', paths: [] })
       await refreshWorker.run({ useChangesFeed: true })
     },
+  })
+
+  // Nightly DB backup one hour after the scan — the DB is all of Horizon's
+  // state, so a corrupted file should cost a restore, not a rebuild. Backups
+  // land in `backups/` next to the DB (inside the /config volume) with a
+  // 7-day retention. Catch-up on boot covers servers that sleep overnight.
+  const backupHandle: DailyScheduleHandle = startDailySchedule({
+    hourLocal: (settings.scanCronHour + 1) % 24,
+    catchUpIfOlderThanMs: 36 * 60 * 60 * 1000,
+    lastFiredAt: 0,
+    task: async () => { await runBackup(db, cfg.dbPath) },
   })
 
   // Snapshot the current root set so each change event can diff added/removed.

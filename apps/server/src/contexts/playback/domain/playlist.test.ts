@@ -41,8 +41,8 @@ describe('buildRenditionPlaylist', () => {
 
 describe('buildMasterPlaylist', () => {
   const profiles: Profile[] = [
-    { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080 },
-    { name: '720p',  videoBitrate: 4000, audioBitrate: 128, width: 1280, height: 720 },
+    { name: '1080p', videoBitrate: 8000, audioBitrate: 192, width: 1920, height: 1080, h264Level: '4.2' },
+    { name: '720p', videoBitrate: 4000, audioBitrate: 128, width: 1280, height: 720, h264Level: '4.0' },
   ]
 
   it('emits one STREAM-INF per profile', () => {

@@ -4,6 +4,46 @@ export interface BandwidthSample {
   timestamp: number
 }
 
+const STORAGE_KEY = 'horizon:lastBandwidthKbps'
+/** Ignore stored estimates older than this — networks change. */
+const STORAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000
+/** Fraction of the measured bandwidth we admit as a ceiling — headroom for
+ *  audio, container overhead, and estimate noise. */
+export const BANDWIDTH_SAFETY_FACTOR = 0.8
+
+/** Persist a bandwidth estimate so the NEXT session can start at a sensible
+ *  quality instead of blindly direct-playing an 80 Mbps remux over a 20 Mbps
+ *  link. No-op outside the browser. */
+export function storeBandwidthEstimate(kbps: number): void {
+  if (typeof localStorage === 'undefined' || kbps <= 0) return
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ kbps, at: Date.now() }))
+  } catch {/* storage full / privacy mode — best-effort */}
+}
+
+/** Last stored estimate (kbps), or 0 when unknown/stale. */
+export function loadBandwidthEstimate(): number {
+  if (typeof localStorage === 'undefined') return 0
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return 0
+    const { kbps, at } = JSON.parse(raw) as { kbps?: number; at?: number }
+    if (typeof kbps !== 'number' || typeof at !== 'number') return 0
+    if (Date.now() - at > STORAGE_MAX_AGE_MS) return 0
+    return kbps > 0 ? kbps : 0
+  } catch {
+    return 0
+  }
+}
+
+/** Effective maxBitrate for session create: combine an explicit preference cap
+ *  with the stored measured estimate (with safety headroom). 0 = unlimited. */
+export function effectiveMaxBitrate(preferenceCapKbps: number): number {
+  const measured = Math.floor(loadBandwidthEstimate() * BANDWIDTH_SAFETY_FACTOR)
+  if (preferenceCapKbps > 0 && measured > 0) return Math.min(preferenceCapKbps, measured)
+  return preferenceCapKbps > 0 ? preferenceCapKbps : measured
+}
+
 export class BandwidthSampler {
   private samples: BandwidthSample[] = []
   private readonly windowSize = 5

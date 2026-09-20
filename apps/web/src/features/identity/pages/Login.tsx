@@ -5,18 +5,6 @@ import { useActiveUser } from '../hooks/useActiveUser.ts'
 import HorizonMark from '../../../shared/ui/chrome/HorizonMark.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
 import type { User } from '@horizon/sdk'
-import './Login.css'
-
-/** Deterministic per-user colour so picker tiles are visually distinct.
- *  Mirrors ProfileBadgeButton so the same name always maps to the same accent
- *  across the app. */
-function userColor(name: string): string {
-  const palette = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
-  return palette[Math.abs(hash) % palette.length]
-}
-
 /** Generic, non-enumerating message for any login failure (wrong password,
  *  unknown user, lockout). The server is deliberately vague; the UI matches. */
 const LOGIN_ERROR = 'Incorrect password, or the account is temporarily locked. Try again shortly.'
@@ -73,70 +61,53 @@ export default function Login() {
 
   if (loading || meLoading) {
     return (
-      <div className="login">
-        <div className="login__loading">Loading…</div>
+      <div>
+        <div>Loading…</div>
       </div>
     )
   }
 
   if (forceSetPassword && user) {
     return (
-      <div className="login">
-        <div className="login__bg" />
-        <div className="login__content">
-          <ForcedSetPassword
-            user={user}
-            onDone={async () => { await refresh(); navigate('/', { replace: true }) }}
-          />
-        </div>
-      </div>
+      <main>
+        <ForcedSetPassword
+          user={user}
+          onDone={async () => { await refresh(); navigate('/', { replace: true }) }}
+        />
+      </main>
     )
   }
 
   return (
-    <div className="login">
-      <div className="login__bg" />
-      <div className="login__content">
-        <div className="login__header">
-          <HorizonMark size={44} />
-          <h1 className="login__title">Welcome back</h1>
-          <p className="login__subtitle">
-            {selected ? `Enter ${selected.name}'s password` : 'Choose a profile to sign in'}
-          </p>
-        </div>
+    <main>
+      <HorizonMark size={44} />
+      <h1>Welcome back</h1>
+      <p>
+        {selected ? `Enter ${selected.name}'s password` : 'Choose a profile to sign in'}
+      </p>
 
-        {!selected ? (
-          <div className="login__grid">
-            {users.map(u => {
-              const color = userColor(u.name)
-              const initial = u.avatar ?? u.name.charAt(0).toUpperCase()
-              return (
+      {!selected ? (
+        <ul>
+          {users.map(u => {
+            const initial = u.avatar ?? u.name.charAt(0).toUpperCase()
+            return (
+              <li key={u.id}>
                 <button
-                  key={u.id}
-                  className="login__profile"
                   onClick={() => { setSelected(u); setPassword(''); setError(null) }}
                 >
-                  <div
-                    className="login__avatar"
-                    style={{ background: color, boxShadow: `0 24px 60px ${color}66` }}
-                  >
-                    {initial}
-                  </div>
-                  <div className="login__name">{u.name}</div>
+                  <span aria-hidden="true">{initial}</span>
+                  <span>{u.name}</span>
                 </button>
-              )
-            })}
-          </div>
-        ) : (
-          <div className="login__form">
-            <div
-              className="login__avatar login__avatar--sm"
-              style={{ background: userColor(selected.name) }}
-            >
-              {selected.avatar ?? selected.name.charAt(0).toUpperCase()}
-            </div>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <div>
+          <span aria-hidden="true">
+            {selected.avatar ?? selected.name.charAt(0).toUpperCase()}
+          </span>
             <input
-              className="login__input"
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
@@ -145,22 +116,20 @@ export default function Login() {
               autoComplete="current-password"
               onKeyDown={e => e.key === 'Enter' && login()}
             />
-            {error && <div className="login__error">{error}</div>}
-            <button className="login__submit" disabled={busy || !password} onClick={login}>
-              {busy ? 'Signing in…' : <>Sign in <Icon name="chevron-right" size={14} color="#000" /></>}
+            {error && <p role="alert">{error}</p>}
+            <button disabled={busy || !password} onClick={login}>
+              {busy ? 'Signing in…' : <>Sign in <Icon name="chevron-right" size={14} /></>}
             </button>
             <button
-              className="login__back"
               type="button"
               disabled={busy}
               onClick={() => { setSelected(null); setPassword(''); setError(null) }}
             >
               Choose a different profile
             </button>
-          </div>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </main>
   )
 }
 
@@ -188,16 +157,15 @@ function ForcedSetPassword({ user, onDone }: { user: User; onDone: () => void | 
   }
 
   return (
-    <div className="login__form">
-      <div className="login__header">
+    <div>
+      <div>
         <HorizonMark size={44} />
-        <h1 className="login__title">Set a password</h1>
-        <p className="login__subtitle">
+        <h1>Set a password</h1>
+        <p>
           {user.name}, secure your profile before continuing.
         </p>
       </div>
       <input
-        className="login__input"
         type="password"
         value={password}
         onChange={e => setPassword(e.target.value)}
@@ -206,7 +174,6 @@ function ForcedSetPassword({ user, onDone }: { user: User; onDone: () => void | 
         autoComplete="new-password"
       />
       <input
-        className="login__input"
         type="password"
         value={confirm}
         onChange={e => setConfirm(e.target.value)}
@@ -214,9 +181,9 @@ function ForcedSetPassword({ user, onDone }: { user: User; onDone: () => void | 
         autoComplete="new-password"
         onKeyDown={e => e.key === 'Enter' && submit()}
       />
-      {error && <div className="login__error">{error}</div>}
-      <button className="login__submit" disabled={busy} onClick={submit}>
-        {busy ? 'Saving…' : <>Continue <Icon name="chevron-right" size={14} color="#000" /></>}
+      {error && <p role="alert">{error}</p>}
+      <button disabled={busy} onClick={submit}>
+        {busy ? 'Saving…' : <>Continue <Icon name="chevron-right" size={14} /></>}
       </button>
     </div>
   )

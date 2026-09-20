@@ -3,7 +3,6 @@ import { ErrorCodes } from '@horizon/sdk'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
 import type { HwAccel } from '../../domain/hwaccel.ts'
 import type { Session } from '../../domain/types.ts'
 import type { PlaybackPlan } from '../../domain/plan.ts'
@@ -32,10 +31,22 @@ export function getFfmpegStderrTail(proc: import('node:child_process').ChildProc
   return stderrTails.get(proc)?.() ?? ''
 }
 
-export async function createSessionDir(sessionId: string): Promise<string> {
-  const dir = path.join(os.tmpdir(), 'horizon', 'sessions', sessionId)
+/** Root under the cache dir holding all per-session HLS dirs. Swept wholesale
+ *  on boot — no session survives a restart. */
+export function sessionsRoot(cacheDir: string): string {
+  return path.join(cacheDir, 'sessions')
+}
+
+export async function createSessionDir(cacheDir: string, sessionId: string): Promise<string> {
+  const dir = path.join(sessionsRoot(cacheDir), sessionId)
   await mkdir(dir, { recursive: true })
   return dir
+}
+
+/** Remove every leftover session dir. Called once at boot: any dir present is
+ *  an orphan from a previous process (crash / SIGKILL skipped destroy()). */
+export async function sweepSessionDirs(cacheDir: string): Promise<void> {
+  await rm(sessionsRoot(cacheDir), { recursive: true, force: true })
 }
 
 export async function cleanupSessionDir(sessionDir: string): Promise<void> {

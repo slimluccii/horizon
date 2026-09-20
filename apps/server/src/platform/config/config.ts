@@ -60,6 +60,14 @@ export interface Config {
   serverName: string | undefined
   /** Advertise the server over mDNS. Off in host setups without multicast. */
   mdnsEnabled: boolean
+  /** Trust X-Forwarded-* headers (reverse proxy / tunnel deployments). Fastify
+   *  then derives req.ip and req.protocol from them, so per-IP rate limits see
+   *  the real client and the session cookie gets its Secure flag behind TLS
+   *  termination. Leave off when clients connect directly. */
+  trustProxy: boolean
+  /** Minimum free space (MB) required on the cache volume to start a new
+   *  playback session. HLS session dirs grow for the session's lifetime. */
+  minFreeDiskMb: number
 }
 
 /** Parse env var as positive integer, falling back to default on missing/NaN. */
@@ -114,6 +122,8 @@ export function loadConfig(): Config {
     serveWeb: webDir ? envBool('HORIZON_SERVE_WEB', true) : false,
     serverName: process.env.HORIZON_SERVER_NAME || undefined,
     mdnsEnabled: envBool('HORIZON_MDNS', true),
+    trustProxy: envBool('HORIZON_TRUST_PROXY', false),
+    minFreeDiskMb: envInt('HORIZON_MIN_FREE_DISK_MB', 2048),
   }
 }
 

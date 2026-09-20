@@ -38,7 +38,7 @@ function makeSession(renditionCount: number, opts: { ownedByMember?: boolean; us
     plan: plan(renditionCount),
     selectedSubtitleTrack: null,
     audioTrackCount: 1,
-    subtitleTrackCount: 0,
+    subtitleTrackCount: 0, imageSubtitleIndexes: [],
     renditionCodecs: [],
     sessionDir: '/tmp/sess',
     sessionReady: true,

@@ -4,22 +4,14 @@ import { horizon } from '../../../shared/horizon.ts'
 import { useActiveUser } from '../../identity/hooks/useActiveUser.ts'
 import { useActivityStream } from '../hooks/useActivityStream.ts'
 import ActivityLogPanel from '../components/ActivityLogPanel.tsx'
+import NowPlayingPanel from '../components/NowPlayingPanel.tsx'
 import HouseholdPanel from '../components/HouseholdPanel'
 import AllHouseholdsPanel from '../components/AllHouseholdsPanel'
 import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
 import type { Preferences, User, ServerSettings, ScanStatusResponse } from '@horizon/sdk'
 import { FolderBrowser, type LibraryTag } from '../../../shared/ui/FolderBrowser/FolderBrowser.tsx'
 import LargeTopNav from '../../../shared/ui/chrome/LargeTopNav.tsx'
-import './Settings.css'
-
 type Tab = 'Personal' | 'Household' | 'Server' | 'Profiles'
-
-const PALETTE = ['#0089FF', '#E34989', '#1FA47C', '#F5C518', '#9D5CFF', '#FA6A3C']
-function userColor(name: string): string {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0
-  return PALETTE[Math.abs(hash) % PALETTE.length]
-}
 
 function ProfilesPanel({
   viewerId,
@@ -93,24 +85,23 @@ function ProfilesPanel({
   }
 
   return (
-    <div>
-      <p className="settings__section-title">Profiles</p>
+    <section aria-label="Profiles">
+      <h3>Profiles</h3>
+      <ul>
       {rows.map(row => {
-        const color = userColor(row.name)
         const initial = row.avatar ?? row.name.charAt(0).toUpperCase()
         const isSelf = row.id === viewerId
         // Owner/admin may reset any non-owner, non-self member. The owner resets
         // their own password via the Personal → Security "Change password".
         const canReset = !isSelf && row.role !== 'owner'
         return (
-          <div key={row.id} className={`settings__profile-row${row.role === 'owner' ? ' settings__profile-row--owner' : ''}`}>
-            <div className="settings__profile-avatar" style={{ background: color }}>{initial}</div>
-            <span className="settings__profile-name">{row.name}</span>
+          <li key={row.id}>
+            <span aria-hidden="true">{initial}</span>
+            <span>{row.name}</span>
             {row.role === 'owner' ? (
-              <span className="settings__profile-role-label">Owner</span>
+              <span>Owner</span>
             ) : (
               <select
-                className="settings__profile-role-select"
                 value={row.role}
                 disabled={busy}
                 onChange={e => handleRoleChange(row.id, e.target.value as 'admin' | 'member')}
@@ -121,25 +112,23 @@ function ProfilesPanel({
             )}
             {canReset && (
               resetFor === row.id ? (
-                <div className="settings__profile-reset">
+                <div>
                   <input
                     type="password"
-                    className="settings__input"
                     placeholder="New password"
                     value={resetPw}
                     autoComplete="new-password"
                     onChange={e => setResetPw(e.target.value)}
                   />
-                  <button className="settings__token-replace" disabled={busy} onClick={() => handleResetPassword(row.id)}>
+                  <button disabled={busy} onClick={() => handleResetPassword(row.id)}>
                     Save
                   </button>
-                  <button className="settings__token-cancel" disabled={busy} onClick={() => { setResetFor(null); setResetPw('') }}>
+                  <button disabled={busy} onClick={() => { setResetFor(null); setResetPw('') }}>
                     Cancel
                   </button>
                 </div>
               ) : (
                 <button
-                  className="settings__token-replace"
                   disabled={busy}
                   onClick={() => { setResetFor(row.id); setResetPw(''); setErr(null) }}
                 >
@@ -147,11 +136,12 @@ function ProfilesPanel({
                 </button>
               )
             )}
-          </div>
+          </li>
         )
       })}
-      {err && <p className="settings__profile-error">{err}</p>}
-    </div>
+      </ul>
+      {err && <p>{err}</p>}
+    </section>
   )
 }
 
@@ -210,15 +200,14 @@ function SecurityPanel({
 
   return (
     <>
-      <p className="settings__section-title">Security</p>
+      <p>Security</p>
 
-      <div className="settings__field">
-        <label className="settings__label">Password</label>
+      <div>
+        <label>Password</label>
         {showChange ? (
-          <div className="settings__token-input-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+          <div>
             <input
               type="password"
-              className="settings__input"
               placeholder="Current password"
               value={oldPw}
               autoComplete="current-password"
@@ -226,7 +215,6 @@ function SecurityPanel({
             />
             <input
               type="password"
-              className="settings__input"
               placeholder="New password"
               value={newPw}
               autoComplete="new-password"
@@ -234,41 +222,40 @@ function SecurityPanel({
             />
             <input
               type="password"
-              className="settings__input"
               placeholder="Confirm new password"
               value={confirmPw}
               autoComplete="new-password"
               onChange={e => setConfirmPw(e.target.value)}
             />
-            <div className="settings__token-row">
-              <button className="settings__token-replace" disabled={busy} onClick={changePassword}>
+            <div>
+              <button disabled={busy} onClick={changePassword}>
                 {busy ? 'Saving…' : 'Save password'}
               </button>
-              <button className="settings__token-cancel" disabled={busy} onClick={() => { setShowChange(false); setErr(null) }}>
+              <button disabled={busy} onClick={() => { setShowChange(false); setErr(null) }}>
                 Cancel
               </button>
             </div>
           </div>
         ) : (
-          <button className="settings__token-replace" type="button" onClick={() => { setShowChange(true); setErr(null) }}>
+          <button type="button" onClick={() => { setShowChange(true); setErr(null) }}>
             Change password
           </button>
         )}
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label">Sessions</label>
-        <div className="settings__token-row">
-          <button className="settings__token-cancel" disabled={busy} onClick={() => doLogout(false)}>
+      <div>
+        <label>Sessions</label>
+        <div>
+          <button disabled={busy} onClick={() => doLogout(false)}>
             Sign out
           </button>
-          <button className="settings__token-cancel" disabled={busy} onClick={() => doLogout(true)}>
+          <button disabled={busy} onClick={() => doLogout(true)}>
             Sign out everywhere
           </button>
         </div>
       </div>
 
-      {err && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{err}</p>}
+      {err && <p>{err}</p>}
     </>
   )
 }
@@ -380,18 +367,17 @@ function LibraryFoldersPanel({ onSave }: { onSave: (msg: string) => void }) {
 
   function renderList(roots: string[], tag: LibraryTag) {
     return (
-      <div className="settings__field">
-        <label className="settings__label">{tag === 'movies' ? 'Movies folders' : 'Shows folders'}</label>
+      <div>
+        <label>{tag === 'movies' ? 'Movies folders' : 'Shows folders'}</label>
         {roots.length === 0 ? (
-          <p className="settings__roots-empty">No folders added.</p>
+          <p>No folders added.</p>
         ) : (
-          <ul className="settings__roots-list">
+          <ul>
             {roots.map(path => (
-              <li key={path} className="settings__roots-row">
-                <span className="settings__roots-path" title={path}>{path}</span>
+              <li key={path}>
+                <span title={path}>{path}</span>
                 <button
                   type="button"
-                  className="settings__roots-remove"
                   disabled={busy}
                   onClick={() => handleRemove(path, tag)}
                 >
@@ -407,31 +393,30 @@ function LibraryFoldersPanel({ onSave }: { onSave: (msg: string) => void }) {
 
   if (moviesRoots === null || showsRoots === null) {
     return error
-      ? <p style={{ color: 'var(--danger)', fontSize: '13px' }}>{error}</p>
-      : <p className="settings__section-title">Loading…</p>
+      ? <p>{error}</p>
+      : <p>Loading…</p>
   }
 
   return (
     <>
-      <p className="settings__section-title">Library folders</p>
+      <p>Library folders</p>
 
       {renderList(moviesRoots, 'movies')}
       {renderList(showsRoots, 'shows')}
 
       {showBrowser ? (
-        <div className="settings__field">
+        <div>
           <FolderBrowser browse={path => horizon.library.browse(path)} onPick={handlePick} />
-          <div className="settings__roots-browser-actions">
-            <button type="button" className="settings__token-cancel" onClick={() => setShowBrowser(false)}>
+          <div>
+            <button type="button" onClick={() => setShowBrowser(false)}>
               Cancel
             </button>
           </div>
         </div>
       ) : (
-        <div className="settings__field">
+        <div>
           <button
             type="button"
-            className="settings__token-replace"
             disabled={busy}
             onClick={() => setShowBrowser(true)}
           >
@@ -440,7 +425,7 @@ function LibraryFoldersPanel({ onSave }: { onSave: (msg: string) => void }) {
         </div>
       )}
 
-      {error && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{error}</p>}
+      {error && <p>{error}</p>}
     </>
   )
 }
@@ -525,37 +510,28 @@ function ScanStatusBadge({ onToast }: { onToast: (msg: string) => void }) {
   }
 
   return (
-    <div className={`settings__scan ${active ? 'is-active' : ''}`}>
-      <div className="settings__scan-row">
-        <span className={`settings__scan-dot ${active ? 'is-active' : ''}`} aria-hidden="true" />
-        <span className="settings__scan-text">{detail}</span>
-        <button className="settings__scan-rescan" type="button" disabled={busy || active} onClick={rescan}>
+    <div>
+      <div>
+        <span>{detail}</span>
+        <button type="button" disabled={busy || active} onClick={rescan}>
           {busy ? 'Starting…' : 'Rescan now'}
         </button>
       </div>
       {showBar && (
-        <div
-          className="settings__scan-bar"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={total}
-          aria-valuenow={processed}
-        >
-          <div className="settings__scan-bar-fill" style={{ width: `${pct}%` }} />
-        </div>
+        <progress max={total} value={processed} aria-label="Scan progress" />
       )}
       {active && (
-        <div className="settings__scan-live">
+        <div>
           <span>Movies: {activity.counts.movies} · Series: {activity.counts.shows}</span>
           {activity.current && (
-            <span className="settings__scan-current">
+            <span>
               {' · '}{activity.current.step} — “{activity.current.title}”
               {activity.current.tmdbId ? ` #${activity.current.tmdbId}` : ''}
             </span>
           )}
         </div>
       )}
-      <button type="button" className="settings__scan-logtoggle" onClick={() => setShowLog(v => !v)}>
+      <button type="button" onClick={() => setShowLog(v => !v)}>
         {showLog ? 'Hide raw log' : 'Show raw log'}
       </button>
       {showLog && <ActivityLogPanel lines={activity.rawLines} />}
@@ -624,8 +600,8 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
 
   if (!form || !initialLib || !metaForm || !initialMeta) {
     return error
-      ? <p style={{ color: 'var(--danger)', fontSize: '13px' }}>{error}</p>
-      : <p className="settings__section-title">Loading…</p>
+      ? <p>{error}</p>
+      : <p>Loading…</p>
   }
 
   function set<K extends keyof LibraryForm>(key: K, value: LibraryForm[K]) {
@@ -719,90 +695,84 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
 
   return (
     <>
-      <p className="settings__section-title">Library</p>
+      <p>Library</p>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-watched-pct">
+      <div>
+        <label htmlFor="settings-watched-pct">
           Watched threshold (%)
         </label>
         <input
           id="settings-watched-pct"
           type="number"
-          className="settings__input"
           min={1} max={100}
           value={form.watchedThresholdPct}
           onChange={e => set('watchedThresholdPct', Number(e.target.value))}
         />
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-cron-hour">
+      <div>
+        <label htmlFor="settings-cron-hour">
           Nightly scan hour (0–23 local time)
         </label>
         <input
           id="settings-cron-hour"
           type="number"
-          className="settings__input"
           min={0} max={23}
           value={form.scanCronHour}
           onChange={e => set('scanCronHour', Number(e.target.value))}
         />
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-concurrency">
+      <div>
+        <label htmlFor="settings-concurrency">
           Scan concurrency
         </label>
         <input
           id="settings-concurrency"
           type="number"
-          className="settings__input"
           min={1} max={32}
           value={form.scanConcurrency}
           onChange={e => set('scanConcurrency', Number(e.target.value))}
         />
       </div>
 
-      <div className="settings__field">
-        <div className="settings__toggle-row">
-          <label className="settings__toggle-label" htmlFor="settings-watch-fs">
+      <div>
+        <div>
+          <label htmlFor="settings-watch-fs">
             Enable filesystem watcher
           </label>
           <input
             id="settings-watch-fs"
             type="checkbox"
-            className="settings__toggle-input"
             checked={form.watchFs}
             onChange={e => set('watchFs', e.target.checked)}
           />
         </div>
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-debounce">
+      <div>
+        <label htmlFor="settings-debounce">
           Watcher debounce (ms)
         </label>
         <input
           id="settings-debounce"
           type="number"
-          className="settings__input"
           min={100} max={60000}
           value={form.watchDebounceMs}
           onChange={e => set('watchDebounceMs', Number(e.target.value))}
         />
       </div>
 
-      <p className="settings__section-title">Metadata</p>
+      <p>Metadata</p>
 
-      <div className="settings__field">
-        <label className="settings__label">TMDB Token</label>
-        <div className="settings__token-row">
-          <span className={`settings__token-status settings__token-status--${tmdbStatus}`}>
+      <div>
+        <label>TMDB Token</label>
+        <div>
+          <span>
             {tmdbStatus === 'set' ? 'Set' : 'Not set'}
           </span>
           {!showTokenInput && (
             <button
-              className="settings__token-replace"
               type="button"
               onClick={() => { setShowTokenInput(true); setPendingToken('') }}
             >
@@ -811,18 +781,16 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
           )}
         </div>
         {showTokenInput && (
-          <div className="settings__token-input-row">
+          <div>
             <input
               id="settings-tmdb-token"
               type="password"
-              className="settings__input"
               placeholder="Paste new token or leave blank to clear"
               value={pendingToken}
               onChange={e => setPendingToken(e.target.value)}
               autoComplete="off"
             />
             <button
-              className="settings__token-cancel"
               type="button"
               onClick={() => { setShowTokenInput(false); setPendingToken('') }}
             >
@@ -832,67 +800,62 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
         )}
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-batch-size">
+      <div>
+        <label htmlFor="settings-batch-size">
           Metadata batch size
         </label>
         <input
           id="settings-batch-size"
           type="number"
-          className="settings__input"
           min={1} max={500}
           value={metaForm.metadataBatchSize}
           onChange={e => setMeta('metadataBatchSize', Number(e.target.value))}
         />
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-max-age-movie">
+      <div>
+        <label htmlFor="settings-max-age-movie">
           Movie metadata max age (days)
         </label>
         <input
           id="settings-max-age-movie"
           type="number"
-          className="settings__input"
           min={1}
           value={metaForm.metadataMaxAgeMovieDays}
           onChange={e => setMeta('metadataMaxAgeMovieDays', Number(e.target.value))}
         />
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-max-age-show">
+      <div>
+        <label htmlFor="settings-max-age-show">
           Show metadata max age (days)
         </label>
         <input
           id="settings-max-age-show"
           type="number"
-          className="settings__input"
           min={1}
           value={metaForm.metadataMaxAgeShowDays}
           onChange={e => setMeta('metadataMaxAgeShowDays', Number(e.target.value))}
         />
       </div>
 
-      <div className="settings__field">
-        <label className="settings__label" htmlFor="settings-max-age-episode">
+      <div>
+        <label htmlFor="settings-max-age-episode">
           Episode metadata max age (days)
         </label>
         <input
           id="settings-max-age-episode"
           type="number"
-          className="settings__input"
           min={1}
           value={metaForm.metadataMaxAgeEpDays}
           onChange={e => setMeta('metadataMaxAgeEpDays', Number(e.target.value))}
         />
       </div>
 
-      {error && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{error}</p>}
+      {error && <p>{error}</p>}
 
-      <div className="settings__actions">
+      <div>
         <button
-          className="settings__save"
           disabled={!canSave}
           onClick={handleSave}
         >
@@ -903,85 +866,79 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
       {/* ---- Playback subsection ---------------------------------------- */}
       {playbackForm && (
         <>
-          <p className="settings__section-title">Playback</p>
+          <p>Playback</p>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-max-sessions">
+          <div>
+            <label htmlFor="settings-max-sessions">
               Max concurrent sessions
             </label>
             <input
               id="settings-max-sessions"
               type="number"
-              className="settings__input"
               min={1} max={64}
               value={playbackForm.maxSessions}
               onChange={e => setPlayback('maxSessions', Number(e.target.value))}
             />
           </div>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-max-renditions">
+          <div>
+            <label htmlFor="settings-max-renditions">
               Max renditions (ABR ladder size)
             </label>
             <input
               id="settings-max-renditions"
               type="number"
-              className="settings__input"
               min={1} max={8}
               value={playbackForm.maxRenditions}
               onChange={e => setPlayback('maxRenditions', Number(e.target.value))}
             />
           </div>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-ws-grace">
+          <div>
+            <label htmlFor="settings-ws-grace">
               WS grace period (ms)
             </label>
             <input
               id="settings-ws-grace"
               type="number"
-              className="settings__input"
               min={0}
               value={playbackForm.wsGraceMs}
               onChange={e => setPlayback('wsGraceMs', Number(e.target.value))}
             />
           </div>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-ws-attach">
+          <div>
+            <label htmlFor="settings-ws-attach">
               WS attach timeout (ms)
             </label>
             <input
               id="settings-ws-attach"
               type="number"
-              className="settings__input"
               min={0}
               value={playbackForm.wsAttachMs}
               onChange={e => setPlayback('wsAttachMs', Number(e.target.value))}
             />
           </div>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-force-encoder">
+          <div>
+            <label htmlFor="settings-force-encoder">
               Force encoder{detectedEncoder ? ` (current: ${detectedEncoder})` : ''}
             </label>
             <input
               id="settings-force-encoder"
               type="text"
-              className="settings__input"
               placeholder="e.g. h264_videotoolbox (leave empty for auto-detect)"
               value={playbackForm.forceEncoder}
               onChange={e => setPlayback('forceEncoder', e.target.value)}
             />
           </div>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-tonemap-op">
+          <div>
+            <label htmlFor="settings-tonemap-op">
               Tone-map operator
             </label>
             <select
               id="settings-tonemap-op"
-              className="settings__select"
               value={playbackForm.tonemapOperator}
               onChange={e => setPlayback('tonemapOperator', e.target.value)}
             >
@@ -991,39 +948,36 @@ function ServerPanel({ onSave }: { onSave: (msg: string) => void }) {
             </select>
           </div>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-tonemap-param">
+          <div>
+            <label htmlFor="settings-tonemap-param">
               Tone-map param (leave empty for operator default)
             </label>
             <input
               id="settings-tonemap-param"
               type="number"
-              className="settings__input"
               placeholder="operator default"
               value={playbackForm.tonemapParam}
               onChange={e => setPlayback('tonemapParam', e.target.value)}
             />
           </div>
 
-          <div className="settings__field">
-            <label className="settings__label" htmlFor="settings-tonemap-desat">
+          <div>
+            <label htmlFor="settings-tonemap-desat">
               Tone-map desat (leave empty for operator default)
             </label>
             <input
               id="settings-tonemap-desat"
               type="number"
-              className="settings__input"
               placeholder="operator default"
               value={playbackForm.tonemapDesat}
               onChange={e => setPlayback('tonemapDesat', e.target.value)}
             />
           </div>
 
-          {playbackError && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{playbackError}</p>}
+          {playbackError && <p>{playbackError}</p>}
 
-          <div className="settings__actions">
+          <div>
             <button
-              className="settings__save"
               disabled={!canSavePlayback}
               onClick={handleSavePlayback}
             >
@@ -1131,28 +1085,29 @@ export default function Settings() {
   }
 
   return (
-    <div className="settings">
+    <div>
       <LargeTopNav />
       {toast && (
-        <div className="settings__toast" role="status" aria-live="polite">
+        <div role="status" aria-live="polite">
           {toast}
         </div>
       )}
-      <div className="settings__body">
-        <div className="settings__tabs">
+      <main>
+        <nav aria-label="Settings sections">
           {tabs.map(tab => (
             <button
               key={tab}
-              className={`settings__tab ${activeTab === tab ? 'is-active' : ''}`}
+              aria-current={activeTab === tab ? 'page' : undefined}
               onClick={() => setActiveTab(tab)}
             >
               {tab}
             </button>
           ))}
-        </div>
+        </nav>
 
         {activeTab === 'Server' && (
           <>
+            <NowPlayingPanel />
             <ScanStatusBadge onToast={showToast} />
             <LibraryFoldersPanel onSave={showToast} />
             <ServerPanel onSave={showToast} />
@@ -1175,13 +1130,12 @@ export default function Settings() {
 
         {activeTab === 'Personal' && (
           <>
-            <p className="settings__section-title">Appearance</p>
+            <p>Appearance</p>
 
-            <div className="settings__field">
-              <label className="settings__label" htmlFor="settings-theme">Theme</label>
+            <div>
+              <label htmlFor="settings-theme">Theme</label>
               <select
                 id="settings-theme"
-                className="settings__select"
                 value={form.theme}
                 onChange={e => set('theme', e.target.value as 'dark' | 'light')}
               >
@@ -1190,13 +1144,12 @@ export default function Settings() {
               </select>
             </div>
 
-            <p className="settings__section-title">Audio &amp; Subtitles</p>
+            <p>Audio &amp; Subtitles</p>
 
-            <div className="settings__field">
-              <label className="settings__label" htmlFor="settings-audio-lang">Audio Language</label>
+            <div>
+              <label htmlFor="settings-audio-lang">Audio Language</label>
               <select
                 id="settings-audio-lang"
-                className="settings__select"
                 value={form.audioLanguage}
                 onChange={e => set('audioLanguage', e.target.value)}
               >
@@ -1206,11 +1159,10 @@ export default function Settings() {
               </select>
             </div>
 
-            <div className="settings__field">
-              <label className="settings__label" htmlFor="settings-sub-lang">Subtitle Language</label>
+            <div>
+              <label htmlFor="settings-sub-lang">Subtitle Language</label>
               <select
                 id="settings-sub-lang"
-                className="settings__select"
                 value={form.subtitleLanguage}
                 onChange={e => set('subtitleLanguage', e.target.value)}
               >
@@ -1220,28 +1172,26 @@ export default function Settings() {
               </select>
             </div>
 
-            <div className="settings__field">
-              <div className="settings__toggle-row">
-                <label className="settings__toggle-label" htmlFor="settings-subtitles">
+            <div>
+              <div>
+                <label htmlFor="settings-subtitles">
                   Subtitles Enabled
                 </label>
                 <input
                   id="settings-subtitles"
                   type="checkbox"
-                  className="settings__toggle-input"
                   checked={form.subtitlesEnabled}
                   onChange={e => set('subtitlesEnabled', e.target.checked)}
                 />
               </div>
             </div>
 
-            <p className="settings__section-title">Playback</p>
+            <p>Playback</p>
 
-            <div className="settings__field">
-              <label className="settings__label" htmlFor="settings-quality">Preferred Quality</label>
+            <div>
+              <label htmlFor="settings-quality">Preferred Quality</label>
               <select
                 id="settings-quality"
-                className="settings__select"
                 value={form.preferredQuality}
                 onChange={e => set('preferredQuality', e.target.value as Required<Preferences>['preferredQuality'])}
               >
@@ -1251,28 +1201,26 @@ export default function Settings() {
               </select>
             </div>
 
-            <p className="settings__section-title">Library</p>
+            <p>Library</p>
 
-            <div className="settings__field">
-              <div className="settings__toggle-row">
-                <label className="settings__toggle-label" htmlFor="settings-collapse-collections">
+            <div>
+              <div>
+                <label htmlFor="settings-collapse-collections">
                   Collapse movie collections into one item
                 </label>
                 <input
                   id="settings-collapse-collections"
                   type="checkbox"
-                  className="settings__toggle-input"
                   checked={form.collapseMovieCollections}
                   onChange={e => set('collapseMovieCollections', e.target.checked)}
                 />
               </div>
             </div>
 
-            {error && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>{error}</p>}
+            {error && <p>{error}</p>}
 
-            <div className="settings__actions">
+            <div>
               <button
-                className="settings__save"
                 disabled={!canSave}
                 onClick={handleSave}
               >
@@ -1288,7 +1236,7 @@ export default function Settings() {
             />
           </>
         )}
-      </div>
+      </main>
     </div>
   )
 }

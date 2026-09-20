@@ -48,7 +48,7 @@ test.describe('mock scenarios', () => {
     await gotoLibrary(page, 'movies')
     await expect(page.getByText(/No movies found/i)).toBeVisible({ timeout: 10_000 })
 
-    await page.locator('.lib__pill', { hasText: /^Series$/ }).click()
+    await page.getByRole('navigation', { name: 'Library kind' }).getByRole('button', { name: 'Series' }).click()
     await expect(page.getByText(/No shows found/i)).toBeVisible()
   })
 
@@ -59,7 +59,7 @@ test.describe('mock scenarios', () => {
     await gotoLibrary(page, 'movies')
     await expect(page.locator('[data-testid="movie-card"]')).toHaveCount(1, { timeout: 10_000 })
 
-    await page.locator('.lib__pill', { hasText: /^Series$/ }).click()
+    await page.getByRole('navigation', { name: 'Library kind' }).getByRole('button', { name: 'Series' }).click()
     await expect(page.locator('[data-testid="show-card"]')).toHaveCount(1)
   })
 
@@ -74,7 +74,7 @@ test.describe('mock scenarios', () => {
     await expect(page.locator('[data-testid="movie-card"]')).toHaveCount(24, { timeout: 15_000 })
     await expect(page.getByText('Featured · Just added')).toBeVisible()
 
-    await page.locator('.lib__pill', { hasText: /^Series$/ }).click()
+    await page.getByRole('navigation', { name: 'Library kind' }).getByRole('button', { name: 'Series' }).click()
     await expect(page.locator('[data-testid="show-card"]')).toHaveCount(10)
 
     // Collapsed view (collapse on): the "Reyes Trilogy" set shows as one card in

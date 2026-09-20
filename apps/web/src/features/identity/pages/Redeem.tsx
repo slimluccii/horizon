@@ -2,8 +2,6 @@ import { useState } from 'react'
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom'
 import { horizon } from '../../../shared/horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
-import './Redeem.css'
-
 const MIN_PASSWORD_LEN = 8
 
 function formatCode(raw: string): string {
@@ -51,20 +49,20 @@ export default function Redeem() {
   if (!loading && user) return <Navigate to="/" replace />
 
   return (
-    <div className="redeem">
-      <div className="redeem__card">
+    <div>
+      <div>
         <h1>Join the server</h1>
-        <label className="redeem__label">Invite code
-          <input className="redeem__input" value={code} onChange={e => setCode(formatCode(e.target.value))} />
+        <label>Invite code
+          <input value={code} onChange={e => setCode(formatCode(e.target.value))} />
         </label>
-        <label className="redeem__label">Your name
-          <input className="redeem__input" value={name} onChange={e => setName(e.target.value)} />
+        <label>Your name
+          <input value={name} onChange={e => setName(e.target.value)} />
         </label>
-        <label className="redeem__label">Password
-          <input className="redeem__input" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+        <label>Password
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} />
         </label>
-        <button className="redeem__submit" disabled={busy} onClick={submit}>Create account</button>
-        {error && <p className="redeem__error">{error}</p>}
+        <button disabled={busy} onClick={submit}>Create account</button>
+        {error && <p>{error}</p>}
       </div>
     </div>
   )

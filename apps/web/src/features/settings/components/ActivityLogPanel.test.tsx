@@ -9,7 +9,7 @@ describe('ActivityLogPanel', () => {
     expect(screen.getByText('No activity yet.')).toBeInTheDocument()
     expect(screen.getByText('0 lines')).toBeInTheDocument()
     // No log rows rendered when empty.
-    expect(document.querySelectorAll('.actlog__line')).toHaveLength(0)
+    expect(document.querySelectorAll('ol li')).toHaveLength(0)
   })
 
   it('renders one row per line and reports the count (happy path)', () => {
@@ -18,7 +18,7 @@ describe('ActivityLogPanel', () => {
 
     expect(screen.queryByText('No activity yet.')).not.toBeInTheDocument()
     expect(screen.getByText('3 lines')).toBeInTheDocument()
-    expect(document.querySelectorAll('.actlog__line')).toHaveLength(3)
+    expect(document.querySelectorAll('ol li')).toHaveLength(3)
     expect(screen.getByText('scan: probing media')).toBeInTheDocument()
   })
 
@@ -27,6 +27,6 @@ describe('ActivityLogPanel', () => {
     render(<ActivityLogPanel lines={lines} />)
 
     expect(screen.getByText('600 lines')).toBeInTheDocument()
-    expect(document.querySelectorAll('.actlog__line')).toHaveLength(600)
+    expect(document.querySelectorAll('ol li')).toHaveLength(600)
   })
 })

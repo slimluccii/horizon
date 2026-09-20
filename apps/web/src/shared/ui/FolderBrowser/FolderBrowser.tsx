@@ -1,4 +1,3 @@
-import './FolderBrowser.css';
 import { useCallback, useEffect, useState } from 'react';
 import type { BrowseEntry, BrowseResult } from '@horizon/sdk';
 import { Button } from '../Button/Button.tsx';
@@ -10,7 +9,6 @@ export interface FolderBrowserProps {
   browse: (path?: string) => Promise<BrowseResult>;
   /** Called when the user assigns the current folder to a library kind. */
   onPick: (path: string, tag: LibraryTag) => void;
-  className?: string;
 }
 
 interface Crumb {
@@ -18,7 +16,7 @@ interface Crumb {
   path: string;
 }
 
-export function FolderBrowser({ browse, onPick, className }: FolderBrowserProps) {
+export function FolderBrowser({ browse, onPick }: FolderBrowserProps) {
   // `null` path means "at the filesystem root" (no current folder, cannot go up).
   const [path, setPath] = useState<string | null>(null);
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
@@ -76,27 +74,23 @@ export function FolderBrowser({ browse, onPick, className }: FolderBrowserProps)
     void load(target.path);
   }
 
-  const classes = ['hz-folder-browser', className].filter(Boolean).join(' ');
-
   return (
-    <div className={classes}>
-      <nav className="hz-folder-browser__breadcrumb" aria-label="Folder path">
+    <div>
+      <nav aria-label="Folder path">
         <button
           type="button"
-          className="hz-folder-browser__crumb"
           onClick={goToRoot}
           disabled={crumbs.length === 0}
         >
           Root
         </button>
         {crumbs.map((crumb, index) => (
-          <span key={crumb.path} className="hz-folder-browser__crumb-segment">
-            <span className="hz-folder-browser__crumb-sep" aria-hidden="true">
+          <span key={crumb.path}>
+            <span aria-hidden="true">
               /
             </span>
             <button
               type="button"
-              className="hz-folder-browser__crumb"
               onClick={() => goToCrumb(index)}
               disabled={index === crumbs.length - 1}
             >
@@ -107,37 +101,36 @@ export function FolderBrowser({ browse, onPick, className }: FolderBrowserProps)
       </nav>
 
       {error ? (
-        <div className="hz-folder-browser__message" role="alert">
+        <div role="alert">
           {error}
         </div>
       ) : loading ? (
-        <div className="hz-folder-browser__message">Loading…</div>
+        <div>Loading…</div>
       ) : entries.length === 0 ? (
-        <div className="hz-folder-browser__message">No subfolders here.</div>
+        <div>No subfolders here.</div>
       ) : (
-        <ul className="hz-folder-browser__list">
+        <ul>
           {entries.map((entry) => (
             <li key={entry.path}>
               <button
                 type="button"
-                className="hz-folder-browser__entry"
                 onClick={() => openEntry(entry)}
               >
-                <span className="hz-folder-browser__entry-icon" aria-hidden="true">
+                <span aria-hidden="true">
                   📁
                 </span>
-                <span className="hz-folder-browser__entry-name">{entry.name}</span>
+                <span>{entry.name}</span>
               </button>
             </li>
           ))}
         </ul>
       )}
 
-      <div className="hz-folder-browser__actions">
-        <span className="hz-folder-browser__current" title={path ?? undefined}>
+      <div>
+        <span title={path ?? undefined}>
           {path ?? 'Select a folder to begin'}
         </span>
-        <div className="hz-folder-browser__assign">
+        <div>
           <Button disabled={!path} onClick={() => path && onPick(path, 'movies')}>
             Use for Movies
           </Button>

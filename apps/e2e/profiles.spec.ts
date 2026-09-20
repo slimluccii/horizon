@@ -43,7 +43,7 @@ test.describe('profiles & roles', () => {
     await page.goto(`${APP}/settings`)
     await page.getByRole('button', { name: 'Profiles' }).click()
 
-    const row = page.locator('.settings__profile-row', { hasText: 'Roley' })
+    const row = page.locator('section[aria-label="Profiles"] li', { hasText: 'Roley' })
     await row.locator('select').selectOption('admin')
     await expect(row.locator('select')).toHaveValue('admin')
 
@@ -51,7 +51,7 @@ test.describe('profiles & roles', () => {
     await page.goto(`${APP}/settings`)
     await page.getByRole('button', { name: 'Profiles' }).click()
     await expect(
-      page.locator('.settings__profile-row', { hasText: 'Roley' }).locator('select'),
+      page.locator('section[aria-label="Profiles"] li', { hasText: 'Roley' }).locator('select'),
     ).toHaveValue('admin')
   })
 
@@ -64,7 +64,7 @@ test.describe('profiles & roles', () => {
     await page.goto(`${APP}/settings`)
     await page.getByRole('button', { name: 'Profiles' }).click()
 
-    const selfRow = page.locator('.settings__profile-row', { hasText: 'SelfDemote' })
+    const selfRow = page.locator('section[aria-label="Profiles"] li', { hasText: 'SelfDemote' })
     await selfRow.locator('select').selectOption('member')
 
     await expect(page.getByRole('button', { name: 'Personal' })).toHaveClass(/is-active/)

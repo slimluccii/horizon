@@ -41,6 +41,9 @@ const TrackChangedSchema = z.object({
   type: z.literal('track-changed'),
   audioTrackIndex: z.number().optional(),
   subtitleTrackIndex: z.number().nullable().optional(),
+  /** True when the switch restarted ffmpeg (image-subtitle burn-in) — the
+   *  client must reload the HLS source to pick up the new init.mp4. */
+  restarted: z.boolean().optional(),
 }).strict()
 
 const WarningSchema = z.object({

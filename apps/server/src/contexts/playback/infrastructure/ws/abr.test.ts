@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeAbrAction, type AbrState } from './handler.ts'
+import { computeAbrAction, computeDemote, type AbrState } from './handler.ts'
 import { PROFILES } from '../../domain/profiles.ts'
 
 describe('computeAbrAction', () => {
@@ -46,5 +46,38 @@ describe('computeAbrAction', () => {
     const stateRecent = { ...state, lastChangeAt: Date.now() - 1000 }
     const action = computeAbrAction({ kbps: 30000, bufferSeconds: 2 }, stateRecent, Date.now())
     expect(action).toBe('none')
+  })
+})
+
+describe('computeDemote (copy-video → transcode)', () => {
+  const src = 40_000 // 40 Mbps remux
+
+  it('demotes after sustained under-bandwidth reports with a draining buffer', () => {
+    let state = { lowCount: 0, demoted: false }
+    let out = computeDemote({ kbps: 20_000, bufferSeconds: 10 }, src, state)
+    expect(out.demote).toBe(false)
+    out = computeDemote({ kbps: 18_000, bufferSeconds: 8 }, src, out.state)
+    expect(out.demote).toBe(false)
+    out = computeDemote({ kbps: 19_000, bufferSeconds: 6 }, src, out.state)
+    expect(out.demote).toBe(true)
+    expect(out.state.demoted).toBe(true)
+  })
+
+  it('a healthy report resets the streak (transient dip tolerated)', () => {
+    let out = computeDemote({ kbps: 20_000, bufferSeconds: 10 }, src, { lowCount: 0, demoted: false })
+    out = computeDemote({ kbps: 20_000, bufferSeconds: 10 }, src, out.state)
+    // Bandwidth recovers above source — streak resets.
+    out = computeDemote({ kbps: 60_000, bufferSeconds: 20 }, src, out.state)
+    expect(out.state.lowCount).toBe(0)
+    out = computeDemote({ kbps: 20_000, bufferSeconds: 10 }, src, out.state)
+    expect(out.demote).toBe(false)
+  })
+
+  it('never fires twice, with unknown source bitrate, or with a healthy buffer', () => {
+    expect(computeDemote({ kbps: 1000, bufferSeconds: 1 }, src, { lowCount: 0, demoted: true }).demote).toBe(false)
+    expect(computeDemote({ kbps: 1000, bufferSeconds: 1 }, 0, { lowCount: 99, demoted: false }).demote).toBe(false)
+    // Slow link but big buffer: the client is just pacing fetches.
+    let out = computeDemote({ kbps: 20_000, bufferSeconds: 30 }, src, { lowCount: 0, demoted: false })
+    expect(out.state.lowCount).toBe(0)
   })
 })

@@ -15,6 +15,8 @@ export interface SessionManager {
    *  the server exits. */
   destroyAll(): Promise<void>
   size(): number
+  /** Snapshot of every live session (for the admin now-playing view). */
+  list(): Session[]
   /** Attach a SessionRuntime to a Session right after create. Only the
    *  PlaybackOrchestrator should call this. */
   attachRuntime(id: string, runtime: SessionRuntime): void
@@ -120,6 +122,7 @@ export function createSessionManager(serverSettings: ServerSettings): SessionMan
   return {
     create, get, getByReconnectToken, destroy, destroyAll,
     size: () => sessions.size,
+    list: () => [...sessions.values()],
     attachRuntime: (id, runtime) => { runtimes.set(id, runtime) },
     getRuntime: (id) => runtimes.get(id),
   }

@@ -143,9 +143,10 @@ describe('buildPlan', () => {
   describe('plan mutators', () => {
     it('planWithProfile replaces renditions and preserves audio + tonemap', () => {
       const plan = buildPlan(input(h265MkvProbe, browserCaps))
-      const newProfile = { name: '480p', videoBitrate: 2000, audioBitrate: 96, width: 854, height: 480 }
+      const newProfile = { name: '480p', videoBitrate: 2000, audioBitrate: 96, width: 854, height: 480, h264Level: '3.1' }
       const updated = planWithProfile(plan, newProfile)
-      expect(updated.renditions).toEqual([{ profile: newProfile, videoCodec: 'avc1.640028' }])
+      // 480p carries Level 3.1 → avc1.64001F (codec string tracks the profile's level).
+      expect(updated.renditions).toEqual([{ profile: newProfile, videoCodec: 'avc1.64001F' }])
       expect(updated.needsToneMap).toBe(plan.needsToneMap)
       expect(updated.audioTrackIndex).toBe(plan.audioTrackIndex)
     })

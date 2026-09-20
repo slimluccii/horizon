@@ -4,6 +4,7 @@ import Library from '../features/library/pages/Library.tsx'
 import Player from '../features/playback/pages/Player.tsx'
 import Show from '../features/library/pages/Show.tsx'
 import Collection from '../features/library/pages/Collection.tsx'
+import Search from '../features/library/pages/Search.tsx'
 import Setup from '../features/identity/pages/Setup.tsx'
 import Login from '../features/identity/pages/Login.tsx'
 import Link from '../features/identity/pages/Link.tsx'
@@ -52,6 +53,7 @@ export default function App() {
       <Route path="/" element={<Guard><Library /></Guard>} />
       <Route path="/show/:showId" element={<Guard><Show /></Guard>} />
       <Route path="/collection/:collectionId" element={<Guard><Collection /></Guard>} />
+      <Route path="/search" element={<Guard><Search /></Guard>} />
       <Route path="/play/:mediaId" element={<Guard><Player /></Guard>} />
       <Route path="/settings" element={<Guard><Settings /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />

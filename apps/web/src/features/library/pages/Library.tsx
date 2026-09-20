@@ -9,8 +9,6 @@ import ContinueWatchingRail from '../components/ContinueWatchingRail.tsx'
 import LargePoster from '../components/LargePoster.tsx'
 import CollectionPoster from '../components/CollectionPoster.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
-import './Library.css'
-
 type Tab = 'movies' | 'shows'
 
 /** Pick a hero title for the top of the page — prefer something with a
@@ -72,97 +70,86 @@ export default function Library() {
   const sizeByKind = tab === 'shows' ? `${shows.length} titles` : `${movieGrid.length} items`
 
   return (
-    <div className="lib">
+    <div>
       <LargeTopNav active={activeTab} transparent={!!heroBackdrop} />
 
       {heroBackdrop && hero && (
-        <section className="lib__hero" style={{ backgroundImage: `url(${heroBackdrop})` }}>
-          <div className="lib__hero-scrim-v" />
-          <div className="lib__hero-scrim-h" />
-          <div className="lib__hero-content">
-            <div className="eyebrow">Featured · Just added</div>
-            <h1 className="lib__hero-title">{hero.title}</h1>
-            <div className="lib__hero-meta">
-              {hero.year && <span>{hero.year}</span>}
-              {hero.year && <Dot />}
-              <span>{Math.round(hero.duration / 60)} min</span>
-              {hero.resolution && <><Dot /><span>{hero.resolution.split('x')[1] ? `${hero.resolution.split('x')[1]}p` : hero.resolution}</span></>}
-              {hero.hdr?.dv && <><Dot /><span className="lib__hero-badge">Dolby Vision</span></>}
-              {hero.videoCodec && <><Dot /><span>{hero.videoCodec.toUpperCase()}</span></>}
-            </div>
-            {heroMeta?.overview && (
-              <p className="lib__hero-overview">{heroMeta.overview}</p>
-            )}
-            <div className="lib__hero-actions">
-              <button className="lib__cta-play" onClick={() => navigate(`/play/${hero.id}`)}>
-                <Icon name="play" size={14} color="#000" /> Play
-              </button>
-              <button className="lib__cta-info" onClick={() => navigate(`/play/${hero.id}`)}>
-                <Icon name="info" size={14} color="#fff" /> More info
-              </button>
-            </div>
-          </div>
+        <section aria-label="Featured title">
+          <p>Featured · Just added</p>
+          <h1>{hero.title}</h1>
+          <p>
+            {hero.year && <span>{hero.year} · </span>}
+            <span>{Math.round(hero.duration / 60)} min</span>
+            {hero.resolution && <span> · {hero.resolution.split('x')[1] ? `${hero.resolution.split('x')[1]}p` : hero.resolution}</span>}
+            {hero.hdr?.dv && <span> · Dolby Vision</span>}
+            {hero.videoCodec && <span> · {hero.videoCodec.toUpperCase()}</span>}
+          </p>
+          {heroMeta?.overview && (
+            <p>{heroMeta.overview}</p>
+          )}
+          <p>
+            <button onClick={() => navigate(`/play/${hero.id}`)}>
+              <Icon name="play" size={14} /> Play
+            </button>
+            <button onClick={() => navigate(`/play/${hero.id}`)}>
+              <Icon name="info" size={14} /> More info
+            </button>
+          </p>
         </section>
       )}
 
-      <div className={`lib__body ${heroBackdrop ? 'lib__body--with-hero' : ''}`}>
+      <main>
         {noRoots && (
-          <div className="lib__banner" role="status">
-            <span className="lib__banner-text">No library folders configured yet.</span>
-            <button className="lib__banner-cta" onClick={() => navigate('/settings')}>
+          <p role="status">
+            <span>No library folders configured yet.</span>
+            <button onClick={() => navigate('/settings')}>
               Add library folders → Settings
             </button>
-          </div>
+          </p>
         )}
-        {userId && <ContinueWatchingRail userId={userId} padX={48} />}
+        {userId && <ContinueWatchingRail userId={userId} />}
 
-        <div className="lib__section">
-          <div className="lib__section-head">
-            <h2 className="lib__section-title">
-              {tab === 'movies' ? 'Movies' : 'Series'}
-            </h2>
-            <div className="lib__section-sub">{sizeByKind} · last scan moments ago</div>
-          </div>
+        <section aria-label="Library">
+          <h2>
+            {tab === 'movies' ? 'Movies' : 'Series'}
+          </h2>
+          <p>{sizeByKind}</p>
 
-          <div className="lib__tabs">
+          <nav aria-label="Library kind">
             {(['movies', 'shows'] as Tab[]).map(t => (
               <button
                 key={t}
-                className={`lib__pill ${tab === t ? 'is-active' : ''}`}
+                aria-pressed={tab === t}
                 onClick={() => { setTab(t); navigate(`/?tab=${t}`, { replace: true }) }}
               >
                 {t === 'movies' ? 'Movies' : 'Series'}
               </button>
             ))}
-          </div>
+          </nav>
 
-          {loading && <div className="lib__loading">Loading library…</div>}
+          {loading && <p>Loading library…</p>}
 
           {!loading && tab === 'movies' && (
-            <div className="lib__grid">
+            <ul>
               {movieGrid.map(entry =>
                 entry.kind === 'collection'
-                  ? <CollectionPoster key={`c-${entry.collection.id}`} collection={entry.collection} width={180}
-                      onClick={() => navigate(`/collection/${entry.collection.id}`)} />
-                  : <LargePoster key={entry.movie.id} item={entry.movie} width={180} showMeta
-                      onClick={() => navigate(`/play/${entry.movie.id}`)} />,
+                  ? <li key={`c-${entry.collection.id}`}><CollectionPoster collection={entry.collection}
+                      onClick={() => navigate(`/collection/${entry.collection.id}`)} /></li>
+                  : <li key={entry.movie.id}><LargePoster item={entry.movie} showMeta
+                      onClick={() => navigate(`/play/${entry.movie.id}`)} /></li>,
               )}
-              {movieGrid.length === 0 && <div className="lib__empty">No movies found.</div>}
-            </div>
+              {movieGrid.length === 0 && <li>No movies found.</li>}
+            </ul>
           )}
 
           {!loading && tab === 'shows' && (
-            <div className="lib__grid">
-              {shows.map(s => <LargePoster key={s.id} item={s} width={180} showMeta onClick={() => navigate(`/show/${s.id}`)} />)}
-              {shows.length === 0 && <div className="lib__empty">No shows found.</div>}
-            </div>
+            <ul>
+              {shows.map(s => <li key={s.id}><LargePoster item={s} showMeta onClick={() => navigate(`/show/${s.id}`)} /></li>)}
+              {shows.length === 0 && <li>No shows found.</li>}
+            </ul>
           )}
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   )
-}
-
-function Dot() {
-  return <span className="lib__dot">·</span>
 }

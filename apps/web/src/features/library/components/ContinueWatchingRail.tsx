@@ -7,7 +7,7 @@ import LandscapeCard from './LandscapeCard.tsx'
 
 /** Fetches /users/:id/continue-watching and renders a rail of landscape cards.
  *  Rail hides itself when the list is empty (new users, new library). */
-export default function ContinueWatchingRail({ userId, padX = 48 }: { userId: string; padX?: number }) {
+export default function ContinueWatchingRail({ userId }: { userId: string }) {
   const [items, setItems] = useState<ContinueWatchingItem[]>([])
   const navigate = useNavigate()
 
@@ -22,14 +22,14 @@ export default function ContinueWatchingRail({ userId, padX = 48 }: { userId: st
   if (items.length === 0) return null
 
   return (
-    <LargeRail title="Continue watching" padX={padX}>
+    <LargeRail title="Continue watching">
       {items.map(item => (
-        <LandscapeCard
-          key={item.mediaId}
-          item={item}
-          width={300}
-          onClick={() => navigate(`/play/${item.mediaId}`)}
-        />
+        <li key={item.mediaId}>
+          <LandscapeCard
+            item={item}
+            onClick={() => navigate(`/play/${item.mediaId}`)}
+          />
+        </li>
       ))}
     </LargeRail>
   )

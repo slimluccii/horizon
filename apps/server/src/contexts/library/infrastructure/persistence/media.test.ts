@@ -296,6 +296,7 @@ describe('Type Safety: MediaItem vs MediaItemRow', () => {
       durationSec: 10822,
       resolution: '3840x2160',
       videoCodec: 'hevc',
+      videoBitrate: null,
       container: 'matroska',
       hdr: { dv: true, hdr10: true, hdr10plus: false },
       audioTracks: [],
@@ -326,6 +327,7 @@ describe('Type Safety: MediaItem vs MediaItemRow', () => {
       durationSec: 10822,
       resolution: '3840x2160',
       videoCodec: 'hevc',
+      videoBitrate: null,
       container: 'matroska',
       hdr: null,
       audioTracks: null,
@@ -334,5 +336,33 @@ describe('Type Safety: MediaItem vs MediaItemRow', () => {
       metadata: null,
     }
     expect('filePath' in item).toBe(false)
+  })
+})
+
+describe('search', () => {
+  it('matches case-insensitive substrings across kinds, movies first (happy path)', () => {
+    const { repo } = freshRepo()
+    repo.upsertMovie(movie({ id: 'mv-dune', title: 'Dune Part Two', filePath: '/x/Dune Part Two (2024).mkv' }))
+    repo.upsertShow({ id: 'sh-dune', title: 'Dune: Prophecy', sortYear: 2024, externalIds: {}, metadata: null })
+    repo.upsertMovie(movie({ id: 'mv-opp', title: 'Oppenheimer', filePath: '/x/Oppenheimer (2023).mkv' }))
+
+    const results = repo.search('dune')
+    expect(results.map(r => r.id)).toEqual(['mv-dune', 'sh-dune'])
+  })
+
+  it('treats LIKE wildcards as literals and ignores blank queries (edge path)', () => {
+    const { repo } = freshRepo()
+    repo.upsertMovie(movie({ id: 'mv-1', title: '100% Wolf', filePath: '/x/100% Wolf (2020).mkv' }))
+    repo.upsertMovie(movie({ id: 'mv-2', title: 'Wolf', filePath: '/x/Wolf (2021).mkv' }))
+
+    expect(repo.search('%').map(r => r.id)).toEqual(['mv-1'])
+    expect(repo.search('   ')).toEqual([])
+  })
+
+  it('excludes soft-deleted rows', () => {
+    const { repo } = freshRepo()
+    repo.upsertMovie(movie({ id: 'mv-1', title: 'Ghost Film', filePath: '/x/Ghost Film (2020).mkv' }))
+    repo.softDeleteMissing(new Set())
+    expect(repo.search('ghost')).toEqual([])
   })
 })

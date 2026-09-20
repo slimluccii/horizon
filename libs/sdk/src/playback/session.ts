@@ -1,7 +1,7 @@
 // sdk/src/playback/session.ts
 import type { HorizonError, HorizonWarning } from '../shared/errors.ts'
 import type { ClientCapabilities } from './capabilities.ts'
-import { BandwidthSampler } from './bandwidth.ts'
+import { BandwidthSampler, storeBandwidthEstimate } from './bandwidth.ts'
 import { parseServerMessage } from './ws-messages.ts'
 
 export type PlaybackMethod = 'direct-play' | 'direct-stream' | 'partial-transcode' | 'transcode'
@@ -40,10 +40,32 @@ export interface SubtitleTrack {
   codec: string
   language: string
   forced: boolean
+  /** Text-based: the server can extract it to WebVTT for client-side render.
+   *  Image-based tracks (PGS/VobSub) are false — the server burns them into
+   *  the video instead, which forces a transcode. */
   embeddable: boolean
+  /** True for sidecar subtitle files found next to the media (e.g. Movie.en.srt). */
+  external?: boolean
+  /** Sidecar file name (basename only) for external tracks. */
+  externalFileName?: string
 }
 
 export type SessionState = 'attaching' | 'active' | 'detached' | 'destroyed'
+
+/** One row of the admin now-playing view (GET /sessions, owner/admin only). */
+export interface ActiveSessionSummary {
+  id: string
+  userId: string | null
+  userName: string | null
+  mediaId: string
+  mediaTitle: string | null
+  method: PlaybackMethod
+  state: string
+  profile: string | null
+  positionMs: number | null
+  durationMs: number | null
+  startedAt: number
+}
 
 export interface PlaybackSessionOptions {
   sessionInfo: SessionInfo
@@ -57,7 +79,7 @@ export interface PlaybackSessionOptions {
   token?: string
   onReady?: (info: SessionInfo) => void
   onQualityChange?: (profile: QualityProfile, reason: string) => void
-  onTrackChange?: (info: { audio?: number; subtitle?: number | null }) => void
+  onTrackChange?: (info: { audio?: number; subtitle?: number | null; restarted?: boolean }) => void
   onWarning?: (w: HorizonWarning) => void
   onEnded?: () => void
   onError?: (err: HorizonError) => void
@@ -221,7 +243,7 @@ export class PlaybackSession {
         this._opts.onQualityChange?.(msg.profile, msg.reason)
         break
       case 'track-changed':
-        this._opts.onTrackChange?.({ audio: msg.audioTrackIndex, subtitle: msg.subtitleTrackIndex })
+        this._opts.onTrackChange?.({ audio: msg.audioTrackIndex, subtitle: msg.subtitleTrackIndex, restarted: msg.restarted })
         break
       case 'warning':
         this._opts.onWarning?.({ code: msg.code, message: msg.message })
@@ -255,9 +277,13 @@ export class PlaybackSession {
   /** Call with hls.js fragment-loaded stats */
   reportSegment(bytes: number, durationMs: number, bufferSeconds: number) {
     this._sampler.record(bytes, durationMs)
+    const estimate = this._sampler.estimate()
+    // Remember the estimate across sessions so the next create starts at a
+    // realistic quality instead of assuming unlimited bandwidth.
+    storeBandwidthEstimate(estimate)
     this._send({
       type: 'bandwidth-report',
-      kbps: this._sampler.estimate(),
+      kbps: estimate,
       bufferSeconds,
       segmentDownloadMs: durationMs,
     })
@@ -289,8 +315,8 @@ export class PlaybackSession {
     })
   }
 
-  setSubtitleTrack(index: number | null) {
-    this._send({ type: 'subtitle-track', index })
+  setSubtitleTrack(index: number | null, positionMs?: number) {
+    this._send({ type: 'subtitle-track', index, positionMs })
   }
 
   /** URL for an extracted text subtitle track (WebVTT). Server lazily extracts

@@ -15,7 +15,7 @@ export type {
 } from './playback/capabilities.ts'
 export type {
   PlaybackMethod, QualityProfile,
-  SessionInfo, AudioTrack, SubtitleTrack,
+  SessionInfo, AudioTrack, SubtitleTrack, ActiveSessionSummary,
 } from './playback/session.ts'
 export type {
   MediaItem, ShowSummary, SeasonSummary, ExternalIds,
@@ -34,7 +34,8 @@ export type {
   ScanStatusResponse, ScanHistoryEntry, ScanResultSummary,
 } from './shared/http.ts'
 export { tmdbImageUrl } from './metadata/metadata.ts'
-export { PreferencesSchema, SUPPORTED_LANGUAGES } from './identity/preferences.ts'
+export { PreferencesSchema, SUPPORTED_LANGUAGES, trackMatchesLanguage, preferredQualityMaxBitrate } from './identity/preferences.ts'
+export { pickInitialTracks, isImageSubtitle, type InitialTracks } from './playback/trackSelection.ts'
 export type { Preferences } from './identity/preferences.ts'
 export * from './library/collections.ts'
 export * from './activity/activity.ts'
