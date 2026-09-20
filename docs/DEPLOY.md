@@ -193,8 +193,8 @@ Alternatives, if you want them:
   different origin, set `HORIZON_CORS_ORIGINS` to it.
 - **Local dev against the NAS**: point the Vite dev proxy targets in
   `apps/web/vite.config.ts` at `http://<truenas-ip>:7777`, then `npm -w @horizon/web run dev`.
-- **Native clients**: the macOS app (`apps/macos`) and Android TV app (Part 2)
-  talk to the server directly over the LAN.
+- **Native clients**: the Android TV app (Part 2) talks to the server directly
+  over the LAN.
 
 ### 7. Owner & member passwords, sessions, and TV pairing
 
