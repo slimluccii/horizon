@@ -28,11 +28,13 @@ import {
   restartAtSegment as defaultRestartAtSegment,
   restartWithReset as defaultRestartWithReset,
 } from './restart.ts'
+import { headSegment as defaultHeadSegment } from '../infrastructure/ffmpeg/ffmpeg.ts'
 
 /** Lookahead window (segments). A segment request inside `[startSegment,
- *  startSegment + LOOKAHEAD)` is treated as "the current ffmpeg run will
- *  produce it shortly" — wait. Beyond that window is a seek — restart. 30
- *  segments ≈ 2 min at 4 s/seg; restarting is faster than waiting beyond. */
+ *  head + LOOKAHEAD)`, where head is the newest segment the run has written,
+ *  is treated as "the current ffmpeg run will produce it shortly" — wait.
+ *  Beyond that window is a seek — restart. Measured from the head, not the run
+ *  start, because a player at the live edge of the encoder asks for head + 1. */
 export const SEEK_LOOKAHEAD_SEGMENTS = 30
 
 /** Hard ceiling on how long a single restart action (ffmpeg respawn +
@@ -121,12 +123,14 @@ export interface SessionRuntimeDeps {
   hwAccel: HwAccel
   doRestart?: RestartFn
   doRestartWithReset?: RestartWithResetFn
+  headSegment?: (session: Session) => number | null
 }
 
 export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
   const { session, hwAccel } = deps
   const doRestart = deps.doRestart ?? defaultRestartAtSegment
   const doRestartWithReset = deps.doRestartWithReset ?? defaultRestartWithReset
+  const headSegment = deps.headSegment ?? defaultHeadSegment
 
   let state: RuntimeState = { kind: 'idle' }
 
@@ -136,7 +140,9 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
 
   function inRange(segNum: number): boolean {
     const start = session.currentStartSegment
-    return segNum >= start && segNum < start + SEEK_LOOKAHEAD_SEGMENTS
+    if (segNum < start) return false
+    const head = Math.max(start - 1, headSegment(session) ?? start - 1)
+    return segNum <= head + SEEK_LOOKAHEAD_SEGMENTS
   }
 
   async function transition(

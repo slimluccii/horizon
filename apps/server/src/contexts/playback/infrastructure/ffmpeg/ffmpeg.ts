@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { ErrorCodes } from '@horizon/sdk'
 import { mkdir, rm, stat } from 'node:fs/promises'
-import { watch } from 'node:fs'
+import { readdirSync, watch } from 'node:fs'
 import path from 'node:path'
 import type { HwAccel } from '../../domain/hwaccel.ts'
 import type { Session } from '../../domain/types.ts'
@@ -52,6 +52,22 @@ export async function sweepSessionDirs(cacheDir: string): Promise<void> {
 export async function cleanupSessionDir(sessionDir: string): Promise<void> {
   if (!sessionDir) return   // guard: dir not yet assigned (session destroyed before mkdir)
   await rm(sessionDir, { recursive: true, force: true })
+}
+
+/** Highest segment number the current run has written, or null before the first one. */
+export function headSegment(session: Session): number | null {
+  let names: string[]
+  try {
+    names = readdirSync(path.join(session.sessionDir, 'r0'))
+  } catch {
+    return null
+  }
+  let head: number | null = null
+  for (const name of names) {
+    const m = /^seg(\d+)\.m4s$/.exec(name)
+    if (m) head = Math.max(head ?? -1, parseInt(m[1], 10))
+  }
+  return head
 }
 
 // ffmpeg exits with code 255 on SIGTERM, which is indistinguishable from a crash without this.
