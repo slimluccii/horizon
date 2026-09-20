@@ -163,6 +163,11 @@ export class PlaybackSession {
     return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(this._reconnectToken)}`
   }
 
+  // The server owns the path prefix, so sibling urls hang off the stream url it handed out.
+  private get _sessionUrl(): string {
+    return this._streamUrl.slice(0, this._streamUrl.lastIndexOf('/'))
+  }
+
   /** Playable stream URL. For direct-play this is the `/direct` endpoint with
    *  the reconnect token appended as a query param, because the browser
    *  `<video src>` cannot send the X-Reconnect-Token header the server requires.
@@ -325,7 +330,7 @@ export class PlaybackSession {
   subtitleUrl(index: number): string {
     // `<track src>` cannot send headers, so the proof-of-knowledge reconnect
     // token rides as a query param. Identity rides the cookie (web).
-    return this._withToken(`${this._opts.baseUrl}/sessions/${this.sessionId}/subtitles/${index}.vtt`)
+    return this._withToken(`${this._sessionUrl}/subtitles/${index}.vtt`)
   }
 
   park() { this._send({ type: 'park' }) }
@@ -343,7 +348,7 @@ export class PlaybackSession {
     // proof-of-knowledge token as the data routes, so echo it back. (If the
     // handshake never completed there is no token yet — the server treats an
     // unknown/already-gone session as an idempotent 204, so the miss is benign.)
-    fetch(`${this._opts.baseUrl}/sessions/${this.sessionId}`, {
+    fetch(this._sessionUrl, {
       method: 'DELETE',
       // The cookie (web) / bearer (native) authenticates the caller; the
       // reconnect token is the per-session proof-of-knowledge on top.

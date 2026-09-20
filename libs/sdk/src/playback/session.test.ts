@@ -135,6 +135,30 @@ describe('PlaybackSession token-bearing URLs for header-less transports (#41)', 
     expect(session.subtitleUrl(2)).toBe('http://x/sessions/s1/subtitles/2.vtt?token=sub-tok')
   })
 
+  describe('with the /api-prefixed urls the server hands out', () => {
+    const apiInfo: SessionInfo = { ...sessionInfo, streamUrl: '/api/sessions/s1/stream.m3u8', wsUrl: '/api/sessions/s1/ws' }
+    const ready = (token: string) => {
+      lastWs().onopen?.()
+      lastWs().onmessage?.({ data: JSON.stringify({ type: 'session-ready', profile: null, reconnectToken: token }) })
+    }
+
+    it('builds subtitle urls under the same prefix as the stream', async () => {
+      const { session } = readySession(apiInfo)
+      await flush()
+      ready('sub-tok')
+      expect(session.subtitleUrl(2)).toBe('http://x/api/sessions/s1/subtitles/2.vtt?token=sub-tok')
+    })
+
+    it('tears the session down under the same prefix as the stream', async () => {
+      const { session } = readySession(apiInfo)
+      await flush()
+      ready('tok')
+      session.disconnect()
+      const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
+      expect(fetchMock).toHaveBeenCalledWith('http://x/api/sessions/s1', expect.objectContaining({ method: 'DELETE' }))
+    })
+  })
+
   it('returns header-less URLs unchanged before the token is assigned', async () => {
     const { session } = readySession(sessionInfo)
     await flush()
