@@ -63,3 +63,5 @@ export { probe, parseProbeOutput, type ProbeResult, type AudioTrack, type Subtit
 
 // HTTP adapter.
 export { registerLibrary, sseFrame } from './infrastructure/http/library.ts'
+export { registerArrWebhook } from './infrastructure/http/arrWebhook.ts'
+export { createWebhookKeyRepo, type WebhookKeyRepo } from './infrastructure/persistence/webhookKey.ts'

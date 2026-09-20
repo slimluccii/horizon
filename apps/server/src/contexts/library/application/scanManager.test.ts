@@ -37,6 +37,13 @@ describe('ScanManager', () => {
   describe('live settings', () => {
     afterEach(() => { vi.restoreAllMocks() })
 
+    it('records a scan asked for by an arr webhook under its own trigger', async () => {
+      const deps = setup()
+      const mgr = createScanManager(baseCfg, deps)
+      await mgr.request({ trigger: 'webhook', paths: [] })
+      expect(deps.scanHistory.recent(1)[0].trigger).toBe('webhook')
+    })
+
     it('keeps the library when a root from settings turns up empty', async () => {
       const root = mkdtempSync(path.join(os.tmpdir(), 'horizon-unmounted-'))
       writeFileSync(path.join(root, 'Tenet (2020).mkv'), '')

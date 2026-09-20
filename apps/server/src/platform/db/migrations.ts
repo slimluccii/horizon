@@ -233,12 +233,39 @@ const V5_SQL = `
 ALTER TABLE media_items ADD COLUMN episode_end INTEGER;
 `
 
+// SQLite cannot alter a CHECK constraint, so scan_history is rebuilt to allow the 'webhook' trigger.
+const V6_SQL = `
+CREATE TABLE webhook_keys (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  key_hash   TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE scan_history_new (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  trigger            TEXT NOT NULL CHECK(trigger IN ('boot','cron','manual','watcher','metadata','webhook')),
+  scope              TEXT NOT NULL,
+  started_at         INTEGER NOT NULL,
+  finished_at        INTEGER,
+  items_seen         INTEGER NOT NULL DEFAULT 0,
+  items_added        INTEGER NOT NULL DEFAULT 0,
+  items_removed      INTEGER NOT NULL DEFAULT 0,
+  metadata_refreshed INTEGER NOT NULL DEFAULT 0,
+  errors             TEXT
+);
+INSERT INTO scan_history_new SELECT * FROM scan_history;
+DROP TABLE scan_history;
+ALTER TABLE scan_history_new RENAME TO scan_history;
+CREATE INDEX idx_scan_history_started ON scan_history(started_at DESC);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
   { version: 3, sql: V3_SQL },
   { version: 4, sql: V4_SQL },
   { version: 5, sql: V5_SQL },
+  { version: 6, sql: V6_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

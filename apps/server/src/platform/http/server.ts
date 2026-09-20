@@ -6,8 +6,8 @@ import type { HwAccel } from '../../contexts/playback/index.ts'
 import type { ProgressRepo } from '../../contexts/playback/index.ts'
 import type { ServerSettings } from '../../contexts/settings/index.ts'
 import type { SessionManager } from '../../contexts/playback/index.ts'
-import type { MediaRepo, CollectionsRepo, ScanHistoryRepo, ScanManager } from '../../contexts/library/index.ts'
-import { registerLibrary } from '../../contexts/library/index.ts'
+import type { MediaRepo, CollectionsRepo, ScanHistoryRepo, ScanManager, WebhookKeyRepo } from '../../contexts/library/index.ts'
+import { registerLibrary, registerArrWebhook } from '../../contexts/library/index.ts'
 import type { MetadataRefreshWorker } from '../../contexts/metadata/index.ts'
 import type { PlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import type { ActivityBus } from '../../contexts/activity/index.ts'
@@ -35,6 +35,7 @@ export interface Repos {
   inviteRepo: InviteRepo
   progressRepo: ProgressRepo
   serverSettings: ServerSettings
+  webhookKeyRepo: WebhookKeyRepo
 }
 
 export interface ScanWorkers {
@@ -96,6 +97,16 @@ export async function buildServer(
 
     registerHealth(api, hwAccel, identity)
     registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
+    registerArrWebhook(api, {
+      keys: repos.webhookKeyRepo,
+      users: repos.userRepo,
+      getRoots: () => {
+        const s = repos.serverSettings.get()
+        return { movies: s.moviesRoots, shows: s.showsRoots }
+      },
+      hasItemsUnder: folder => repos.mediaRepo.idsUnder(folder).length > 0,
+      requestScan: req => workers.scanManager.request(req),
+    })
     registerSessions(api, cfg, hwAccel, sessions, repos.progressRepo, orchestrator, repos.serverSettings, repos.userRepo, repos.mediaRepo)
     registerPlaylists(api, sessions, repos.userRepo)
     registerSegments(api, hwAccel, sessions, repos.mediaRepo, repos.userRepo)

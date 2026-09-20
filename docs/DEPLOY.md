@@ -200,6 +200,36 @@ Alternatives, if you want them:
 - **Native clients**: the Android TV app (Part 2) talks to the server directly
   over the LAN.
 
+### Sonarr and Radarr
+
+Horizon rescans a movie or series folder as soon as Sonarr or Radarr imports,
+renames or deletes something in it, so new downloads do not wait for the file
+watcher or the nightly scan.
+
+1. Generate the webhook key as the owner or an admin. It is shown once;
+   generating again replaces it. Use the session token of a logged-in user:
+
+   ```bash
+   curl -X POST http://<truenas-ip>:7777/api/webhooks/arr/key \
+     -H "Authorization: Bearer <session-token>"
+   # → {"key":"..."}
+   ```
+
+2. In Sonarr and in Radarr: Settings → Connect → + → Webhook.
+   - URL: `http://<truenas-ip>:7777/api/webhooks/arr`, method `POST`
+   - Header: `X-Api-Key` with the key from step 1
+   - Triggers: On File Import, On File Upgrade, On Rename, On Series/Movie
+     Delete, On Episode/Movie File Delete
+   - Press Test. Horizon answers 200 for the test event.
+
+No path mapping is needed. Sonarr and Radarr usually see the library under a
+different path than Horizon (`/data/media/movies/...` against `/media/movies/...`).
+Horizon matches the trailing folder names against its own library folders.
+
+Put the TMDB or TVDB id in the folder names (`{tmdb-12345}`, `{tvdb-12345}`) in
+the Sonarr and Radarr naming settings. Horizon then identifies a title by that
+id, so watch progress survives any rename.
+
 ### 7. Owner & member passwords, sessions, and TV pairing
 
 Horizon authenticates every request. Here's the day-to-day of it.
