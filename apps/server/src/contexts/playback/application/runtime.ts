@@ -28,7 +28,8 @@ import {
   restartAtSegment as defaultRestartAtSegment,
   restartWithReset as defaultRestartWithReset,
 } from './restart.ts'
-import { headSegment as defaultHeadSegment } from '../infrastructure/ffmpeg/ffmpeg.ts'
+import { headSegment as defaultHeadSegment, pauseFfmpeg, resumeFfmpeg } from '../infrastructure/ffmpeg/ffmpeg.ts'
+import { createTranscodeThrottle } from './throttle.ts'
 
 /** Lookahead window (segments). A segment request inside `[startSegment,
  *  head + LOOKAHEAD)`, where head is the newest segment the run has written,
@@ -81,6 +82,9 @@ export interface SessionRuntime {
   startSegment(): number
   seekPositionMs(): number
 
+  /** Note every segment request, served from disk or not; this is what paces the encoder. */
+  onSegmentRequested(segNum: number): void
+
   /** Sync: classify a segment request against the current run's window. */
   requestSegment(segNum: number): SegmentDecision
 
@@ -131,6 +135,7 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
   const doRestart = deps.doRestart ?? defaultRestartAtSegment
   const doRestartWithReset = deps.doRestartWithReset ?? defaultRestartWithReset
   const headSegment = deps.headSegment ?? defaultHeadSegment
+  const throttle = createTranscodeThrottle({ session, headSegment, pause: pauseFfmpeg, resume: resumeFfmpeg })
 
   let state: RuntimeState = { kind: 'idle' }
 
@@ -180,6 +185,8 @@ export function createSessionRuntime(deps: SessionRuntimeDeps): SessionRuntime {
     state: () => state,
     startSegment: () => session.currentStartSegment,
     seekPositionMs: () => session.seekPositionMs,
+
+    onSegmentRequested: throttle.onSegmentRequested,
 
     requestSegment(segNum) {
       if (inRange(segNum)) return { kind: 'wait' }
