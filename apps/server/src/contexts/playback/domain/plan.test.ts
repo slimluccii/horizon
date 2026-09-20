@@ -53,7 +53,7 @@ const safariCaps: ClientCapabilities = {
 }
 
 function input(probe: Partial<ProbeResult>, caps: ClientCapabilities, audioTrackIndex = 0) {
-  return { probe: probe as ProbeResult, capabilities: caps, hwAccel, audioTrackIndex, maxRenditions: 3, toneMap }
+  return { probe: probe as ProbeResult, capabilities: caps, hwAccel, audioTrackIndex, maxRenditions: 3, toneMap, streamCopyAllowed: true }
 }
 
 describe('buildPlan', () => {
@@ -64,6 +64,22 @@ describe('buildPlan', () => {
       expect(plan.renditions).toHaveLength(0)
       expect(plan.audioStrategy).toBe('copy')
       expect(plan.videoStrategy).toBe('copy')
+    })
+
+    it('transcodes instead of copying when the file has no usable keyframe index', () => {
+      const containerMismatch = { ...h265MkvProbe, videoCodec: 'h264', hdr: { dv: false, hdr10: false, hdr10plus: false } }
+      const copyable = buildPlan(input(containerMismatch, safariCaps))
+      expect(copyable.videoStrategy).toBe('copy')
+
+      const plan = buildPlan({ ...input(containerMismatch, safariCaps), streamCopyAllowed: false })
+      expect(plan.method).toBe('transcode')
+      expect(plan.videoStrategy).toBe('transcode')
+      expect(plan.renditions.length).toBeGreaterThan(0)
+    })
+
+    it('still direct-plays without a keyframe index, since that needs no segments at all', () => {
+      const plan = buildPlan({ ...input(h265MkvProbe, shieldCaps), streamCopyAllowed: false })
+      expect(plan.method).toBe('direct-play')
     })
 
     it('direct-stream when container mismatch but codecs ok (SDR source)', () => {

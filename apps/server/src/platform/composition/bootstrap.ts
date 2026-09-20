@@ -17,6 +17,9 @@ import {
   startWatcher,
   type WatcherHandle,
   createWebhookKeyRepo,
+  createKeyframeIndexRepo,
+  createKeyframeIndexer,
+  extractKeyframes,
 } from '../../contexts/library/index.ts'
 import { startDailySchedule, type DailyScheduleHandle } from '../scheduler/scheduler.ts'
 import { createSessionManager, sweepSessionDirs } from '../../contexts/playback/index.ts'
@@ -139,15 +142,26 @@ export async function bootstrap() {
     // After a scan, drain the whole metadata queue so newly-indexed items get
     // FULL enrichment in one pass (not batchSize-at-a-time). Serial; the TMDB
     // provider's concurrency cap + per-item backoff keep it well-behaved.
-    onScanFinished: () => { void refreshWorker.run({ useChangesFeed: false, drain: true }) },
+    onScanFinished: () => {
+      void refreshWorker.run({ useChangesFeed: false, drain: true })
+      keyframeIndexer.indexLibrary()
+    },
     getRoots,
     getScanConcurrency: () => serverSettings.get().scanConcurrency,
     bus: activityBus,
   })
 
   const sessions = createSessionManager(serverSettings)
+  const keyframeIndex = createKeyframeIndexRepo(db)
+  const keyframeIndexer = createKeyframeIndexer({
+    media: mediaRepo,
+    index: keyframeIndex,
+    extract: extractKeyframes,
+    isIdle: () => sessions.size() === 0,
+  })
   const orchestrator = createPlaybackOrchestrator({
     cfg, hwAccel, media: mediaRepo, users: userRepo, sessions, serverSettings,
+    keyframes: { get: id => keyframeIndex.get(id), request: id => keyframeIndexer.request(id) },
   })
 
   const app = await buildServer(
@@ -181,6 +195,7 @@ export async function bootstrap() {
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.once(sig, () => {
       mdns?.stop()
+      keyframeIndexer.stop()
       void app.close().then(() => process.exit(0))
     })
   }

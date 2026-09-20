@@ -8,6 +8,7 @@
  *
  * See CONTEXT.md → PlaybackPlan / RenderContext.
  */
+import type { KeyframeTimeline } from '../domain/timeline.ts'
 import type { HwAccel } from '../domain/hwaccel.ts'
 import type { PlaybackPlan, Rendition } from '../domain/plan.ts'
 import { buildToneMapPrefix } from '../domain/tonemap.ts'
@@ -24,6 +25,8 @@ export interface RenderContext {
   /** Position to seek to before the first encoded segment. Sub-segment
    *  precision preserved here (renderer rounds to ms when emitting -ss). */
   seekPositionMs: number
+  /** Set when the plan copies the video: segments then follow the source keyframes. */
+  copyTimeline?: KeyframeTimeline
 }
 
 export interface RenderedArgs {
@@ -82,6 +85,7 @@ function renderDirectStream(plan: PlaybackPlan, ctx: RenderContext): string[] {
   // No hwaccel decode — copy path doesn't decode.
   args.push(...inputArgs(ctx, /* hwAccel */ undefined, { wantHwDecode: false }))
   args.push('-map', '0:v:0', '-map', `0:a:${plan.audioTrackIndex}`)
+  args.push(...copyTrimArgs(ctx))
   args.push('-c:v', 'copy', '-c:a', 'copy')
   args.push(...hlsMuxerArgs(ctx, 1, /* varStreamMap */ false))
   return args
@@ -93,6 +97,7 @@ function renderPartial(plan: PlaybackPlan, ctx: RenderContext, hwAccel: HwAccel)
   args.push('-map', '0:v:0', '-map', `0:a:${plan.audioTrackIndex}`)
   // Video copy + audio transcode. Use the first (only) rendition's audioBitrate.
   const profile = plan.renditions[0].profile
+  args.push(...copyTrimArgs(ctx))
   args.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', `${profile.audioBitrate}k`)
   args.push(...hlsMuxerArgs(ctx, 1, /* varStreamMap */ false))
   return args
@@ -106,6 +111,7 @@ interface InputOpts { wantHwDecode: boolean }
 
 /** -hwaccel (optional) + -ss (optional) + -thread_queue_size + -i + -copyts (when seeking). */
 function inputArgs(ctx: RenderContext, hwAccel: HwAccel | undefined, opts: InputOpts): string[] {
+  if (ctx.copyTimeline) return copyInputArgs(ctx, ctx.copyTimeline)
   const seekSecs = ctx.seekPositionMs / 1000
   const args: string[] = []
   if (opts.wantHwDecode && hwAccel && hwAccel.hwaccelDecode.length > 0) {
@@ -122,11 +128,33 @@ function inputArgs(ctx: RenderContext, hwAccel: HwAccel | undefined, opts: Input
   return args
 }
 
+/**
+ * Input seeking lands on a keyframe at or before the target, and with B-frames
+ * often one earlier than asked. So a restart seeks to the previous keyframe and
+ * copyTrimArgs cuts the output to the exact one. -copyts from the first run on
+ * keeps every run on the source clock.
+ */
+function copyInputArgs(ctx: RenderContext, timeline: KeyframeTimeline): string[] {
+  const args: string[] = []
+  const seekSecs = ctx.startSegment > 0 ? timeline.startSec(ctx.startSegment - 1) : 0
+  if (seekSecs > 0) args.push('-ss', seekSecs.toFixed(3))
+  args.push('-thread_queue_size', '512', '-i', ctx.sourceFilePath, '-copyts')
+  return args
+}
+
+// A stream copy is trimmed by decode time, which for a keyframe lies before its presentation time.
+function copyTrimArgs(ctx: RenderContext): string[] {
+  if (!ctx.copyTimeline || ctx.startSegment === 0) return []
+  return ['-ss', (ctx.copyTimeline.startDtsSec(ctx.startSegment) - 0.001).toFixed(3)]
+}
+
 /** -f hls + segment naming + var_stream_map (when multi-rendition). */
 function hlsMuxerArgs(ctx: RenderContext, renditionCount: number, varStreamMap: boolean): string[] {
   const args = [
     '-f', 'hls',
-    '-hls_time', String(SEGMENT_DURATION_SEC),
+    // A tiny target makes the muxer cut at every keyframe; its default rule merges
+    // gaps in a way that depends on where the run started.
+    '-hls_time', ctx.copyTimeline ? '0.001' : String(SEGMENT_DURATION_SEC),
     '-hls_list_size', '0',
     '-start_number', String(ctx.startSegment),
     '-hls_flags', 'independent_segments',

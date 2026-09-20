@@ -6,7 +6,7 @@ import type { HwAccel } from '../domain/hwaccel.ts'
 import type { PlaybackPlan } from '../domain/plan.ts'
 import type { RenderContext } from './render.ts'
 import { spawnFfmpeg, killFfmpeg } from '../infrastructure/ffmpeg/ffmpeg.ts'
-import { sessionTimeline } from '../domain/timeline.ts'
+import { copyTimelineOf, sessionTimeline } from '../domain/timeline.ts'
 
 /** Grace window after SIGKILL before assuming the process is dead. ffmpeg
  *  releases its file handles synchronously on macOS but exit() callbacks may
@@ -65,6 +65,7 @@ function applyStartSegment(session: Session, segNum: number): RenderContext {
     sessionDir: session.sessionDir,
     startSegment: segNum,
     seekPositionMs: session.seekPositionMs,
+    copyTimeline: copyTimelineOf(session),
   }
 }
 

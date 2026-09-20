@@ -40,6 +40,7 @@ import { extractSubtitles as defaultExtractSubtitles } from '../infrastructure/f
 import { getFfmpegStderrTail } from '../infrastructure/ffmpeg/ffmpeg.ts'
 import { createSessionRuntime } from './runtime.ts'
 import { TranscodeError } from '../domain/errors.ts'
+import { copyEligible, copyTimelineOf, type Keyframe } from '../domain/timeline.ts'
 import { streamUrl } from '../domain/urls.ts'
 import { statfsSync } from 'node:fs'
 
@@ -105,6 +106,12 @@ export interface PlaybackOrchestratorDeps {
   users: UserRepo
   sessions: SessionManager
   serverSettings: ServerSettings
+  /** The library's keyframe index. Without it every file that would be stream-copied is transcoded. */
+  keyframes?: {
+    get(mediaId: string): Keyframe[] | null
+    /** Ask for a file to be indexed soon, because someone just tried to play it. */
+    request(mediaId: string): void
+  }
   /** Injection point for tests. Defaults to the real `spawnFfmpeg`. */
   spawner?: Spawner
   /** Injection point for tests. Defaults to the real `extractSubtitles`. */
@@ -199,7 +206,9 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         ? selectedSub.index
         : null
 
-      const plan = buildPlan({
+      const keyframes = deps.keyframes?.get(input.mediaId) ?? null
+      const streamCopyAllowed = keyframes !== null && copyEligible(keyframes, mediaItem.durationSec ?? 0)
+      const planInput = {
         probe: mediaItemToProbeView(mediaItem),
         capabilities: input.capabilities,
         hwAccel,
@@ -207,7 +216,12 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         maxRenditions: liveSettings.maxRenditions,
         toneMap: settingsToToneMap(liveSettings),
         burnInSubtitleIndex,
-      })
+      }
+      const plan = buildPlan({ ...planInput, streamCopyAllowed })
+      // Only worth indexing when it would change the outcome: the file would be copied if it had an index.
+      if (keyframes === null && buildPlan({ ...planInput, streamCopyAllowed: true }).videoStrategy !== plan.videoStrategy) {
+        deps.keyframes?.request(input.mediaId)
+      }
 
       const session = sessions.create({
         mediaId: input.mediaId,
@@ -225,6 +239,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         durationSec: mediaItem.durationSec ?? 0,
         userId: input.userId ?? undefined,
       })
+      if (streamCopyAllowed) session.keyframes = keyframes
 
       // Bandwidth-demote support: the WS layer can't rebuild a plan (it holds
       // no probe/capabilities), so hand the session a rebuild closure. Reads
@@ -239,6 +254,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
         maxRenditions: serverSettings.get().maxRenditions,
         toneMap: settingsToToneMap(serverSettings.get()),
         burnInSubtitleIndex: session.plan.burnInSubtitleIndex,
+        streamCopyAllowed,
       })
 
       const profiles = plan.renditions.map(r => r.profile)
@@ -282,6 +298,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
           sessionDir: session.sessionDir,
           startSegment: session.currentStartSegment,
           seekPositionMs: session.seekPositionMs,
+          copyTimeline: copyTimelineOf(session),
         }
 
         try {

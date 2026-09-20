@@ -115,6 +115,20 @@ checked in the `audio-track` handler against `Session.audioTrackCount` /
 Session). The counts are stable because a MediaItem is immutable for the life
 of a Session.
 
+### Keyframe index and stream copy
+A stream copy (`direct-stream`, `partial-transcode`) cannot cut a segment
+anywhere but at a source keyframe, so its playlist cannot be the fixed
+one-second grid an encode uses. The library keeps a keyframe index per file
+(presentation and decode time of every video keyframe, tied to the file's mtime
+and size) and a copy session cuts one segment per keyframe gap. A file without a
+usable index is transcoded, and asking to play it moves it to the front of the
+background indexer, which otherwise works through the library while nobody is
+watching. Two ffmpeg facts shape the restart arguments: input seeking lands on
+an earlier keyframe than asked when the stream has B-frames, and a stream copy
+is trimmed by decode time. See
+[apps/server/src/contexts/playback/domain/timeline.ts](apps/server/src/contexts/playback/domain/timeline.ts)
+and [apps/server/src/contexts/library/application/keyframeIndexer.ts](apps/server/src/contexts/library/application/keyframeIndexer.ts).
+
 ### SessionState
 `pre-buffer | active | detached | parked | destroyed`. Transitions are driven
 by WS attach, WS close (grace timer), explicit DELETE, and session destroy.
