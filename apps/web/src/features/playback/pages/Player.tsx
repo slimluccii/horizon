@@ -222,7 +222,7 @@ export default function Player() {
   )
 
   const subtitleTrack = (selectedSubtitle != null && media)
-    ? media.subtitleTracks.find(t => t.index === selectedSubtitle) ?? null
+    ? media.subtitleTracks?.find(t => t.index === selectedSubtitle) ?? null
     : null
   // Only text/sidecar tracks render as a client-side <track>; image subs are
   // burned into the video by the server.
@@ -291,8 +291,8 @@ export default function Player() {
 
       {ready && session && media && (
         <TrackSelector
-          audioTracks={media.audioTracks}
-          subtitleTracks={media.subtitleTracks}
+          audioTracks={media.audioTracks ?? []}
+          subtitleTracks={media.subtitleTracks ?? []}
           selectedAudio={selectedAudio}
           selectedSubtitle={selectedSubtitle}
           currentProfile={currentProfile}
@@ -304,7 +304,7 @@ export default function Player() {
             session.setAudioTrack(idx, posMs)
           }}
           onSubtitleChange={(idx) => {
-            const newTrack = idx != null ? media.subtitleTracks.find(t => t.index === idx) : undefined
+            const newTrack = idx != null ? media.subtitleTracks?.find(t => t.index === idx) : undefined
             const leavingBurnIn = subtitleTrack != null && isImageSubtitle(subtitleTrack)
             const enteringBurnIn = !!newTrack && isImageSubtitle(newTrack)
             const posMs = Math.floor((videoRef.current?.currentTime ?? 0) * 1000)

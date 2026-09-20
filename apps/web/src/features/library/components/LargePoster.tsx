@@ -1,5 +1,6 @@
 import { tmdbImageUrl } from '@horizon/sdk'
 import type { MediaItem, ShowSummary, MovieMetadata, ShowMetadataInfo } from '@horizon/sdk'
+import { runtimeMinutes } from '../runtime.ts'
 
 interface Props {
   item: MediaItem | ShowSummary
@@ -29,8 +30,8 @@ export default function LargePoster({ item, showMeta = false, progress, onClick 
     const m = item.metadata?.kind === 'movie' ? (item.metadata as MovieMetadata) : undefined
     posterPath = m?.posterPath
     year = item.year ?? m?.releaseDate?.slice(0, 4)
-    const mins = Math.round(item.duration / 60)
-    subtitle = `${mins}m`
+    const mins = runtimeMinutes(item)
+    subtitle = mins === null ? undefined : `${mins}m`
   }
 
   const poster = tmdbImageUrl(posterPath, 'w342')

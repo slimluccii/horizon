@@ -49,7 +49,9 @@ A single playable artifact, in the wire/domain shape. `kind` is one of
 NO `filePath`, NO DB bookkeeping (firstSeenAt/lastSeenAt/deletedAt/mtimeMs/
 sizeBytes), NO metadata-refresh state (tmdbId, metadataFetched*, etc) — those
 live on MediaItemRow. Wire-safe by construction; routes can serialize
-MediaItem directly without leaking server internals. See
+MediaItem directly without leaking server internals. The shape is defined once,
+in the SDK ([libs/sdk/src/library/mediaItem.ts](libs/sdk/src/library/mediaItem.ts)),
+and the server's MediaItem is that type, so server and web cannot drift. See
 [apps/server/src/contexts/library/infrastructure/persistence/media.ts](apps/server/src/contexts/library/infrastructure/persistence/media.ts).
 
 ### MediaItemRow
