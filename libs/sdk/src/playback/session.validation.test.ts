@@ -108,6 +108,18 @@ describe('PlaybackSession message validation', () => {
     expect(onReady).toHaveBeenCalledOnce()
   })
 
+  it('becomes ready on a direct-play session-ready, which has no profile', async () => {
+    const { session, onReady } = makeSession()
+    await flushMicrotasks()
+    const before = session.profile
+    FakeWebSocket.instances.at(-1)!.onopen?.()
+    deliver({ type: 'session-ready', method: 'direct-play', streamUrl: '/api/sessions/s1/direct', profile: null, reconnectToken: 'tok' })
+    expect(session.state).toBe('active')
+    expect(session.reconnectToken).toBe('tok')
+    expect(session.profile).toBe(before)
+    expect(onReady).toHaveBeenCalledOnce()
+  })
+
   it('drops a malformed profile (videoBitrate string) without mutating state or firing onReady', async () => {
     const { session, onReady } = makeSession()
     await flushMicrotasks()

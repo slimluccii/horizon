@@ -40,6 +40,7 @@ import { extractSubtitles as defaultExtractSubtitles } from '../infrastructure/f
 import { getFfmpegStderrTail } from '../infrastructure/ffmpeg/ffmpeg.ts'
 import { createSessionRuntime } from './runtime.ts'
 import { TranscodeError } from '../domain/errors.ts'
+import { streamUrl } from '../domain/urls.ts'
 import { statfsSync } from 'node:fs'
 
 /** Free bytes on the volume holding `dir`. Returns Infinity when statfs is
@@ -246,9 +247,7 @@ export function createPlaybackOrchestrator(deps: PlaybackOrchestratorDeps): Play
       const info: PlaybackSessionInfo = {
         sessionId: session.id,
         method: plan.method,
-        streamUrl: plan.method === 'direct-play'
-          ? `/api/sessions/${session.id}/direct`
-          : `/api/sessions/${session.id}/stream.m3u8`,
+        streamUrl: streamUrl(session.id, plan.method),
         wsUrl: `/api/sessions/${session.id}/ws`,
         profiles: profiles.length > 0 ? profiles : [initialProfile],
         selectedAudioTrack: audioTrackIndex,

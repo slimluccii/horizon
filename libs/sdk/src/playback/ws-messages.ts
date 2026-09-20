@@ -27,7 +27,8 @@ const SessionReadySchema = z.object({
   type: z.literal('session-ready'),
   method: z.string().optional(),
   streamUrl: z.string().optional(),
-  profile: QualityProfileSchema,
+  /** Null for direct play, which has no renditions. */
+  profile: QualityProfileSchema.nullable(),
   reconnectToken: z.string().optional(),
 }).strict()
 

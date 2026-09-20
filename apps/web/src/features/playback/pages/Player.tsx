@@ -189,13 +189,6 @@ export default function Player() {
           if (cancelled) return
           setError(err.message)
         },
-        onEnded: () => {
-          if (cancelled) return
-          // Episode with a follow-up → post-play prompt (auto-advance);
-          // otherwise back to the library.
-          if (nextEpisodeRef.current) setPostPlay(true)
-          else navigate('/')
-        },
       }).then(s => {
         stamp('session created (POST /sessions resolved)')
         if (cancelled) {
@@ -274,6 +267,12 @@ export default function Player() {
           resumeAtSec={resumeAtSec}
           subtitle={textSubtitleTrack}
           onBufferUpdate={setBufferSeconds}
+          onEnded={() => {
+            // Episode with a follow-up → post-play prompt (auto-advance);
+            // otherwise back to the library.
+            if (nextEpisodeRef.current) setPostPlay(true)
+            else navigate('/')
+          }}
           onQualityChange={(profile, reason) => {
             setCurrentProfile(profile)
             setQualityLog(log => [...log, { profile, reason, time: new Date() }])

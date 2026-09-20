@@ -17,7 +17,7 @@
  */
 import { test, expect, type APIRequestContext } from '@playwright/test'
 import WebSocket from 'ws'
-import { API, ensureOwner, bearer, scanMoviesRoot, type SessionUser } from './helpers/auth.ts'
+import { API, APP, ensureOwner, bearer, authBrowser, scanMoviesRoot, type SessionUser } from './helpers/auth.ts'
 import { hasPlayableFixture, E2E_MOVIES } from './global-setup.ts'
 
 const H264_CAPS = {
@@ -151,5 +151,25 @@ test.describe('playback transcode pipeline', () => {
     const res = await request.get(`${API}/sessions/${sessionId}/renditions/0.m3u8?token=wrong`, { headers: bearer(owner) })
     expect(res.status()).toBe(400)
     expect((await res.json()).code).toBe('invalid-reconnect-token')
+  })
+
+  test('the player stays open while the viewer is watching and leaves when the video ends', async ({ browser }) => {
+    const ctx = await browser.newContext()
+    await authBrowser(ctx, owner)
+    const page = await ctx.newPage()
+    await page.goto(`${APP}/play/${mediaId}`)
+
+    const video = page.locator('video')
+    await expect(video).toBeVisible({ timeout: 60_000 })
+    await video.evaluate(async (v: HTMLVideoElement) => { v.muted = true; await v.play() })
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 30_000 }).toBeGreaterThan(0.5)
+
+    // The 30 s fixture transcodes in a few seconds, long before the viewer is done.
+    await page.waitForTimeout(8_000)
+    expect(new URL(page.url()).pathname).toBe(`/play/${mediaId}`)
+
+    await video.evaluate((v: HTMLVideoElement) => { v.playbackRate = 8 })
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe('/')
+    await ctx.close()
   })
 })

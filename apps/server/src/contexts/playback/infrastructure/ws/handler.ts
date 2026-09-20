@@ -7,7 +7,7 @@ import type { SessionRuntime, TransitionResult } from '../../application/runtime
 import { ErrorCodes } from '@horizon/sdk'
 import { PROFILES } from '../../domain/profiles.ts'
 import { pauseFfmpeg, resumeFfmpeg } from '../ffmpeg/ffmpeg.ts'
-import { parseWsMessage, type WsMessage } from './messages.ts'
+import { parseWsMessage, sessionReadyMessage, type WsMessage } from './messages.ts'
 
 export interface AbrState {
   currentProfileIndex: number  // index into PROFILES global array
@@ -157,15 +157,7 @@ const handlers: { [K in WsMessage['type']]: Handler } = {
     wsAuthenticated.set(session, true)
     clearTimeout(session.graceTimer)
     session.state = 'active'
-    send(session, {
-      type: 'session-ready',
-      method: session.plan.method,
-      streamUrl: session.plan.method === 'direct-play'
-        ? `/sessions/${session.id}/direct`
-        : `/sessions/${session.id}/stream.m3u8`,
-      profile: session.plan.renditions[0].profile,
-      reconnectToken: session.reconnectToken,
-    })
+    send(session, sessionReadyMessage(session))
   },
 
   'bandwidth-report'(msg, { session, runtime }) {

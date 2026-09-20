@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { ErrorCodes } from '@horizon/sdk'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { watch } from 'node:fs'
@@ -54,9 +54,13 @@ export async function cleanupSessionDir(sessionDir: string): Promise<void> {
   await rm(sessionDir, { recursive: true, force: true })
 }
 
+// ffmpeg exits with code 255 on SIGTERM, which is indistinguishable from a crash without this.
+const stoppedOnPurpose = new WeakSet<ChildProcess>()
+
 export function killFfmpeg(session: Session): void {
   const proc = session.ffmpegProcess
   if (!proc || proc.killed) return
+  stoppedOnPurpose.add(proc)
   proc.kill('SIGTERM')
   // Schedule SIGKILL fallback. Cancel on early exit so we don't fire on a
   // dead process (benign but wastes a timer slot).
@@ -281,7 +285,7 @@ export async function spawnFfmpeg(
   })
 
   proc.on('exit', (code, signal) => {
-    if (code !== 0 && code !== null) {
+    if (code !== 0 && code !== null && !stoppedOnPurpose.has(proc)) {
       console.error(
         `Session ${session.id}: ffmpeg exited code=${code} signal=${signal}\n` +
         `=== ffmpeg stderr tail ===\n${stderrTail}\n=== end ===`,
@@ -294,8 +298,6 @@ export async function spawnFfmpeg(
           fatal: true,
         }))
       } catch {/* socket may be gone */}
-    } else if (code === 0) {
-      try { session.wsSocket?.send(JSON.stringify({ type: 'ended' })) } catch {/* gone */}
     }
   })
 
