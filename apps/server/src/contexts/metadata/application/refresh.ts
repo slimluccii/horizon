@@ -220,25 +220,10 @@ export function createMetadataRefreshWorker(
         return false
       }
       step('fetched', 'movie', pick.title, { tmdbId: m.tmdbId })
-      deps.media.upsertMovie({
-        id: existing.id,
-        filePath: existing.filePath,
-        title: existing.title,
-        sortYear: existing.year,
-        durationSec: existing.durationSec ?? 0,
-        resolution: existing.resolution ?? '',
-        videoCodec: existing.videoCodec ?? '',
-        videoBitrate: existing.videoBitrate,
-        container: existing.container ?? '',
-        hdr: existing.hdr ?? { dv: false, hdr10: false, hdr10plus: false },
-        audioTracks: existing.audioTracks ?? [],
-        subtitleTracks: existing.subtitleTracks ?? [],
-        mtimeMs: existing.mtimeMs ?? 0,
-        sizeBytes: existing.sizeBytes ?? 0,
-        externalIds: existing.externalIds,
-        metadata: m,
-      })
-      deps.media.markMetadataFetched(pick.id, m.tmdbId ?? null, now)
+      if (!deps.media.setMetadata(pick.id, { metadata: m, tmdbId: m.tmdbId ?? null }, now)) {
+        step('failed', 'movie', pick.title, { reason: 'no-file' })
+        return false
+      }
       step('stored', 'movie', pick.title, { tmdbId: m.tmdbId })
       return true
     }
@@ -256,14 +241,10 @@ export function createMetadataRefreshWorker(
       const existing = deps.media.getInternalRow(pick.id)
       if (!existing) { step('failed', 'show', pick.title, { reason: 'no-file' }); deps.media.markMetadataFailed(pick.id, now); return false }
       step('fetched', 'show', pick.title, { tmdbId: s.tmdbId })
-      deps.media.upsertShow({
-        id: existing.id,
-        title: existing.title,
-        sortYear: existing.year,
-        externalIds: existing.externalIds,
-        metadata: s,
-      })
-      deps.media.markMetadataFetched(pick.id, s.tmdbId ?? null, now)
+      if (!deps.media.setMetadata(pick.id, { metadata: s, tmdbId: s.tmdbId ?? null }, now)) {
+        step('failed', 'show', pick.title, { reason: 'no-file' })
+        return false
+      }
       step('stored', 'show', pick.title, { tmdbId: s.tmdbId })
       return true
     }
@@ -299,27 +280,10 @@ export function createMetadataRefreshWorker(
       return false
     }
     step('fetched', 'episode', pick.title, { tmdbId: showTmdbId })
-    deps.media.upsertEpisode({
-      id: existing.id,
-      parentId: existing.parentId!,
-      filePath: existing.filePath,
-      title: ep.title ?? existing.title,
-      season: existing.season!,
-      episode: existing.episode!,
-      durationSec: existing.durationSec ?? 0,
-      resolution: existing.resolution ?? '',
-      videoCodec: existing.videoCodec ?? '',
-        videoBitrate: existing.videoBitrate,
-      container: existing.container ?? '',
-      hdr: existing.hdr ?? { dv: false, hdr10: false, hdr10plus: false },
-      audioTracks: existing.audioTracks ?? [],
-      subtitleTracks: existing.subtitleTracks ?? [],
-      mtimeMs: existing.mtimeMs ?? 0,
-      sizeBytes: existing.sizeBytes ?? 0,
-      externalIds: existing.externalIds,
-      metadata: ep,
-    })
-    deps.media.markMetadataFetched(pick.id, ep.tmdbId ?? null, now)
+    if (!deps.media.setMetadata(pick.id, { metadata: ep, tmdbId: ep.tmdbId ?? null, title: ep.title ?? undefined }, now)) {
+      step('failed', 'episode', pick.title, { reason: 'no-file' })
+      return false
+    }
     step('stored', 'episode', pick.title, { tmdbId: showTmdbId })
     return true
   }

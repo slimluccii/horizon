@@ -419,8 +419,7 @@ describe('MetadataRefreshWorker', () => {
       return {
         findStaleMetadata: (() => { let done = false; return () => done ? [] : (done = true, [pick]) })(),
         getInternalRow: () => internal,
-        upsertMovie: () => {},
-        markMetadataFetched: () => {},
+        setMetadata: () => true,
         markMetadataFailed: () => {},
       } as any
     }
