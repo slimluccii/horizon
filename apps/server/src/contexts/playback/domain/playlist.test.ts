@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { buildRenditionPlaylist, buildMasterPlaylist } from './playlist.ts'
+import { uniformTimeline } from './timeline.ts'
 import type { Profile } from './profiles.ts'
 
 describe('buildRenditionPlaylist', () => {
   it('emits VOD playlist with EXTM3U + ENDLIST', () => {
-    const pl = buildRenditionPlaylist(8)
+    const pl = buildRenditionPlaylist(uniformTimeline(8))
     expect(pl).toContain('#EXTM3U')
     expect(pl).toContain('#EXT-X-PLAYLIST-TYPE:VOD')
     expect(pl).toContain('#EXT-X-ENDLIST')
@@ -12,7 +13,7 @@ describe('buildRenditionPlaylist', () => {
 
   it('lists every segment for the duration', () => {
     // 3s @ 1s/seg = 3 segs
-    const pl = buildRenditionPlaylist(3)
+    const pl = buildRenditionPlaylist(uniformTimeline(3))
     const segs = pl.split('\n').filter(l => l.endsWith('.m4s'))
     expect(segs).toHaveLength(3)
     expect(segs[0]).toBe('seg00000.m4s')
@@ -21,19 +22,19 @@ describe('buildRenditionPlaylist', () => {
 
   it('rounds up partial last segment', () => {
     // 2.5s @ 1s/seg = 2 full + 1 partial
-    const pl = buildRenditionPlaylist(2.5)
+    const pl = buildRenditionPlaylist(uniformTimeline(2.5))
     const segs = pl.split('\n').filter(l => l.endsWith('.m4s'))
     expect(segs).toHaveLength(3)
   })
 
   it('honours segment path prefix in segment URIs and EXT-X-MAP', () => {
-    const pl = buildRenditionPlaylist(4, 'renditions/0/')
+    const pl = buildRenditionPlaylist(uniformTimeline(4), 'renditions/0/')
     expect(pl).toContain('#EXT-X-MAP:URI="renditions/0/init.mp4"')
     expect(pl).toContain('renditions/0/seg00000.m4s')
   })
 
   it('emits at least one segment for tiny durations', () => {
-    const pl = buildRenditionPlaylist(0.5)
+    const pl = buildRenditionPlaylist(uniformTimeline(0.5))
     const segs = pl.split('\n').filter(l => l.endsWith('.m4s'))
     expect(segs).toHaveLength(1)
   })

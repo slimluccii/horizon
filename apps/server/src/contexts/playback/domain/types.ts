@@ -1,3 +1,4 @@
+import type { KeyframeTimeline } from './timeline.ts'
 import type { PlaybackPlan } from './plan.ts'
 
 export type SessionState = 'pre-buffer' | 'active' | 'detached' | 'parked' | 'destroyed'
@@ -39,6 +40,8 @@ export interface Session {
   sessionReady: boolean
   /** Total media duration in seconds — used to build static VOD playlist. */
   durationSec: number
+  /** Set for stream-copy sessions, whose segments follow the source keyframes. */
+  copyTimeline?: KeyframeTimeline
   /** Segment number the current ffmpeg run started producing from.
    *  Initial spawn = 0; seek-triggered restarts set this to the requested segment. */
   currentStartSegment: number

@@ -6,7 +6,7 @@ import type { HwAccel } from '../domain/hwaccel.ts'
 import type { PlaybackPlan } from '../domain/plan.ts'
 import type { RenderContext } from './render.ts'
 import { spawnFfmpeg, killFfmpeg } from '../infrastructure/ffmpeg/ffmpeg.ts'
-import { SEGMENT_DURATION_SEC } from '../domain/segments.ts'
+import { sessionTimeline } from '../domain/timeline.ts'
 
 /** Grace window after SIGKILL before assuming the process is dead. ffmpeg
  *  releases its file handles synchronously on macOS but exit() callbacks may
@@ -59,7 +59,7 @@ export async function cleanupRenditionFiles(
  *  check classifies subsequent requests correctly. */
 function applyStartSegment(session: Session, segNum: number): RenderContext {
   session.currentStartSegment = segNum
-  session.seekPositionMs = segNum * SEGMENT_DURATION_SEC * 1000
+  session.seekPositionMs = Math.round(sessionTimeline(session).startSec(segNum) * 1000)
   return {
     sourceFilePath: session.filePath,
     sessionDir: session.sessionDir,
