@@ -38,6 +38,7 @@ export default function VideoPlayer({
   // Track which reloadKey has had its resumeAtSec applied. Prevents re-applying
   // a stale position if the init effect ever re-runs for the same reloadKey.
   const appliedReloadKeyRef = useRef<number>(-1)
+  const firstLoadRef = useRef<{ session: PlaybackSession; reloadKey: number } | null>(null)
 
   useEffect(() => {
     const video = videoRef.current
@@ -57,7 +58,15 @@ export default function VideoPlayer({
     // for a reloadKey we've already handled, fall back to -1 so we never re-seek
     // to a stale position the user has since moved past.
     const isFreshReload = reloadKey !== appliedReloadKeyRef.current
-    const startPosition = isFreshReload && resumeAtSec > 0 ? resumeAtSec : -1
+    // A session that starts mid-film has no segments before that point, so its
+    // first load must open there instead of at the top of the playlist. Keyed on
+    // the reloadKey the session arrived with, because StrictMode runs this
+    // effect twice on mount and the second run is no longer a fresh reload.
+    if (firstLoadRef.current?.session !== session) firstLoadRef.current = { session, reloadKey }
+    const isFirstLoad = firstLoadRef.current.reloadKey === reloadKey
+    const startPosition = isFreshReload && resumeAtSec > 0
+      ? resumeAtSec
+      : isFirstLoad && session.startPositionSec > 0 ? session.startPositionSec : -1
     appliedReloadKeyRef.current = reloadKey
 
     const hls = new Hls({

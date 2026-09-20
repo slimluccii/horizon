@@ -180,6 +180,7 @@ describe('PlaybackSession token-bearing URLs for header-less transports (#41)', 
       await flush()
       ready('tok')
       expect(session.streamUrl).toBe('http://x/api/sessions/s1/stream.m3u8')
+      expect(session.startPositionSec).toBe(754.5)
     })
   })
 

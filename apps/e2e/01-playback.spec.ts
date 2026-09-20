@@ -164,12 +164,42 @@ test.describe('playback transcode pipeline', () => {
     await video.evaluate(async (v: HTMLVideoElement) => { v.muted = true; await v.play() })
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 30_000 }).toBeGreaterThan(0.5)
 
-    // The 30 s fixture transcodes in a few seconds, long before the viewer is done.
+    // The fixture transcodes in a few seconds, long before the viewer is done.
     await page.waitForTimeout(8_000)
     expect(new URL(page.url()).pathname).toBe(`/play/${mediaId}`)
 
-    await video.evaluate((v: HTMLVideoElement) => { v.playbackRate = 8 })
-    await expect.poll(() => new URL(page.url()).pathname, { timeout: 30_000 }).toBe('/')
+    await video.evaluate((v: HTMLVideoElement) => { v.playbackRate = 16 })
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 60_000 }).toBe('/')
+    await ctx.close()
+  })
+
+  test('resume picks up a transcoded movie where the viewer left off', async ({ browser, request }) => {
+    // The end-of-playback test above leaves this movie marked watched, which suppresses the resume prompt.
+    await request.delete(`${API}/users/${owner.id}/progress/${mediaId}`, { headers: bearer(owner) })
+
+    const ctx = await browser.newContext()
+    await authBrowser(ctx, owner)
+    const page = await ctx.newPage()
+    await page.goto(`${APP}/play/${mediaId}`)
+
+    const video = page.locator('video')
+    await expect(video).toBeVisible({ timeout: 60_000 })
+    await video.evaluate(async (v: HTMLVideoElement) => { v.muted = true; v.playbackRate = 4; await v.play() })
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 30_000 }).toBeGreaterThan(12)
+    await video.evaluate((v: HTMLVideoElement) => v.pause())
+    const leftAt = await video.evaluate((v: HTMLVideoElement) => v.currentTime)
+    await page.goto(`${APP}/`)
+
+    await page.goto(`${APP}/play/${mediaId}`)
+    await page.getByRole('button', { name: 'Resume' }).click({ timeout: 10_000 })
+    const resumed = page.locator('video')
+    await expect(resumed).toBeVisible({ timeout: 60_000 })
+    await resumed.evaluate(async (v: HTMLVideoElement) => { v.muted = true; await v.play() })
+    // The first moment it is playing decides it: a start from zero would also reach this position eventually.
+    await expect.poll(() => resumed.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 30_000 }).toBeGreaterThan(0.5)
+    const startedAt = await resumed.evaluate((v: HTMLVideoElement) => v.currentTime)
+    expect(startedAt).toBeGreaterThan(leftAt - 3)
+    expect(startedAt).toBeLessThan(leftAt + 8)
     await ctx.close()
   })
 })
