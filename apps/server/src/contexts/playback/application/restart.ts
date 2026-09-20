@@ -1,3 +1,4 @@
+import { isRunning } from '../infrastructure/ffmpeg/process.ts'
 import path from 'node:path'
 import { rm, readdir, unlink } from 'node:fs/promises'
 import type { Session } from '../domain/types.ts'
@@ -85,7 +86,7 @@ export async function restartAtSegment(
   // SIGKILL: we don't need ffmpeg to flush; we wipe its outputs anyway.
   // Saves up to 1.5s of grace-wait on every seek vs. SIGTERM.
   const proc = session.ffmpegProcess
-  if (proc && !proc.killed && proc.exitCode === null && proc.signalCode === null) {
+  if (isRunning(proc)) {
     try { proc.kill('SIGKILL') } catch {/* gone */}
     await waitForExit(session)
   }

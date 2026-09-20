@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { isRunning } from './process.ts'
 import { ErrorCodes } from '@horizon/sdk'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import { readdirSync, watch } from 'node:fs'
@@ -75,29 +76,26 @@ const stoppedOnPurpose = new WeakSet<ChildProcess>()
 
 export function killFfmpeg(session: Session): void {
   const proc = session.ffmpegProcess
-  if (!proc || proc.killed) return
+  if (!isRunning(proc)) return
   stoppedOnPurpose.add(proc)
+  // A process paused with SIGSTOP does not run its SIGTERM handler until it is continued.
+  proc.kill('SIGCONT')
   proc.kill('SIGTERM')
   // Schedule SIGKILL fallback. Cancel on early exit so we don't fire on a
   // dead process (benign but wastes a timer slot).
   const t = setTimeout(() => {
-    if (!proc.killed && proc.exitCode === null) proc.kill('SIGKILL')
+    if (isRunning(proc)) proc.kill('SIGKILL')
   }, SIGTERM_TO_SIGKILL_MS)
   proc.once('exit', () => clearTimeout(t))
 }
 
-function isAlive(session: Session): boolean {
-  const p = session.ffmpegProcess
-  return !!p && !p.killed && p.exitCode === null && p.signalCode === null
-}
-
 export function pauseFfmpeg(session: Session): void {
-  if (!isAlive(session)) return
+  if (!isRunning(session.ffmpegProcess)) return
   try { session.ffmpegProcess?.kill('SIGSTOP') } catch {/* ESRCH: process gone */}
 }
 
 export function resumeFfmpeg(session: Session): void {
-  if (!isAlive(session)) return
+  if (!isRunning(session.ffmpegProcess)) return
   try { session.ffmpegProcess?.kill('SIGCONT') } catch {/* ESRCH: process gone */}
 }
 
