@@ -259,6 +259,19 @@ ALTER TABLE scan_history_new RENAME TO scan_history;
 CREATE INDEX idx_scan_history_started ON scan_history(started_at DESC);
 `
 
+// Video keyframe timestamps per file, as [pts, dts] pairs. A stream copy can only
+// cut segments at keyframes, so its playlist is built from these. mtime_ms and
+// size_bytes tie an index to the version of the file it was read from.
+const V7_SQL = `
+CREATE TABLE keyframe_index (
+  media_id   TEXT PRIMARY KEY REFERENCES media_items(id) ON DELETE CASCADE,
+  mtime_ms   INTEGER NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  keyframes  TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
@@ -266,6 +279,7 @@ const MIGRATIONS: Migration[] = [
   { version: 4, sql: V4_SQL },
   { version: 5, sql: V5_SQL },
   { version: 6, sql: V6_SQL },
+  { version: 7, sql: V7_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.
