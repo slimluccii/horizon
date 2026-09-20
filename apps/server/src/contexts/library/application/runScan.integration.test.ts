@@ -305,4 +305,151 @@ describe('rescan (integration)', () => {
       expect(media.listMovies().map(m => m.title).sort()).toEqual(['Oppenheimer', 'Tenet'])
     })
   })
+
+  describe('stable ids', () => {
+    function setup() {
+      const moviesRoot = path.join(tmpRoot, 'movies')
+      const showsRoot = path.join(tmpRoot, 'shows')
+      mkdirSync(moviesRoot, { recursive: true })
+      mkdirSync(showsRoot, { recursive: true })
+      const db = openDatabase(':memory:')
+      migrate(db)
+      const media = createMediaRepo(db)
+      const collections = createCollectionsRepo(db)
+      const scanWith = (cfg: { moviesRoots: string[]; showsRoots: string[] }) => {
+        const full = { ...cfg, cacheDir: tmpRoot, scanConcurrency: 2 }
+        return runScan(fullScope(full), full, { media, collections })
+      }
+      const scan = () => scanWith({ moviesRoots: [moviesRoot], showsRoots: [showsRoot] })
+      return { moviesRoot, showsRoot, db, media, collections, scan, scanWith }
+    }
+
+    it('keeps a movie id when a quality upgrade renames the file', async () => {
+      const { moviesRoot, media, scan } = setup()
+      const dir = path.join(moviesRoot, 'Oppenheimer (2023) {tmdb-872585}')
+      mkdirSync(dir)
+      writeFileSync(path.join(dir, 'Oppenheimer (2023) WEBDL-1080p.mkv'), '')
+      await scan()
+      const before = media.listMovies()[0].id
+
+      rmSync(path.join(dir, 'Oppenheimer (2023) WEBDL-1080p.mkv'))
+      writeFileSync(path.join(dir, 'Oppenheimer (2023) Bluray-2160p.mp4'), '')
+      const result = await scan()
+
+      expect(media.listMovies().map(m => m.id)).toEqual([before])
+      expect(result.itemsAdded).toBe(0)
+      expect(result.itemsRemoved).toBe(0)
+      expect(media.getInternalRow(before)!.filePath).toContain('Bluray-2160p.mp4')
+    })
+
+    it('keeps an untagged movie id across a rename that keeps title and year', async () => {
+      const { moviesRoot, media, scan } = setup()
+      writeFileSync(path.join(moviesRoot, 'Tenet (2020) 720p.mkv'), '')
+      await scan()
+      const before = media.listMovies()[0].id
+
+      rmSync(path.join(moviesRoot, 'Tenet (2020) 720p.mkv'))
+      mkdirSync(path.join(moviesRoot, 'Tenet (2020)'))
+      writeFileSync(path.join(moviesRoot, 'Tenet (2020)', 'Tenet (2020) 1080p.mkv'), '')
+      await scan()
+
+      expect(media.listMovies().map(m => m.id)).toEqual([before])
+    })
+
+    it('keeps show and episode ids when the library root moves', async () => {
+      const { showsRoot, media, scan, scanWith } = setup()
+      const season = path.join(showsRoot, 'Breaking Bad {tvdb-81189}', 'Season 01')
+      mkdirSync(season, { recursive: true })
+      writeFileSync(path.join(season, 'Breaking Bad - S01E01 - Pilot.mkv'), '')
+      await scan()
+      const show = media.listShows()[0].id
+      const episode = media.getEpisodes(show)[0].id
+
+      const newRoot = path.join(tmpRoot, 'tv')
+      const newSeason = path.join(newRoot, 'Breaking Bad {tvdb-81189}', 'Season 01')
+      mkdirSync(newSeason, { recursive: true })
+      writeFileSync(path.join(newSeason, 'Breaking Bad - S01E01 - Pilot WEBDL-1080p.mkv'), '')
+      rmSync(showsRoot, { recursive: true })
+      await scanWith({ moviesRoots: [], showsRoots: [newRoot] })
+
+      expect(media.listShows().map(s => s.id)).toEqual([show])
+      expect(media.getEpisodes(show).map(e => e.id)).toEqual([episode])
+    })
+
+    it('merges one show that is split across two folders', async () => {
+      const { showsRoot, media, scan } = setup()
+      const a = path.join(showsRoot, 'disk1', 'Frieren {tvdb-424536}', 'Season 01')
+      const b = path.join(showsRoot, 'disk2', 'Frieren {tvdb-424536}', 'Season 02')
+      mkdirSync(a, { recursive: true })
+      mkdirSync(b, { recursive: true })
+      writeFileSync(path.join(a, 'Frieren - S01E01.mkv'), '')
+      writeFileSync(path.join(b, 'Frieren - S02E01.mkv'), '')
+      await scan()
+
+      expect(media.listShows()).toHaveLength(1)
+      expect(media.getEpisodes(media.listShows()[0].id)).toHaveLength(2)
+    })
+
+    it('keeps the larger file when two files are the same movie, and reports the other', async () => {
+      const { moviesRoot, media, scan } = setup()
+      mkdirSync(path.join(moviesRoot, 'hd'))
+      mkdirSync(path.join(moviesRoot, 'uhd'))
+      writeFileSync(path.join(moviesRoot, 'hd', 'Dune (2021) {tmdb-438631} 1080p.mkv'), 'small')
+      writeFileSync(path.join(moviesRoot, 'uhd', 'Dune (2021) {tmdb-438631} 2160p.mkv'), 'much larger file')
+      const result = await scan()
+
+      expect(media.listMovies()).toHaveLength(1)
+      expect(media.getInternalRow(media.listMovies()[0].id)!.filePath).toContain('2160p')
+      expect(result.duplicates).toEqual([path.join(moviesRoot, 'hd', 'Dune (2021) {tmdb-438631} 1080p.mkv')])
+    })
+
+    it('keeps the larger file when a subtree scan only sees the smaller one', async () => {
+      const { moviesRoot, showsRoot, media, collections, scan } = setup()
+      mkdirSync(path.join(moviesRoot, 'hd'))
+      mkdirSync(path.join(moviesRoot, 'uhd'))
+      const small = path.join(moviesRoot, 'hd', 'Dune (2021) {tmdb-438631} 1080p.mkv')
+      writeFileSync(small, 'small')
+      writeFileSync(path.join(moviesRoot, 'uhd', 'Dune (2021) {tmdb-438631} 2160p.mkv'), 'much larger file')
+      await scan()
+
+      const cfg = { moviesRoots: [moviesRoot], showsRoots: [showsRoot], cacheDir: tmpRoot, scanConcurrency: 2 }
+      const scope = { moviesPaths: [path.join(moviesRoot, 'hd')], showsPaths: [], fullScope: false }
+      const result = await runScan(scope, cfg, { media, collections })
+
+      expect(result.duplicates).toEqual([small])
+      expect(media.listMovies()).toHaveLength(1)
+      expect(media.getInternalRow(media.listMovies()[0].id)!.filePath).toContain('2160p')
+    })
+
+    it('takes over the file of a row that was stored under a path-based id', async () => {
+      const { moviesRoot, db, media, scan } = setup()
+      const file = path.join(moviesRoot, 'Tenet (2020).mkv')
+      writeFileSync(file, '')
+      db.prepare(
+        `INSERT INTO media_items (id, kind, title, file_path, mtime_ms, size_bytes, first_seen_at, last_seen_at)
+         VALUES ('legacy-path-hash', 'movie', 'Tenet', ?, 0, 0, 0, 0)`,
+      ).run(file)
+
+      await scan()
+
+      expect(media.listMovies()).toHaveLength(1)
+      expect(media.listMovies()[0].id).not.toBe('legacy-path-hash')
+      expect(media.getById('legacy-path-hash')).toBeNull()
+    })
+
+    it('lets a file move to a new identity when its tag is corrected', async () => {
+      const { moviesRoot, media, scan } = setup()
+      const wrong = path.join(moviesRoot, 'Dune (2021) {tmdb-841}.mkv')
+      writeFileSync(wrong, '')
+      await scan()
+      const before = media.listMovies()[0].id
+
+      rmSync(wrong)
+      writeFileSync(path.join(moviesRoot, 'Dune (2021) {tmdb-438631}.mkv'), '')
+      await scan()
+
+      expect(media.listMovies()).toHaveLength(1)
+      expect(media.listMovies()[0].id).not.toBe(before)
+    })
+  })
 })
