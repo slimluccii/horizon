@@ -67,7 +67,7 @@ test.describe('profiles & roles', () => {
     const selfRow = page.locator('section[aria-label="Profiles"] li', { hasText: 'SelfDemote' })
     await selfRow.locator('select').selectOption('member')
 
-    await expect(page.getByRole('button', { name: 'Personal' })).toHaveClass(/is-active/)
+    await expect(page.getByRole('button', { name: 'Personal' })).toHaveAttribute('aria-current', 'page')
     await expect(page.getByRole('status')).toHaveText(/role changed/i)
   })
 
