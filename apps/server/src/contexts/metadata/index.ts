@@ -13,4 +13,5 @@ export {
   type RefreshErrorState,
   type RefreshResult,
 } from './application/refresh.ts'
+export { keepTmdbInSyncWithSettings } from './application/tmdbFromSettings.ts'
 export { registerMetadata } from './infrastructure/http/metadata.ts'
