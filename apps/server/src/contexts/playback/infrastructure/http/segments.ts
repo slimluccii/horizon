@@ -11,6 +11,7 @@ import type { UserRepo } from '../../../identity/index.ts'
 import { waitForSegment, waitForInit } from '../ffmpeg/ffmpeg.ts'
 import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
+import { segmentName } from '../../domain/segments.ts'
 
 const INIT_WAIT_MS = 30_000
 const SEGMENT_WAIT_MS = 60_000
@@ -102,8 +103,9 @@ export function registerSegments(
       // directly. Briefly wait if not on disk yet — ffmpeg writes init alongside
       // seg0, so a freshly-spawned run may not have flushed it yet.
       if (segReq === 'init.mp4' || segReq.startsWith('init_')) {
-        if (!existsSync(segPath)) await waitForInit(session, r, INIT_WAIT_MS)
-        if (!existsSync(segPath)) return sendNotFound(reply, ErrorCodes.NOT_READY, 'Init not ready')
+        // ffmpeg creates init.mp4 empty and fills it with the first segment, so existing is not enough.
+        const ready = await waitForInit(session, r, INIT_WAIT_MS)
+        if (!ready || !existsSync(segPath)) return sendNotFound(reply, ErrorCodes.NOT_READY, 'Init not ready')
         return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
       }
 
@@ -113,8 +115,9 @@ export function registerSegments(
       const runtime = sessions.getRuntime(session.id)
       runtime?.onSegmentRequested(segNum)
 
-      // Fast path: segment already on disk
-      if (existsSync(segPath)) {
+      // Fast path: a segment is complete once ffmpeg has started the next one. The
+      // newest one may still be growing, so it goes through waitForSegment below.
+      if (existsSync(segPath) && existsSync(path.join(path.dirname(segPath), segmentName(segNum + 1)))) {
         logFirstSegment(session, segNum)
         return reply.header('Content-Type', 'video/mp4').send(createReadStream(segPath))
       }
