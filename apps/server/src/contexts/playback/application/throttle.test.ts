@@ -4,11 +4,13 @@ import {
   PAUSE_WHEN_AHEAD_SEGMENTS,
   RESUME_WHEN_AHEAD_SEGMENTS,
   THROTTLE_CHECK_INTERVAL_MS,
+  KEEP_BEHIND_SEGMENTS,
 } from './throttle.ts'
 import type { Session } from '../domain/types.ts'
 
 function setup(overrides: Partial<Session> = {}) {
   const calls: string[] = []
+  const evicted: number[] = []
   const state = { head: 0 as number | null, now: 0 }
   const session = { id: 's1', state: 'active', ffmpegProcess: { pid: 1 }, ...overrides } as unknown as Session
   const throttle = createTranscodeThrottle({
@@ -16,6 +18,7 @@ function setup(overrides: Partial<Session> = {}) {
     headSegment: () => state.head,
     pause: () => { calls.push('pause') },
     resume: () => { calls.push('resume') },
+    evictBelow: (_s, segNum) => { evicted.push(segNum) },
     now: () => state.now,
   })
   const request = (segNum: number, head: number | null) => {
@@ -23,7 +26,7 @@ function setup(overrides: Partial<Session> = {}) {
     state.now += THROTTLE_CHECK_INTERVAL_MS
     throttle.onSegmentRequested(segNum)
   }
-  return { session, throttle, calls, state, request }
+  return { session, throttle, calls, evicted, state, request }
 }
 
 describe('transcode throttle', () => {
@@ -62,7 +65,7 @@ describe('transcode throttle', () => {
     let reads = 0
     const session = { id: 's1', state: 'active', ffmpegProcess: { pid: 1 } } as unknown as Session
     const throttle = createTranscodeThrottle({
-      session, headSegment: () => { reads++; return 500 }, pause: () => {}, resume: () => {}, now: () => 0,
+      session, headSegment: () => { reads++; return 500 }, pause: () => {}, resume: () => {}, evictBelow: () => {}, now: () => 0,
     })
     for (let seg = 0; seg < 20; seg++) throttle.onSegmentRequested(seg)
     expect(reads).toBe(1)
@@ -86,5 +89,26 @@ describe('transcode throttle', () => {
     const { calls, request } = setup({ ffmpegProcess: undefined } as Partial<Session>)
     request(10, 10 + PAUSE_WHEN_AHEAD_SEGMENTS)
     expect(calls).toEqual([])
+  })
+})
+
+describe('segment eviction by the throttle', () => {
+  it('drops segments the player has left far enough behind', () => {
+    const { evicted, request } = setup()
+    request(KEEP_BEHIND_SEGMENTS + 40, 500)
+    expect(evicted).toEqual([40])
+  })
+
+  it('keeps everything while the player is still within the keep window of the run start', () => {
+    const { evicted, request } = setup({ currentStartSegment: 100 } as Partial<Session>)
+    request(100 + KEEP_BEHIND_SEGMENTS, 500)
+    expect(evicted).toEqual([])
+  })
+
+  it('does not evict again for a request further back than the last eviction', () => {
+    const { evicted, request } = setup()
+    request(KEEP_BEHIND_SEGMENTS + 40, 500)
+    request(KEEP_BEHIND_SEGMENTS + 10, 500)
+    expect(evicted).toEqual([40])
   })
 })

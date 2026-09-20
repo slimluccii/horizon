@@ -62,6 +62,29 @@ function deferred(): Deferred {
 }
 
 describe('SessionRuntime', () => {
+  describe('segments that are gone for good', () => {
+    it('restarts for a segment the encoder has already passed, since it will not be written again', () => {
+      const session = fakeSession({ currentStartSegment: 0 })
+      const runtime = createSessionRuntime({ session, hwAccel, headSegment: () => 300 })
+      expect(runtime.requestSegment(40)).toEqual({ kind: 'restart', segNum: 40 })
+    })
+
+    it('waits for the segment the encoder is writing right now', () => {
+      const session = fakeSession({ currentStartSegment: 0 })
+      const runtime = createSessionRuntime({ session, hwAccel, headSegment: () => 300 })
+      expect(runtime.requestSegment(300).kind).toBe('wait')
+      expect(runtime.requestSegment(301).kind).toBe('wait')
+    })
+
+    it('judges a request against the rendition it asks for, which may lag behind the first one', () => {
+      const session = fakeSession({ currentStartSegment: 0 })
+      const heads = [300, 296]
+      const runtime = createSessionRuntime({ session, hwAccel, headSegment: (_s, rendition = 0) => heads[rendition] })
+      expect(runtime.requestSegment(298, 1).kind).toBe('wait')
+      expect(runtime.requestSegment(298, 0).kind).toBe('restart')
+    })
+  })
+
   describe('lookahead window follows the encoder', () => {
     it('waits for the next segment during continuous playback past the first window', () => {
       const session = fakeSession({ currentStartSegment: 0 })

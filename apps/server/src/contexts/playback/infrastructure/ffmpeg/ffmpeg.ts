@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { isRunning } from './process.ts'
 import { ErrorCodes } from '@horizon/sdk'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat, unlink } from 'node:fs/promises'
 import { readdirSync, watch } from 'node:fs'
 import path from 'node:path'
 import type { HwAccel } from '../../domain/hwaccel.ts'
@@ -56,10 +56,10 @@ export async function cleanupSessionDir(sessionDir: string): Promise<void> {
 }
 
 /** Highest segment number the current run has written, or null before the first one. */
-export function headSegment(session: Session): number | null {
+export function headSegment(session: Session, rendition = 0): number | null {
   let names: string[]
   try {
-    names = readdirSync(path.join(session.sessionDir, 'r0'))
+    names = readdirSync(path.join(session.sessionDir, `r${rendition}`))
   } catch {
     return null
   }
@@ -69,6 +69,22 @@ export function headSegment(session: Session): number | null {
     if (m) head = Math.max(head ?? -1, parseInt(m[1], 10))
   }
   return head
+}
+
+/** Delete the segments numbered below `segNum` from every rendition; init.mp4 stays. */
+export async function evictSegmentsBelow(session: Session, segNum: number): Promise<number> {
+  const renditions = await readdir(session.sessionDir).catch(() => [] as string[])
+  let removed = 0
+  for (const rendition of renditions) {
+    const dir = path.join(session.sessionDir, rendition)
+    const names = await readdir(dir).catch(() => [] as string[])
+    for (const name of names) {
+      const m = /^seg(\d+)\.m4s$/.exec(name)
+      if (!m || parseInt(m[1], 10) >= segNum) continue
+      await unlink(path.join(dir, name)).then(() => { removed++ }, () => {/* gone */})
+    }
+  }
+  return removed
 }
 
 // ffmpeg exits with code 255 on SIGTERM, which is indistinguishable from a crash without this.
