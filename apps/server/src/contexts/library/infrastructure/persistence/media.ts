@@ -134,6 +134,12 @@ export interface MediaItemRow extends MediaItemBase {
   metadataFailedCount: number
 }
 
+export interface MetadataWrite {
+  metadata: unknown
+  tmdbId: number | null
+  title?: string
+}
+
 /** Items eligible for metadata refresh, in priority order. */
 export interface StaleMetadataPick {
   id: string
@@ -195,6 +201,9 @@ export interface MediaRepo {
     failureBackoffMs: number
     failureBackoffCap: number
   }): StaleMetadataPick[]
+  /** Store fetched metadata and mark the item fetched. Returns false when the
+   *  item is gone or soft-deleted, so a late refresh cannot resurrect it. */
+  setMetadata(id: string, input: MetadataWrite, nowMs: number): boolean
   markMetadataFetched(id: string, tmdbId: number | null, nowMs: number): void
   markMetadataFailed(id: string, nowMs: number): void
 }
@@ -288,7 +297,6 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       mtime_ms        = excluded.mtime_ms,
       size_bytes      = excluded.size_bytes,
       external_ids    = excluded.external_ids,
-      metadata        = excluded.metadata,
       last_seen_at    = excluded.last_seen_at,
       deleted_at      = NULL
   `)
@@ -305,7 +313,6 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       title        = excluded.title,
       sort_year    = excluded.sort_year,
       external_ids = excluded.external_ids,
-      metadata     = excluded.metadata,
       last_seen_at = excluded.last_seen_at,
       deleted_at   = NULL
   `)
@@ -339,7 +346,6 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       mtime_ms        = excluded.mtime_ms,
       size_bytes      = excluded.size_bytes,
       external_ids    = excluded.external_ids,
-      metadata        = excluded.metadata,
       last_seen_at    = excluded.last_seen_at,
       deleted_at      = NULL
   `)
@@ -572,6 +578,20 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
         metadataFetchedAt: r.metadata_fetched_at,
         metadataFailedCount: r.metadata_failed_count ?? 0,
       }))
+    },
+
+    setMetadata(id, input, nowMs) {
+      const res = db.prepare(
+        `UPDATE media_items
+            SET metadata = ?,
+                title = COALESCE(?, title),
+                tmdb_id = COALESCE(?, tmdb_id),
+                metadata_fetched_at = ?,
+                metadata_failed_at = NULL,
+                metadata_failed_count = 0
+          WHERE id = ? AND deleted_at IS NULL`,
+      ).run(JSON.stringify(input.metadata), input.title ?? null, input.tmdbId, nowMs, id)
+      return res.changes > 0
     },
 
     markMetadataFetched(id, tmdbId, nowMs) {

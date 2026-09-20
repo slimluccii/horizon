@@ -6,6 +6,8 @@ import { openDatabase } from '../../../platform/db/connection.ts'
 import { migrate } from '../../../platform/db/migrations.ts'
 import { createMediaRepo } from '../infrastructure/persistence/media.ts'
 import { createCollectionsRepo } from '../infrastructure/persistence/collections.ts'
+import { createChangesCursorRepo } from '../infrastructure/persistence/scanState.ts'
+import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../metadata/index.ts'
 import { rescan, runScan, fullScope } from './runScan.ts'
 
 // Stub probe — scanner is generally backed by ffprobe. We inject a fake via
@@ -176,5 +178,73 @@ describe('rescan (integration)', () => {
 
     expect(result.itemsFailed).toBe(1)
     expect(media.listMovies()).toHaveLength(0)
+  })
+
+  describe('data safety', () => {
+    const fakeTmdb = {
+      async movieByTmdbId(id: number) { return { tmdbId: id, title: 'Oppenheimer', overview: 'A physicist.' } },
+      async movieByImdbId() { return null },
+      async searchMovie() { return null },
+      async showByTmdbId() { return null },
+      async showByTvdbId() { return null },
+      async searchShow() { return null },
+      async episode() { return null },
+      async changedMovieIds() { return [] },
+      async changedShowIds() { return [] },
+    } as any
+
+    function setup() {
+      const moviesRoot = path.join(tmpRoot, 'movies')
+      mkdirSync(moviesRoot, { recursive: true })
+      const db = openDatabase(':memory:')
+      migrate(db)
+      const media = createMediaRepo(db)
+      const collections = createCollectionsRepo(db)
+      const cfg = { moviesRoots: [moviesRoot], showsRoots: [], cacheDir: tmpRoot, scanConcurrency: 2 }
+      const scan = () => runScan(fullScope(cfg), cfg, { media, collections })
+      return { moviesRoot, db, media, scan }
+    }
+
+    it('keeps TMDB metadata across a rescan', async () => {
+      const { moviesRoot, db, media, scan } = setup()
+      writeFileSync(path.join(moviesRoot, 'Oppenheimer (2023) {tmdb-872585}.mkv'), '')
+      await scan()
+
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, changesFeedExtraCap: 0 },
+        { media, tmdb: fakeTmdb, changesCursor: createChangesCursorRepo(db) },
+      )
+      const refreshed = await worker.run({ useChangesFeed: false })
+      expect(refreshed.refreshed).toBe(1)
+      expect(media.listMovies()[0].metadata).toMatchObject({ overview: 'A physicist.' })
+
+      await scan()
+
+      expect(media.listMovies()[0].metadata).toMatchObject({ overview: 'A physicist.' })
+    })
+
+    it('does not resurrect a soft-deleted item when a metadata refresh lands after the delete', async () => {
+      const { moviesRoot, db, media, scan } = setup()
+      const file = path.join(moviesRoot, 'Oppenheimer (2023) {tmdb-872585}.mkv')
+      writeFileSync(file, '')
+      writeFileSync(path.join(moviesRoot, 'Tenet (2020).mkv'), '')
+      await scan()
+
+      const slowTmdb = {
+        ...fakeTmdb,
+        async movieByTmdbId(id: number) {
+          rmSync(file)
+          await scan()
+          return fakeTmdb.movieByTmdbId(id)
+        },
+      }
+      const worker = createMetadataRefreshWorker(
+        { ...DEFAULT_REFRESH_CONFIG, changesFeedExtraCap: 0 },
+        { media, tmdb: slowTmdb, changesCursor: createChangesCursorRepo(db) },
+      )
+      await worker.run({ useChangesFeed: false })
+
+      expect(media.listMovies().map(m => m.title)).toEqual(['Tenet'])
+    })
   })
 })
