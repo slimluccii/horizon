@@ -77,6 +77,9 @@ export interface PlaybackSessionOptions {
    *  origin. Native clients (which have no cookie) attach this token as a bearer
    *  on the requests they control. Identity no longer travels in the URL. */
   token?: string
+  /** Where playback starts. The server seeks a transcode itself; a direct-play
+   *  `<video src>` gets it as a media fragment. */
+  startPositionMs?: number
   onReady?: (info: SessionInfo) => void
   onQualityChange?: (profile: QualityProfile, reason: string) => void
   onTrackChange?: (info: { audio?: number; subtitle?: number | null; restarted?: boolean }) => void
@@ -179,7 +182,9 @@ export class PlaybackSession {
     // the proof-of-knowledge reconnect token rides as a query param. Identity
     // rides the cookie (web); the URL no longer carries a caller id. transcode
     // manifests are fetched by hls.js, which sets the token header via xhrSetup.
-    return this.method === 'direct-play' ? this._withToken(this._streamUrl) : this._streamUrl
+    if (this.method !== 'direct-play') return this._streamUrl
+    const startSec = (this._opts.startPositionMs ?? 0) / 1000
+    return this._withToken(this._streamUrl) + (startSec > 0 ? `#t=${startSec}` : '')
   }
 
   private _connect() {

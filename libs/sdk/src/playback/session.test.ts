@@ -157,6 +157,30 @@ describe('PlaybackSession token-bearing URLs for header-less transports (#41)', 
       const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
       expect(fetchMock).toHaveBeenCalledWith('http://x/api/sessions/s1', expect.objectContaining({ method: 'DELETE' }))
     })
+
+    it('starts a direct-play stream at the resume position', async () => {
+      const session = new PlaybackSession({
+        sessionInfo: { ...apiInfo, method: 'direct-play', streamUrl: '/api/sessions/s1/direct' },
+        baseUrl: 'http://x',
+        startPositionMs: 754_500,
+        capabilities: { videoCodecs: [], audioCodecs: [], hdr: [], maxBitrate: 0, container: [] },
+      })
+      await flush()
+      ready('tok')
+      expect(session.streamUrl).toBe('http://x/api/sessions/s1/direct?token=tok#t=754.5')
+    })
+
+    it('leaves a transcode stream url alone, since the server already starts it at the resume position', async () => {
+      const session = new PlaybackSession({
+        sessionInfo: apiInfo,
+        baseUrl: 'http://x',
+        startPositionMs: 754_500,
+        capabilities: { videoCodecs: [], audioCodecs: [], hdr: [], maxBitrate: 0, container: [] },
+      })
+      await flush()
+      ready('tok')
+      expect(session.streamUrl).toBe('http://x/api/sessions/s1/stream.m3u8')
+    })
   })
 
   it('returns header-less URLs unchanged before the token is assigned', async () => {

@@ -346,6 +346,7 @@ export class HorizonClient {
       baseUrl: this.baseUrl,
       capabilities: caps,
       token: this.token ?? undefined,
+      startPositionMs: opts.startPositionMs,
       onReady: opts.onReady,
       onQualityChange: opts.onQualityChange,
       onTrackChange: opts.onTrackChange,
