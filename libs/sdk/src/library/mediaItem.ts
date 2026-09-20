@@ -18,6 +18,8 @@ export interface MediaItem {
   season?: number
   /** Episode only — episode number within the season. */
   episode?: number
+  /** Episode only — last episode in a multi-episode file; equals `episode` otherwise. */
+  episodeEnd?: number
   duration: number
   resolution: string
   videoCodec: string

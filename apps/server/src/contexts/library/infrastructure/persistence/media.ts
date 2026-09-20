@@ -58,6 +58,8 @@ export interface EpisodeUpsert extends Omit<MovieUpsert, 'sortYear'> {
   parentId: string
   season: number
   episode: number
+  /** Defaults to `episode`. */
+  episodeEnd?: number
 }
 
 /**
@@ -83,6 +85,8 @@ export interface MediaItemBase {
   year: number | null
   season: number | null
   episode: number | null
+  /** Last episode in a multi-episode file; equals `episode` otherwise. */
+  episodeEnd: number | null
   durationSec: number | null
   resolution: string | null
   videoCodec: string | null
@@ -220,6 +224,7 @@ function rowToInternal(row: any): MediaItemRow {
     year: row.sort_year,
     season: row.season,
     episode: row.episode,
+    episodeEnd: row.episode_end ?? row.episode,
     filePath: row.file_path,
     durationSec: row.duration_sec,
     resolution: row.resolution,
@@ -254,6 +259,7 @@ function rowToDomain(row: MediaItemBase): MediaItem {
     year: row.year,
     season: row.season,
     episode: row.episode,
+    episodeEnd: row.episodeEnd,
     durationSec: row.durationSec,
     resolution: row.resolution,
     videoCodec: row.videoCodec,
@@ -319,23 +325,25 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       deleted_at   = NULL
   `)
 
+  // Once metadata is fetched the episode title comes from TMDB, so the filename title must not overwrite it.
   const upsertEpisodeStmt = db.prepare(`
     INSERT INTO media_items (
-      id, kind, parent_id, title, season, episode,
+      id, kind, parent_id, title, season, episode, episode_end,
       file_path, duration_sec, resolution, video_codec, video_bitrate, container,
       hdr, audio_tracks, subtitle_tracks, mtime_ms, size_bytes,
       external_ids, metadata, first_seen_at, last_seen_at, deleted_at
     ) VALUES (
-      ?, 'episode', ?, ?, ?, ?,
+      ?, 'episode', ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, NULL
     )
     ON CONFLICT(id) DO UPDATE SET
       parent_id       = excluded.parent_id,
-      title           = excluded.title,
+      title           = CASE WHEN media_items.metadata IS NULL THEN excluded.title ELSE media_items.title END,
       season          = excluded.season,
       episode         = excluded.episode,
+      episode_end     = excluded.episode_end,
       file_path       = excluded.file_path,
       duration_sec    = excluded.duration_sec,
       resolution      = excluded.resolution,
@@ -402,7 +410,7 @@ export function createMediaRepo(db: DatabaseSync): MediaRepo {
       const now = Date.now()
       releasePathStmt.run(now, input.filePath, input.id)
       upsertEpisodeStmt.run(
-        input.id, input.parentId, input.title, input.season, input.episode,
+        input.id, input.parentId, input.title, input.season, input.episode, input.episodeEnd ?? input.episode,
         input.filePath, input.durationSec, input.resolution, input.videoCodec, input.videoBitrate ?? null, input.container,
         JSON.stringify(input.hdr), JSON.stringify(input.audioTracks), JSON.stringify(input.subtitleTracks),
         input.mtimeMs, input.sizeBytes,

@@ -43,7 +43,7 @@ describe('MediaItemRowSchema', () => {
   it('parses a movie row with JSON fields', () => {
     const row = MediaItemRowSchema.parse({
       id: 'm1', kind: 'movie', parent_id: null,
-      title: 'Oppenheimer', sort_year: 2023, season: null, episode: null,
+      title: 'Oppenheimer', sort_year: 2023, season: null, episode: null, episode_end: null,
       file_path: '/x.mkv', duration_sec: 10000, resolution: '1920x1080',
       video_codec: 'hevc', container: 'mkv',
       hdr: '{"dv":true,"hdr10":true,"hdr10plus":false}',

@@ -6,11 +6,11 @@ import { migrate } from './migrations.ts'
 // so there are no deployed DBs to migrate. These tests assert the final schema
 // applies cleanly and enforces its constraints.
 describe('migrate', () => {
-  it('applies the baseline schema to an empty DB (user_version = 4)', () => {
+  it('applies the baseline schema to an empty DB (user_version = 5)', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(4)
+    expect(ver).toBe(5)
   })
 
   it('is idempotent — re-running leaves version + history unchanged', () => {
@@ -18,15 +18,15 @@ describe('migrate', () => {
     migrate(db)
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(4)
+    expect(ver).toBe(5)
     const rows = db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]
-    expect(rows.map(r => r.version)).toEqual([1, 2, 3, 4])
+    expect(rows.map(r => r.version)).toEqual([1, 2, 3, 4, 5])
   })
 
   it('migrates to v3 with households, invites, and act-as columns', () => {
     const db = openDatabase(':memory:')
     migrate(db)
-    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(4)
+    expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(5)
 
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
       .map(r => r.name)
@@ -52,7 +52,7 @@ describe('migrate', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     const ver = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    expect(ver).toBe(4)
+    expect(ver).toBe(5)
     const names = (db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     ).all() as { name: string }[]).map(r => r.name)
