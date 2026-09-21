@@ -296,6 +296,20 @@ describe('POST /sessions auth', () => {
     expect(orch.calls[0].userId).toBe(owner.id)
   })
 
+  it('starts nothing on a shared device while the person who logged in is locked behind a pin and no profile is named', async () => {
+    const { db, users, serverSettings, member, owner } = setup()
+    users.setPin(member.id, 'a pin hash')
+    const orch = fakeOrchestrator()
+    const app = await buildAppWithProfile(db, users, serverSettings, orch)
+    const res = await app.inject({
+      method: 'POST', url: '/sessions', payload: body(),
+      headers: hdrGrant(db, member.id, [member.id, owner.id]),
+    })
+    expect(res.statusCode).toBe(403)
+    expect(res.json().code).toBe('profile-locked')
+    expect(orch.calls).toHaveLength(0)
+  })
+
   it('rejects a body userId that disagrees with the active profile (403 user-mismatch)', async () => {
     const { db, users, serverSettings, member, owner } = setup()
     const orch = fakeOrchestrator()

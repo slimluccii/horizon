@@ -300,6 +300,12 @@ export class HorizonClient {
      *  password unless the login is only minutes old. */
     setDeviceMode: (mode: DeviceMode, password?: string) =>
       this.fetch<{ mode: DeviceMode }>('/auth/device', { method: 'POST', body: JSON.stringify({ mode, password }) }),
+    /** Set (`pin` of 4 to 8 digits) or remove (`null`) the PIN a shared device asks for. Your own, or as head anyone's. */
+    setProfilePin: (body: { userId?: string; pin: string | null; password: string }) =>
+      this.fetch<{ hasPin: boolean }>('/auth/profile-pin', { method: 'POST', body: JSON.stringify(body) }),
+    /** Enter a profile's PIN on a shared device; the unlock lasts as long as this device's session. */
+    unlockProfile: (profileId: string, pin: string) =>
+      this.fetch<{ ok: true }>('/auth/profile-unlock', { method: 'POST', body: JSON.stringify({ profileId, pin }) }),
     /**
      * Set or change a password. Self-service supplies `oldPassword` once one is
      * set (omitted on first-boot / forced set). Owner/admin reset another user

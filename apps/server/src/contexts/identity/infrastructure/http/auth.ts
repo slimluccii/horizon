@@ -75,6 +75,23 @@ const DeviceBody = z.object({
   password: z.string().min(1).max(1024).optional(),
 }).strict()
 
+const ProfilePinBody = z.object({
+  /** Target profile; defaults to the caller. */
+  userId: z.string().optional(),
+  /** `null` removes the PIN. */
+  pin: z.string().regex(/^\d{4,8}$/).nullable(),
+  password: z.string().min(1).max(1024),
+}).strict()
+
+const ProfileUnlockBody = z.object({
+  profileId: z.string(),
+  pin: z.string().min(1).max(64),
+}).strict()
+
+/** Wrong PINs a shared device may try on one profile before it has to wait. */
+const PIN_MAX_TRIES = 5
+const PIN_LOCK_MS = 5 * 60_000
+
 /** How long after logging in the device mode can be chosen without typing the password again. */
 const FRESH_LOGIN_MS = 10 * 60 * 1000
 
@@ -150,6 +167,8 @@ export async function registerAuth(
 
   const loginLimiter = new IpRateLimiter(RATE_WINDOW_MS)
   const pairLimiter = new IpRateLimiter(RATE_WINDOW_MS)
+  // Wrong PINs per session and profile. The picker asks on every pick, so right ones must not count.
+  const pinFailures = new Map<string, { count: number; lockedUntil: number }>()
 
   // POST /auth/login — unauthenticated (allowlisted). Verifies the password,
   // issues a session, and sets the cookie + returns the raw token for native
@@ -268,13 +287,72 @@ export async function registerAuth(
   app.get('/auth/session', async (req, reply) => {
     const caller = req.user
     const principal = caller ? users.get(caller.id) : null
-    const profile = users.get(req.profileUserId ?? caller?.id ?? '')
-    if (!caller || !principal || !profile) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    if (!caller || !principal) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    // Null while the person who logged in is locked behind a PIN and nobody has been picked yet.
+    const profile = req.profileUserId ? users.get(req.profileUserId) ?? null : null
+    if (req.profileUserId && !profile) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
     const token = tokenFromRequest(req)
     const session = token ? sessions.resolve(token) : null
     const profiles = grantedProfiles(session?.grant, caller.id, users)
-      .map(u => ({ id: u.id, name: u.name, avatar: u.avatar }))
+      .map(u => ({ id: u.id, name: u.name, avatar: u.avatar, hasPin: u.hasPin }))
     return { principal, profile, role: caller.role, shared: caller.shared, canShare: householdGrant(caller.id).length > 1, profiles }
+  })
+
+  // POST /auth/profile-pin — set or remove the optional PIN that guards a profile
+  // in the picker of a shared device. Your own, or as head of the household
+  // anyone's in it. Always takes the caller's password.
+  app.post('/auth/profile-pin', async (req, reply) => {
+    const caller = req.user
+    if (!caller) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    const parse = ProfilePinBody.safeParse(req.body)
+    if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
+    if (caller.shared) return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'A PIN cannot be changed from a shared device')
+
+    const targetId = parse.data.userId ?? caller.id
+    const target = users.get(targetId)
+    const isHead = !!target?.householdId && households.get(target.householdId)?.ownerUserId === caller.id
+    if (!target || (targetId !== caller.id && !isHead)) {
+      return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only the head of the household can set a PIN for someone else')
+    }
+    const hash = users.getAuthById(caller.id)?.passwordHash
+    if (!hash || !(await verifyPassword(hash, parse.data.password))) {
+      return errorReply(reply, 401, ErrorCodes.INVALID_CREDENTIALS, 'Password is incorrect')
+    }
+
+    users.setPin(targetId, parse.data.pin === null ? null : await hashPassword(parse.data.pin))
+    sessions.relockProfile(targetId)
+    return { hasPin: parse.data.pin !== null }
+  })
+
+  // POST /auth/profile-unlock — enter a profile's PIN on a shared device. The
+  // unlock is remembered on this session only.
+  app.post('/auth/profile-unlock', async (req, reply) => {
+    const caller = req.user
+    const token = tokenFromRequest(req)
+    const session = token ? sessions.resolve(token) : null
+    if (!caller || !session) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    const parse = ProfileUnlockBody.safeParse(req.body)
+    if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
+    const { profileId, pin } = parse.data
+
+    if (!grantedProfiles(session.grant, caller.id, users).some(u => u.id === profileId)) {
+      return errorReply(reply, 403, ErrorCodes.PROFILE_NOT_GRANTED, 'Profile not granted')
+    }
+    const pinHash = users.getAuthById(profileId)?.pinHash
+    if (!pinHash) return { ok: true }
+    const key = `${session.id}:${profileId}`
+    const failures = pinFailures.get(key) ?? { count: 0, lockedUntil: 0 }
+    if (failures.lockedUntil > Date.now()) {
+      return errorReply(reply, 429, ErrorCodes.PIN_LOCKED, 'Too many wrong PINs, try again in a few minutes')
+    }
+    if (!(await verifyPassword(pinHash, pin))) {
+      const count = failures.count + 1
+      pinFailures.set(key, count >= PIN_MAX_TRIES ? { count: 0, lockedUntil: Date.now() + PIN_LOCK_MS } : { count, lockedUntil: 0 })
+      return errorReply(reply, 401, ErrorCodes.INVALID_PIN, 'Wrong PIN')
+    }
+    pinFailures.delete(key)
+    sessions.unlockProfile(session.id, profileId)
+    return { ok: true }
   })
 
   // POST /auth/set-password — self (with old password once one is set) OR
@@ -419,7 +497,7 @@ export async function registerAuth(
       sessions.revoke(session.id)
       return errorReply(reply, 410, ErrorCodes.PAIRING_EXPIRED, 'Pairing code already used')
     }
-    const profiles = grant.map(id => users.get(id)).filter(Boolean).map(u => ({ id: u!.id, name: u!.name, avatar: u!.avatar }))
+    const profiles = grant.map(id => users.get(id)).filter(Boolean).map(u => ({ id: u!.id, name: u!.name, avatar: u!.avatar, hasPin: u!.hasPin }))
     return { token, user: users.get(pc.approvedUserId), grant, profiles }
   })
 
@@ -432,7 +510,7 @@ export async function registerAuth(
     const token = tokenFromRequest(req)
     const session = token ? sessions.resolve(token) : null
     const profiles = grantedProfiles(session?.grant, caller.id, users)
-      .map(u => ({ id: u.id, name: u.name, avatar: u.avatar }))
+      .map(u => ({ id: u.id, name: u.name, avatar: u.avatar, hasPin: u.hasPin }))
     return { profiles }
   })
 }

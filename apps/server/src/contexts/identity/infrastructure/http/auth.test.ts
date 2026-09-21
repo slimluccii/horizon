@@ -22,7 +22,7 @@ async function buildApp(db: DatabaseSync, users: UserRepo, sessions: SessionRepo
   app.addHook('preHandler', makeResolveProfile(sessions, users))
   // A trivial protected route to exercise cookie/bearer auth end-to-end.
   app.get('/protected', async req => ({ id: req.user?.id }))
-  app.get('/whoami', async req => ({ role: req.user?.role, shared: req.user?.shared }))
+  app.get('/whoami', async req => ({ role: req.user?.role, shared: req.user?.shared, profileUserId: req.profileUserId }))
   await app.ready()
   return app
 }
@@ -363,9 +363,9 @@ describe('auth routes', () => {
       await home()
       const { token } = (await login('Luuk', 'luuk password')).json()
       const role = async () => (await app.inject({ method: 'GET', url: '/whoami', headers: { authorization: `Bearer ${token}` } })).json()
-      expect(await role()).toEqual({ role: 'owner', shared: false })
+      expect(await role()).toMatchObject({ role: 'owner', shared: false })
       await device(token, { mode: 'shared' })
-      expect(await role()).toEqual({ role: 'member', shared: true })
+      expect(await role()).toMatchObject({ role: 'member', shared: true })
     })
   })
 
@@ -391,6 +391,125 @@ describe('auth routes', () => {
       })).json()
       expect(body).toMatchObject({ role: 'member', shared: true, canShare: true, principal: { id: luuk.id }, profile: { id: kid.id, name: 'Kid' } })
       expect(body.profiles.map((p: { name: string }) => p.name).sort()).toEqual(['Kid', 'Luuk'])
+    })
+  })
+
+  describe('profile pin', () => {
+    async function home() {
+      const luuk = await makeUserWithPassword(users, 'Luuk', 'luuk password')
+      const kid = users.create({ name: 'Kid' })
+      const partner = await makeUserWithPassword(users, 'Partner', 'partner password')
+      const house = households.create('Home', luuk.id)
+      for (const u of [luuk, kid, partner]) users.setHousehold(u.id, house.id)
+      const personal = sessions.issue(luuk.id, null, [luuk.id]).token
+      const shared = sessions.issue(luuk.id, null, [luuk.id, kid.id, partner.id]).token
+      return { luuk, kid, partner, personal, shared }
+    }
+    const call = (method: 'GET' | 'POST', url: string, token: string, payload?: object, profile?: string) =>
+      app.inject({ method, url, payload, headers: { authorization: `Bearer ${token}`, ...(profile ? { 'x-horizon-profile': profile } : {}) } })
+    const setPin = (token: string, payload: object) => call('POST', '/auth/profile-pin', token, payload)
+
+    it('the household head gives a profile a pin, and the pin itself is never sent anywhere', async () => {
+      const { kid, personal } = await home()
+      const res = await setPin(personal, { userId: kid.id, pin: '1234', password: 'luuk password' })
+      expect(res.statusCode).toBe(200)
+      const stored = users.get(kid.id)!
+      expect(stored.hasPin).toBe(true)
+      expect(JSON.stringify(stored)).not.toContain('1234')
+      expect(Object.keys(stored).some(k => /pin/i.test(k) && k !== 'hasPin')).toBe(false)
+    })
+
+    it('anyone sets or clears their own pin with their password', async () => {
+      const { partner } = await home()
+      const token = sessions.issue(partner.id, null, [partner.id]).token
+      expect((await setPin(token, { pin: '4321', password: 'partner password' })).statusCode).toBe(200)
+      expect(users.get(partner.id)!.hasPin).toBe(true)
+      expect((await setPin(token, { pin: null, password: 'partner password' })).statusCode).toBe(200)
+      expect(users.get(partner.id)!.hasPin).toBe(false)
+    })
+
+    it('refuses a pin that is not 4 to 8 digits, a wrong password, and someone who is not the head', async () => {
+      const { luuk, kid, partner, personal } = await home()
+      expect((await setPin(personal, { userId: kid.id, pin: '12', password: 'luuk password' })).statusCode).toBe(400)
+      expect((await setPin(personal, { userId: kid.id, pin: 'abcd', password: 'luuk password' })).statusCode).toBe(400)
+      expect((await setPin(personal, { userId: kid.id, pin: '1234', password: 'wrong' })).statusCode).toBe(401)
+      const partnerToken = sessions.issue(partner.id, null, [partner.id]).token
+      expect((await setPin(partnerToken, { userId: luuk.id, pin: '1234', password: 'partner password' })).statusCode).toBe(403)
+    })
+
+    it('cannot be set from a shared device', async () => {
+      const { kid, shared } = await home()
+      expect((await setPin(shared, { userId: kid.id, pin: '1234', password: 'luuk password' })).statusCode).toBe(403)
+    })
+
+    it('locks the profile on a shared device until the pin is entered there', async () => {
+      const { luuk, kid, personal, shared } = await home()
+      await setPin(personal, { userId: kid.id, pin: '1234', password: 'luuk password' })
+
+      const locked = await call('GET', '/whoami', shared, undefined, kid.id)
+      expect(locked.statusCode).toBe(403)
+      expect(locked.json().code).toBe('profile-locked')
+
+      const wrong = await call('POST', '/auth/profile-unlock', shared, { profileId: kid.id, pin: '0000' })
+      expect(wrong.statusCode).toBe(401)
+      expect(wrong.json().code).toBe('invalid-pin')
+
+      expect((await call('POST', '/auth/profile-unlock', shared, { profileId: kid.id, pin: '1234' })).statusCode).toBe(200)
+      expect((await call('GET', '/whoami', shared, undefined, kid.id)).statusCode).toBe(200)
+
+      // Another shared device of the same household still has to enter it.
+      const otherTv = sessions.issue(luuk.id, null, [luuk.id, kid.id]).token
+      expect((await call('GET', '/whoami', otherTv, undefined, kid.id)).statusCode).toBe(403)
+    })
+
+    it('asks again everywhere once the pin changes', async () => {
+      const { kid, personal, shared } = await home()
+      await setPin(personal, { userId: kid.id, pin: '1234', password: 'luuk password' })
+      await call('POST', '/auth/profile-unlock', shared, { profileId: kid.id, pin: '1234' })
+      expect((await call('GET', '/whoami', shared, undefined, kid.id)).statusCode).toBe(200)
+
+      await setPin(personal, { userId: kid.id, pin: '9999', password: 'luuk password' })
+      expect((await call('GET', '/whoami', shared, undefined, kid.id)).json().code).toBe('profile-locked')
+    })
+
+    it('tells a paired tv which profiles have a pin, at pairing and afterwards', async () => {
+      const { luuk, kid, personal } = await home()
+      await setPin(personal, { userId: kid.id, pin: '1234', password: 'luuk password' })
+      const hasPin = (profiles: Array<{ id: string; hasPin: boolean }>) => Object.fromEntries(profiles.map(p => [p.id, p.hasPin]))
+
+      const { code } = (await app.inject({ method: 'POST', url: '/auth/pair/start' })).json()
+      await call('POST', '/auth/pair/approve', personal, { code, grant: [luuk.id, kid.id] })
+      const tv = (await app.inject({ method: 'POST', url: '/auth/pair/poll', payload: { code } })).json()
+      expect(hasPin(tv.profiles)).toEqual({ [luuk.id]: false, [kid.id]: true })
+
+      const grant = (await call('GET', '/auth/grant', tv.token)).json()
+      expect(hasPin(grant.profiles)).toEqual({ [luuk.id]: false, [kid.id]: true })
+    })
+
+    it('stops taking guesses after five wrong pins', async () => {
+      const { kid, personal, shared } = await home()
+      await setPin(personal, { userId: kid.id, pin: '1234', password: 'luuk password' })
+      for (let i = 0; i < 5; i++) await call('POST', '/auth/profile-unlock', shared, { profileId: kid.id, pin: '0000' })
+      const res = await call('POST', '/auth/profile-unlock', shared, { profileId: kid.id, pin: '1234' })
+      expect(res.statusCode).toBe(429)
+      expect(res.json().code).toBe('pin-locked')
+    })
+
+    it('never asks on a personal device', async () => {
+      const { luuk, personal } = await home()
+      await setPin(personal, { pin: '1234', password: 'luuk password' })
+      const res = await call('GET', '/auth/session', personal)
+      expect(res.statusCode).toBe(200)
+      expect(res.json().profile.id).toBe(luuk.id)
+    })
+
+    it('on a shared device a request that names no profile is nobody while the person who logged in is locked', async () => {
+      const { luuk, personal, shared } = await home()
+      await setPin(personal, { pin: '1234', password: 'luuk password' })
+      const session = (await call('GET', '/auth/session', shared)).json()
+      expect(session.profile).toBeNull()
+      expect(session.profiles.find((p: { id: string }) => p.id === luuk.id).hasPin).toBe(true)
+      expect((await call('GET', '/whoami', shared)).json().profileUserId).toBeUndefined()
     })
   })
 
