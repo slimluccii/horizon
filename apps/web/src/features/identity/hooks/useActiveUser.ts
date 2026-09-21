@@ -41,7 +41,7 @@ function applyTheme(user: User | null) {
 
 function apply(session: DeviceSession | null) {
   cachedSession = session
-  cachedUser = session ? { ...session.profile, role: session.role } : null
+  cachedUser = session?.profile ? { ...session.profile, role: session.role } : null
   applyTheme(cachedUser)
 }
 
@@ -91,7 +91,8 @@ export function useActiveUser(): {
   profiles: ProfileSummary[]
   /** True on a shared device until someone has picked a profile in this tab. */
   needsProfilePick: boolean
-  pickProfile: (id: string) => Promise<void>
+  /** Takes the PIN when the profile has one; rejects with the server's error code when it is wrong. */
+  pickProfile: (id: string, pin?: string) => Promise<void>
   loading: boolean
   refresh: () => Promise<void>
   logout: () => Promise<void>
@@ -134,7 +135,8 @@ export function useActiveUser(): {
     }
   }, [])
 
-  const pickProfile = useCallback(async (id: string) => {
+  const pickProfile = useCallback(async (id: string, pin?: string) => {
+    if (pin !== undefined) await horizon.auth.unlockProfile(id, pin)
     rememberPickedProfile(id)
     await refreshGlobal()
   }, [])
@@ -151,7 +153,7 @@ export function useActiveUser(): {
     shared: cachedSession?.shared ?? false,
     canShare: cachedSession?.canShare ?? false,
     profiles: cachedSession?.profiles ?? [],
-    needsProfilePick: !!cachedSession?.shared && !pickedProfile(),
+    needsProfilePick: !!cachedSession?.shared && (!pickedProfile() || !cachedUser),
     pickProfile,
     loading: !loaded,
     refresh,

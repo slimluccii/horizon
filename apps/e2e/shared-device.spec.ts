@@ -55,4 +55,51 @@ test.describe('shared device', () => {
     await page.goto(`${APP}/settings`)
     await expect(page.getByRole('button', { name: 'Server' })).toBeVisible()
   })
+
+  test.describe('with a profile pin', () => {
+    test.afterAll(async ({ request }) => {
+      const owner = await ensureOwner(request)
+      const res = await request.post(`${API}/auth/profile-pin`, { headers: bearer(owner), data: { pin: null, password: PASSWORD } })
+      expect(res.ok()).toBe(true)
+    })
+
+    test('the head gives their own profile a pin, and the shared device asks for it before anyone gets in as them', async ({ page, browser }) => {
+      await page.goto(`${APP}/login`)
+      await page.getByLabel('Name').fill(OWNER_NAME)
+      await page.getByLabel('Password').fill(PASSWORD)
+      await page.getByRole('button', { name: /sign in/i }).click()
+      await page.getByRole('button', { name: 'Just me' }).click()
+      await page.goto(`${APP}/settings`)
+      await page.getByRole('button', { name: 'Personal' }).click()
+
+      const pins = page.getByRole('region', { name: 'Profile PIN' })
+      await pins.getByRole('listitem').filter({ hasText: OWNER_NAME }).getByRole('button', { name: 'Set a PIN' }).click()
+      await pins.getByLabel('New PIN').fill('2468')
+      await pins.getByLabel('Your password').fill(PASSWORD)
+      await pins.getByRole('button', { name: 'Save' }).click()
+      await expect(pins.getByRole('listitem').filter({ hasText: OWNER_NAME })).toContainText('Has a PIN')
+
+      const tv = await (await browser.newContext()).newPage()
+      await tv.goto(`${APP}/login`)
+      await tv.getByLabel('Name').fill(OWNER_NAME)
+      await tv.getByLabel('Password').fill(PASSWORD)
+      await tv.getByRole('button', { name: /sign in/i }).click()
+      await tv.getByRole('button', { name: 'My household' }).click()
+
+      // Nobody is in use yet, and that must not read as logged out.
+      await tv.goto(`${APP}/`)
+      await expect(tv.getByRole('heading', { name: "Who's watching?" })).toBeVisible()
+
+      await tv.getByRole('button', { name: new RegExp(OWNER_NAME) }).click()
+      await tv.getByLabel(`PIN for ${OWNER_NAME}`).fill('0000')
+      await tv.getByRole('button', { name: 'Continue' }).click()
+      await expect(tv.getByRole('alert')).toContainText('Wrong PIN')
+      await expect(tv).toHaveURL(`${APP}/profiles`)
+
+      await tv.getByLabel(`PIN for ${OWNER_NAME}`).fill('2468')
+      await tv.getByRole('button', { name: 'Continue' }).click()
+      await expect(tv).toHaveURL(`${APP}/`)
+      await expect(tv.getByRole('button', { name: OWNER_NAME, exact: true })).toBeVisible()
+    })
+  })
 })

@@ -33,7 +33,8 @@ function Guard({ children }: { children: React.ReactNode }) {
   // No profiles at all → first-run wizard (which sets the owner password).
   if (!hasUsers && location.pathname !== '/setup') return <Navigate to="/setup" replace />
   // Profiles exist but the caller has no session → log in.
-  if (hasUsers && !user && !PUBLIC.includes(location.pathname)) {
+  // `principal`, not `user`: on a shared device nobody is in use while the person who logged in is behind a PIN.
+  if (hasUsers && !principal && !PUBLIC.includes(location.pathname)) {
     return <Navigate to="/login" replace />
   }
   // Authenticated but never set a password (migrated owner / admin-created member)
@@ -42,7 +43,7 @@ function Guard({ children }: { children: React.ReactNode }) {
   if (principal && !principal.hasPassword && !PUBLIC.includes(location.pathname)) {
     return <Navigate to="/login" replace />
   }
-  if (user && needsProfilePick && !['/profiles', '/device'].includes(location.pathname)) {
+  if (principal && needsProfilePick && !['/profiles', '/device'].includes(location.pathname)) {
     return <Navigate to="/profiles" replace />
   }
   return <>{children}</>
