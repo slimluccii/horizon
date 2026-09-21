@@ -250,8 +250,16 @@ export async function registerAuth(
       if (caller.role === 'member') {
         return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only owner or admin can reset another user')
       }
-      if (!users.getAuthById(targetId)) {
+      const target = users.get(targetId)
+      if (!target) {
         return errorReply(reply, 404, ErrorCodes.USER_NOT_FOUND, 'User not found')
+      }
+      // A reset hands over the account, so it may only go down the ranks: admin over members, owner over everyone.
+      if (target.role === 'owner') {
+        return errorReply(reply, 403, ErrorCodes.OWNER_PROTECTED, 'Only the owner can change the owner password')
+      }
+      if (target.role === 'admin' && caller.role !== 'owner') {
+        return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Only the owner can reset an admin')
       }
     }
 

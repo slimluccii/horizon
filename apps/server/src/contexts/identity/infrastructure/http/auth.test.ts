@@ -247,6 +247,45 @@ describe('auth routes', () => {
     })
   })
 
+  describe('POST /auth/set-password on a more privileged account', () => {
+    async function reset(callerId: string, targetId: string) {
+      return app.inject({
+        method: 'POST', url: '/auth/set-password',
+        headers: { authorization: `Bearer ${sessions.issue(callerId).token}` },
+        payload: { userId: targetId, newPassword: 'taken over!!' },
+      })
+    }
+
+    it('an admin cannot reset the owner', async () => {
+      const owner = await makeUserWithPassword(users, 'Owner', 'owner password')
+      const admin = await makeUserWithPassword(users, 'Admin', 'admin password')
+      users.update(admin.id, { role: 'admin' })
+      const res = await reset(admin.id, owner.id)
+      expect(res.statusCode).toBe(403)
+      expect(res.json().code).toBe('owner-protected')
+      const login = await app.inject({ method: 'POST', url: '/auth/login', payload: { name: 'Owner', password: 'owner password' } })
+      expect(login.statusCode).toBe(200)
+    })
+
+    it('an admin cannot reset another admin', async () => {
+      await makeUserWithPassword(users, 'Owner', 'owner password')
+      const a = await makeUserWithPassword(users, 'AdminA', 'admin password')
+      const b = await makeUserWithPassword(users, 'AdminB', 'admin password')
+      users.update(a.id, { role: 'admin' })
+      users.update(b.id, { role: 'admin' })
+      expect((await reset(a.id, b.id)).statusCode).toBe(403)
+    })
+
+    it('the owner can reset an admin, and an admin can reset a member', async () => {
+      const owner = await makeUserWithPassword(users, 'Owner', 'owner password')
+      const admin = await makeUserWithPassword(users, 'Admin', 'admin password')
+      const member = await makeUserWithPassword(users, 'Member', 'member password')
+      users.update(admin.id, { role: 'admin' })
+      expect((await reset(owner.id, admin.id)).statusCode).toBe(200)
+      expect((await reset(admin.id, member.id)).statusCode).toBe(200)
+    })
+  })
+
   describe('pairing flow', () => {
     it('start → approve → poll issues a session for the approver, then 410 on re-poll', async () => {
       const owner = await makeUserWithPassword(users, 'Owner', 'owner password')
