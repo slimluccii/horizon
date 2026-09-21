@@ -30,7 +30,15 @@ End-to-end instructions for two things:
 >
 > **First boot:** the owner is forced to set a password before anything else is
 > usable; the owner then sets (or resets) passwords for the other household
-> members in-app. No profile works without a password.
+> members in-app. Nobody is listed before login: you type your name and password.
+>
+> **Personal and shared devices:** you log in once per device (a session lasts 90
+> days and renews while it is used). The head of a household is asked once who
+> uses the device. "Just me" opens straight into the library. "My household" shows
+> a picker on every open, no password per profile, and works for a profile that
+> has no password of its own, such as a child's. A shared device never has admin
+> rights: use a personal device to change server or household settings. Friends
+> get their own household through an invite and never see yours.
 >
 > **TVs and other 10-foot devices** don't type passwords well, so they use a
 > **device-pairing flow** instead: the TV shows a short code, you open `/link` on

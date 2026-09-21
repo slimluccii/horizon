@@ -83,16 +83,8 @@ export const AUTH_ALLOWLIST_PREFIXES: ReadonlyArray<string> = [
   '/metadata/',
 ]
 
-/**
- * Method-specific exemptions. `GET /users` lists profiles (names + avatars only,
- * no secrets) and MUST be reachable pre-login: the first-run Guard reads it to
- * decide setup-vs-login, and the login page renders the profile picker from it
- * (the Plex/Jellyfin "who's watching" screen). The mutating verbs on /users are
- * NOT exempt — creating/editing/deleting still requires a session (POST /users
- * has its own first-boot empty-household bypass in server.ts).
- */
+/** Method-specific exemptions. */
 export const AUTH_ALLOWLIST_BY_METHOD: Readonly<Record<string, ReadonlyArray<string>>> = {
-  GET: ['/users'],
   // Sonarr and Radarr cannot hold a session; the route checks its own key.
   POST: ['/webhooks/arr'],
 }

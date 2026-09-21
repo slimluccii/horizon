@@ -34,10 +34,9 @@ describe('auth/middleware', () => {
       expect(isAllowlisted('/auth/me')).toBe(false)
       expect(isAllowlisted('/library')).toBe(false)
     })
-    it('exempts GET /users (profile picker) but not its mutating verbs', () => {
-      // Pre-login Guard + login profile picker read GET /users unauthenticated.
-      expect(isAllowlisted('/users', 'GET')).toBe(true)
-      // Path-only (no method) stays gated, and other verbs require a session.
+    it('lists nobody before login: GET /users needs a session like every other verb', () => {
+      expect(isAllowlisted('/users', 'GET')).toBe(false)
+      expect(isAllowlisted('/auth/state', 'GET')).toBe(true)
       expect(isAllowlisted('/users')).toBe(false)
       expect(isAllowlisted('/users', 'POST')).toBe(false)
       expect(isAllowlisted('/users', 'PATCH')).toBe(false)

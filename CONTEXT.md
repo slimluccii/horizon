@@ -23,6 +23,21 @@ rejects with `owner-protected` (403). The web UI hides the "Delete profile"
 button in the badge menu when the active user is the owner. See
 [apps/server/src/contexts/identity/infrastructure/persistence/userRepo.ts](apps/server/src/contexts/identity/infrastructure/persistence/userRepo.ts).
 
+### Device mode
+A login session belongs to a device and carries a grant: the profiles it may act
+as. A **personal device** has a grant of one, the person who logged in. A
+**shared device** has the whole household in its grant, shows a picker, and lets
+anyone pick any profile without a password, including a profile that has none. A
+session whose grant holds more than one profile is shared by definition, a paired
+TV included, and always runs with role `member`: it cannot manage the server or
+the household, and cannot pair further devices for the household. Only the head
+of a household can share a device (`POST /auth/device`), freely right after
+login and with the password later. The acting profile travels in
+`X-Horizon-Profile` and is checked against the grant and the household on every
+request. Nobody is listed before login; `GET /auth/state` only says whether the
+first account still has to be made. See
+[apps/server/src/contexts/identity/infrastructure/http/auth.ts](apps/server/src/contexts/identity/infrastructure/http/auth.ts).
+
 ## Configuration
 
 ### ServerSettings

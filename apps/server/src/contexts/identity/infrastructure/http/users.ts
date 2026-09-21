@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
 import type { HouseholdRepo } from '../persistence/householdRepo.ts'
-import { setSessionCookie, tokenFromRequest, type AuthedUser } from '../authMiddleware.ts'
+import { setSessionCookie, type AuthedUser } from '../authMiddleware.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole } from './authz.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
@@ -98,18 +98,13 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
     }
   })
 
-  app.get('/users', async (req) => {
-    // GET /users is auth-allowlisted (the pre-login profile picker), so the
-    // requireAuth hook never sets req.user here. Resolve the caller from the
-    // session token ourselves: an authenticated caller sees only their own
-    // household's members; the unauthenticated login picker keeps the full list.
-    const token = tokenFromRequest(req)
-    if (token) {
-      const session = sessions.resolve(token)
-      const me = session ? users.get(session.userId) : null
-      if (me?.householdId) return users.listByHousehold(me.householdId)
-    }
-    return users.list()
+  // Nobody is listed before login. A caller sees their own household, or only themselves without one.
+  app.get('/users', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    const me = users.get(caller.id)
+    if (!me) return []
+    return me.householdId ? users.listByHousehold(me.householdId) : [me]
   })
 
   // Registered before `/users/:id` so the static segment isn't captured by the
