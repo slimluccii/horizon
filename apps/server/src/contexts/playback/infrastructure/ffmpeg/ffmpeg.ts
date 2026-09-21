@@ -189,7 +189,10 @@ async function waitForFile(session: Session, absPath: string, timeoutMs: number)
           // where ffmpeg is still alive but the file never stabilises.
           const p = session.ffmpegProcess
           if (p && (p.exitCode !== null || p.signalCode !== null)) {
-            finish(false)
+            // Nothing writes to the file any more, so what is there now is final. A
+            // short run (a stream copy of a small file) can finish inside the check
+            // that just saw the file still growing.
+            stat(absPath).then(s => finish(s.size > 0), () => finish(false))
           }
         }
       })
