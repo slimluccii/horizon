@@ -18,8 +18,8 @@ function makeReply() {
   return { reply, state }
 }
 
-const owner: AuthedUser = { id: 'u-owner', role: 'owner' }
-const member: AuthedUser = { id: 'u-member', role: 'member' }
+const owner: AuthedUser = { id: 'u-owner', role: 'owner', shared: false }
+const member: AuthedUser = { id: 'u-member', role: 'member', shared: false }
 
 describe('resolveCallerRole', () => {
   it('returns null when no session is attached', () => {
@@ -75,7 +75,7 @@ describe('canAccessSession', () => {
 
 describe('canAccessSession with profiles', () => {
   // A friend runs their own household: server role member, with a TV paired for their kids' profiles.
-  const friend: AuthedUser = { id: 'u-friend', role: 'member' }
+  const friend: AuthedUser = { id: 'u-friend', role: 'member', shared: false }
 
   it('lets a member reach a session that plays as a profile they were granted', () => {
     expect(canAccessSession('u-friend-kid', friend, ['u-friend', 'u-friend-kid'])).toBe(true)

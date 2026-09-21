@@ -34,6 +34,8 @@ export function setSessionCookie(reply: FastifyReply, req: FastifyRequest, token
 export interface AuthedUser {
   id: string
   role: 'owner' | 'admin' | 'member'
+  /** True on a device set up for the whole household, where anyone can pick any profile. */
+  shared: boolean
 }
 
 declare module 'fastify' {
@@ -60,6 +62,7 @@ declare module 'fastify' {
 export const AUTH_ALLOWLIST: ReadonlyArray<string> = [
   '/health',
   '/auth/login',
+  '/auth/state',
   '/auth/pair/start',
   '/auth/pair/poll',
   '/invites/redeem',
@@ -175,7 +178,9 @@ export function makeRequireAuth(sessionRepo: SessionRepo, userRepo: UserRepo) {
       await reply.status(401).send({ error: 'Authentication required', code: ErrorCodes.UNAUTHORIZED })
       return
     }
-    req.user = { id: user.id, role: user.role }
+    // Nobody proves who they are on a shared device, so it never carries admin rights.
+    const shared = (session.grant?.length ?? 1) > 1
+    req.user = { id: user.id, role: shared ? 'member' : user.role, shared }
   }
 }
 

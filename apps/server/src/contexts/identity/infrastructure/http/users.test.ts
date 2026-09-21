@@ -628,3 +628,25 @@ describe('GET /users/:id across households', () => {
     expect((await app.inject({ method: 'GET', url: `/users/${friend.id}`, headers: hdr(db, owner.id) })).statusCode).toBe(200)
   })
 })
+
+describe('managing the household from a shared device', () => {
+  it('is refused, even on the profile of the household head', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'ServerOwner' })
+    const head = users.create({ name: 'Friend' })
+    const kid = users.create({ name: 'Kid' })
+    const house = createHouseholdRepo(db).create('Friends', head.id)
+    users.setHousehold(head.id, house.id)
+    users.setHousehold(kid.id, house.id)
+    const app = await buildApp(users, db)
+    const sessions = createSessionRepo(db)
+
+    const shared = sessions.issue(head.id, null, [head.id, kid.id]).token
+    const personal = sessions.issue(head.id, null, [head.id]).token
+    const del = (token: string) => app.inject({ method: 'DELETE', url: `/users/${kid.id}`, headers: { authorization: `Bearer ${token}` } })
+
+    expect((await del(shared)).statusCode).toBe(403)
+    expect((await del(personal)).statusCode).toBe(204)
+  })
+})
