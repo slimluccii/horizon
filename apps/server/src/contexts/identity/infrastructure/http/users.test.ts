@@ -143,6 +143,24 @@ describe('GET /users and /users/:id', () => {
     expect(list.json()).toHaveLength(1)
   })
 
+  it('lists nobody to a caller who is not logged in', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'A' })
+    const app = await buildApp(users, db)
+    expect((await app.inject({ method: 'GET', url: '/users' })).statusCode).toBe(401)
+  })
+
+  it('lists only themselves to someone without a household', async () => {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    users.create({ name: 'Owner' })
+    const loner = users.create({ name: 'Loner' })
+    const app = await buildApp(users, db)
+    const list = (await app.inject({ method: 'GET', url: '/users', headers: hdr(db, loner.id) })).json() as { name: string }[]
+    expect(list.map(u => u.name)).toEqual(['Loner'])
+  })
+
   it('authenticated GET /users returns only the caller household members', async () => {
     const db = openDatabase(':memory:'); migrate(db)
     const users = createUserRepo(db)

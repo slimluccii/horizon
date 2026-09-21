@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { OWNER_NAME } from './helpers/auth.ts'
 
 /**
  * First-boot setup wizard, end to end through the real web UI + backend.
@@ -15,7 +16,7 @@ import { test, expect } from '@playwright/test'
  */
 test.describe.configure({ mode: 'serial' })
 
-const OWNER = 'Tester'
+const OWNER = OWNER_NAME
 const PASSWORD = 'e2e-password-123'
 
 test.describe('first-boot setup', () => {

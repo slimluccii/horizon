@@ -22,14 +22,17 @@ export interface SessionUser {
 
 /** Default password used for every e2e account. */
 export const PASSWORD = 'e2e-password-123'
+/** The owner the setup spec creates. The server lists nobody before login, so the name has to be known. */
+export const OWNER_NAME = 'Tester'
 
 /**
  * Ensure an owner exists with a known password and return a bearer session for
  * it. Safe to call when the household is already set up (falls back to login).
  */
-export async function ensureOwner(request: APIRequestContext, name = 'Owner'): Promise<SessionUser> {
-  const list = (await (await request.get(`${API}/users`)).json()) as Array<{ id: string; name: string; role: SessionUser['role']; hasPassword?: boolean }>
-  if (list.length === 0) {
+export async function ensureOwner(request: APIRequestContext, name = OWNER_NAME): Promise<SessionUser> {
+  // The server lists nobody before login; all it says is whether the first account exists yet.
+  const { setupRequired } = (await (await request.get(`${API}/auth/state`)).json()) as { setupRequired: boolean }
+  if (setupRequired) {
     // First-boot: create owner (issues a bootstrap session token), set password.
     const created = await (await request.post(`${API}/users`, { data: { name } })).json() as { id: string; token: string }
     await request.post(`${API}/auth/set-password`, {
@@ -39,9 +42,8 @@ export async function ensureOwner(request: APIRequestContext, name = 'Owner'): P
     const login = await loginApi(request, name)
     return login
   }
-  // Already set up — log in as the existing owner.
-  const owner = list.find(u => u.role === 'owner') ?? list[0]
-  return loginApi(request, owner.name)
+  // Already set up — the first account is always the owner, created under this name.
+  return loginApi(request, name)
 }
 
 /** Create a member (or admin) profile with a password, as an authenticated
