@@ -5,7 +5,7 @@ import { buildRenditionPlaylist, buildMasterPlaylist } from '../../domain/playli
 import { sessionTimeline } from '../../domain/timeline.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { requireReconnectToken } from './segments.ts'
-import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
+import { resolveCallerRole, callerCanAccessSession } from '../../../identity/index.ts'
 
 const HLS_CONTENT_TYPE = 'application/vnd.apple.mpegurl'
 
@@ -14,7 +14,7 @@ export function registerPlaylists(app: FastifyInstance, sessions: SessionManager
     const session = sessions.get(req.params.id)
     if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
     if (!requireReconnectToken(session, req, reply)) return
-    if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+    if (!callerCanAccessSession(req, session.userId)) {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
     }
 
@@ -38,7 +38,7 @@ export function registerPlaylists(app: FastifyInstance, sessions: SessionManager
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
-      if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+      if (!callerCanAccessSession(req, session.userId)) {
         return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
       }
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')

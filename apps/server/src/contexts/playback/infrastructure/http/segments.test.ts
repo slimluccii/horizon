@@ -9,7 +9,8 @@ import { createServerSettings } from '../../../settings/index.ts'
 import { createMediaRepo, type MovieUpsert } from '../../../library/index.ts'
 import { createUserRepo } from '../../../identity/index.ts'
 import { createSessionRepo } from '../../../identity/index.ts'
-import { makeRequireAuth } from '../../../identity/index.ts'
+import { makeRequireAuth, makeResolveProfile } from '../../../identity/index.ts'
+import { createHouseholdRepo } from '../../../identity/index.ts'
 import { createSessionManager } from '../../application/manager.ts'
 import { registerSegments } from './segments.ts'
 import type { HwAccel } from '../../domain/hwaccel.ts'
@@ -534,5 +535,51 @@ describe('files that ffmpeg is still writing', () => {
     const res = await get('seg00000.m4s')
     expect(res.body).toBe('done')
     expect(Date.now() - t0).toBeLessThan(80)
+  })
+})
+
+describe('a member playing as a profile from their grant', () => {
+  // A friend runs their own household: server role member, TV paired for a second profile.
+  async function friendSetup() {
+    const ctx = setup({ renditionCount: 1 })
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(path.join(ctx.sessionDir, 'r0'), { recursive: true })
+    writeFileSync(path.join(ctx.sessionDir, 'r0', 'init.mp4'), 'fakeinit')
+    const friends = createHouseholdRepo(ctx.db).create('Friends', ctx.member.id)
+    ctx.users.setHousehold(ctx.member.id, friends.id)
+    ctx.users.setHousehold(ctx.other.id, friends.id)
+    ;(ctx.session as { userId?: string }).userId = ctx.other.id
+
+    const fastify = Fastify({ logger: false })
+    fastify.addHook('onRequest', makeRequireAuth(createSessionRepo(ctx.db), ctx.users))
+    fastify.addHook('preHandler', makeResolveProfile(createSessionRepo(ctx.db), ctx.users))
+    registerSegments(fastify, hwAccel, ctx.sessions, ctx.media, ctx.users)
+    await fastify.ready()
+    app = fastify
+    const get = (grant: string[]) => fastify.inject({
+      method: 'GET',
+      url: `/sessions/${ctx.session.id}/renditions/0/init.mp4`,
+      headers: {
+        'x-reconnect-token': ctx.session.reconnectToken,
+        authorization: `Bearer ${createSessionRepo(ctx.db).issue(ctx.member.id, null, grant).token}`,
+      },
+    })
+    return { ...ctx, get }
+  }
+
+  it('can fetch the media of a session that plays as the granted profile', async () => {
+    const { member, other, get } = await friendSetup()
+    expect((await get([member.id, other.id])).statusCode).toBe(200)
+  })
+
+  it('cannot when the profile is not in the grant', async () => {
+    const { member, get } = await friendSetup()
+    expect((await get([member.id])).statusCode).toBe(403)
+  })
+
+  it('cannot when the granted profile has since moved to another household', async () => {
+    const { db, users, member, other, owner, get } = await friendSetup()
+    users.setHousehold(other.id, createHouseholdRepo(db).create('Elsewhere', owner.id).id)
+    expect((await get([member.id, other.id])).statusCode).toBe(403)
   })
 })

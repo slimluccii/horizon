@@ -43,6 +43,8 @@ declare module 'fastify' {
     user?: AuthedUser
     /** Active profile (X-Horizon-Profile), validated against the session grant. */
     profileUserId?: string
+    /** Every profile this caller may act as right now. */
+    grantedProfileIds?: string[]
   }
 }
 
@@ -187,24 +189,31 @@ export const PROFILE_HEADER = 'x-horizon-profile'
  * re-resolved by token to read its grant (the principal is already known from
  * requireAuth, but the grant lives on the session).
  */
+/**
+ * The profiles a session may act as: its grant, minus anyone who no longer
+ * exists or has left the principal's household. A grant is captured at pairing
+ * and frozen on a long-lived session, so the household check is what keeps a
+ * profile that later moved away from being acted on across households.
+ */
+export function grantedProfiles(grant: string[] | undefined, principalId: string, userRepo: UserRepo) {
+  const householdId = userRepo.get(principalId)?.householdId
+  return (grant ?? [principalId])
+    .map(id => userRepo.get(id))
+    .filter((u): u is NonNullable<typeof u> => !!u && (u.id === principalId || u.householdId === householdId))
+}
+
 export function makeResolveProfile(sessionRepo: SessionRepo, userRepo: UserRepo) {
   return async function resolveProfile(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     if (!req.user) return // allowlisted routes never set req.user; nothing to resolve
     const raw = req.headers[PROFILE_HEADER]
     const target = Array.isArray(raw) ? raw[0] : raw
-    if (!target) { req.profileUserId = req.user.id; return }
 
     const token = tokenFromRequest(req)
     const session = token ? sessionRepo.resolve(token) : null
-    const grant = session?.grant ?? [req.user.id]
-    // The target must be in the grant AND still share the principal's household.
-    // The household re-check is defense-in-depth: a grant is captured at pairing
-    // and frozen on a 90-day session, so without it a profile later moved to
-    // another household could still be acted on cross-household. GET /auth/grant
-    // applies the same household intersection — enforcement must match display.
-    const principal = userRepo.get(req.user.id)
-    const targetUser = userRepo.get(target)
-    if (!grant.includes(target) || !targetUser || targetUser.householdId !== principal?.householdId) {
+    req.grantedProfileIds = grantedProfiles(session?.grant, req.user.id, userRepo).map(u => u.id)
+    if (!target) { req.profileUserId = req.user.id; return }
+
+    if (!req.grantedProfileIds.includes(target)) {
       await reply.status(403).send({ error: 'Profile not granted', code: ErrorCodes.PROFILE_NOT_GRANTED })
       return
     }
