@@ -75,9 +75,11 @@ data class MediaItem(
     val kind: String,
     val title: String,
     val parentId: String? = null,
-    val sortYear: Int? = null,
+    val year: Int? = null,
     val season: Int? = null,
     val episode: Int? = null,
+    /** Last episode in a multi-episode file; equals [episode] otherwise. */
+    val episodeEnd: Int? = null,
     val durationSec: Double? = null,
     val resolution: String? = null,
     val videoCodec: String? = null,
@@ -173,6 +175,20 @@ data class SessionInfo(
 )
 
 // ---------- progress WS -----------------------------------------------------
+
+/** The one server frame the TV acts on. It carries the reconnect token, the proof-of-knowledge
+ *  the server wants on this session's stream, segment and teardown requests. */
+@Serializable
+data class SessionReadyMessage(
+    val type: String,
+    val reconnectToken: String? = null,
+)
+
+@Serializable
+data class HelloMessage(
+    val type: String = "hello",
+    val reconnectToken: String? = null,
+)
 
 @Serializable
 data class ProgressReportMessage(

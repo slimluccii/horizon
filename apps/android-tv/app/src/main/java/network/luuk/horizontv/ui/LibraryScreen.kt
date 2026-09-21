@@ -131,7 +131,7 @@ private fun MovieGrid(items: List<MediaItem>, onMovieClick: (MediaItem) -> Unit)
             ) {
                 Poster(m.metadata?.posterPath)
                 Text(m.title, maxLines = 2)
-                m.sortYear?.let { Text(it.toString()) }
+                m.year?.let { Text(it.toString()) }
             }
         }
     }

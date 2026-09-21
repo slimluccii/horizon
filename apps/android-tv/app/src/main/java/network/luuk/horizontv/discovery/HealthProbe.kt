@@ -18,14 +18,14 @@ private data class HealthBody(
 private val healthJson = Json { ignoreUnknownKeys = true }
 
 /**
- * GET [baseUrl]/health. Returns a [DiscoveredServer] when the server reports
+ * GET [baseUrl]/api/health. Returns a [DiscoveredServer] when the server reports
  * `status:ok`, else null. Never throws — connection failures map to null so the
  * sweep can fire hundreds of these concurrently.
  */
 suspend fun probeHealth(client: OkHttpClient, baseUrl: String, source: Source): DiscoveredServer? =
     withContext(Dispatchers.IO) {
         try {
-            val req = Request.Builder().url("$baseUrl/health").get().build()
+            val req = Request.Builder().url("$baseUrl/api/health").get().build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val body = resp.body?.string().orEmpty()

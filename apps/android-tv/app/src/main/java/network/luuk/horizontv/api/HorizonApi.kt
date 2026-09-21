@@ -21,7 +21,10 @@ class HorizonApi(
     private val baseUrl: String,
     val okHttp: OkHttpClient = defaultClient(),
 ) {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    // The server mounts every route under /api; baseUrl is only scheme, host and port.
+    private val apiUrl = "$baseUrl/api"
+    // explicitNulls = false: the server validates bodies strictly and rejects a null where a field may only be absent.
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     @Volatile
@@ -31,6 +34,10 @@ class HorizonApi(
 
     fun setToken(value: String?) { token = value }
     fun setActiveProfile(id: String?) { activeProfileId = id }
+
+    /** Headers for a session's stream, segment and WebSocket requests. */
+    fun sessionHeaders(reconnectToken: String?): Map<String, String> =
+        playbackHeaders(token, activeProfileId, reconnectToken)
 
     // ----- library -----
     suspend fun listMovies(): List<MediaItem> = get("/library/movies", serializer())
@@ -52,14 +59,15 @@ class HorizonApi(
     // ----- sessions -----
     suspend fun createSession(body: CreateSessionBody): SessionInfo =
         post("/sessions", body, serializer())
-    suspend fun destroySession(id: String) = delete("/sessions/$id")
+    suspend fun destroySession(id: String, reconnectToken: String? = null) =
+        delete("/sessions/$id", reconnectToken)
 
     // ----- auth -----
     suspend fun pairStart(): PairStartResult = postEmpty("/auth/pair/start", serializer())
 
     suspend fun pairPoll(code: String): PairPoll = withContext(Dispatchers.IO) {
         val payload = json.encodeToString(serializer(), PairPollBody(code))
-        val req = Request.Builder().url(baseUrl + "/auth/pair/poll").post(payload.toRequestBody(jsonMedia))
+        val req = Request.Builder().url(apiUrl + "/auth/pair/poll").post(payload.toRequestBody(jsonMedia))
         authHeaders(req)
         okHttp.newCall(req.build()).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
@@ -82,7 +90,7 @@ class HorizonApi(
     // ----- generic helpers --------------------------------------------------
 
     private suspend fun <T> get(path: String, ser: KSerializer<T>): T =
-        exec(Request.Builder().url(baseUrl + path).get(), ser)
+        exec(Request.Builder().url(apiUrl + path).get(), ser)
 
     private suspend inline fun <reified Body, T> post(
         path: String,
@@ -91,18 +99,19 @@ class HorizonApi(
     ): T {
         val payload = json.encodeToString(serializer(), body)
         val req = Request.Builder()
-            .url(baseUrl + path)
+            .url(apiUrl + path)
             .post(payload.toRequestBody(jsonMedia))
         return exec(req, ser)
     }
 
-    private suspend fun delete(path: String) {
-        val req = Request.Builder().url(baseUrl + path).delete()
+    private suspend fun delete(path: String, reconnectToken: String? = null) {
+        val req = Request.Builder().url(apiUrl + path).delete()
+        reconnectToken?.let { req.header("X-Reconnect-Token", it) }
         exec(req, serializer<Unit>())
     }
 
     private suspend fun <T> postEmpty(path: String, ser: KSerializer<T>): T =
-        exec(Request.Builder().url(baseUrl + path).post(ByteArray(0).toRequestBody(jsonMedia)), ser)
+        exec(Request.Builder().url(apiUrl + path).post(ByteArray(0).toRequestBody(jsonMedia)), ser)
 
     /** Apply auth headers to a request builder (bearer always when set; the
      *  active-profile selector only when one is chosen). */
