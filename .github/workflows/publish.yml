@@ -3,6 +3,8 @@ name: Publish image
 # Builds the server image (multi-arch) and pushes it to GitHub Container
 # Registry. The package inherits the repo's visibility — private repo → private
 # image, pullable only with a token that has read:packages.
+# Runs the CI workflow first and only publishes when it passes, so `latest`
+# never points at a commit with failing tests.
 on:
   push:
     branches: [main]
@@ -17,7 +19,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read

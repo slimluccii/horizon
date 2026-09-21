@@ -1,9 +1,12 @@
 name: CI
 
+# Pushes to main are not listed here: the publish workflow calls this one for
+# them, so the image is only built from a commit that passed.
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
   pull_request:
+  workflow_call:
 
 # Cancel superseded runs on the same ref.
 concurrency:
