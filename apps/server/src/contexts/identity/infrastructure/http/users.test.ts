@@ -594,3 +594,37 @@ describe('PATCH /users/:id preferences', () => {
     expect(res.json().preferences).toEqual({ theme: 'dark', subtitlesEnabled: true, audioLanguage: 'fr' })
   })
 })
+
+describe('GET /users/:id across households', () => {
+  async function twoHouseholds() {
+    const db = openDatabase(':memory:'); migrate(db)
+    const users = createUserRepo(db)
+    const households = createHouseholdRepo(db)
+    const owner = users.create({ name: 'Luuk' })
+    const kid = users.create({ name: 'Kid' })
+    const friend = users.create({ name: 'Friend' })
+    const home = households.create('Home', owner.id)
+    const theirs = households.create('Friends', friend.id)
+    users.setHousehold(owner.id, home.id)
+    users.setHousehold(kid.id, home.id)
+    users.setHousehold(friend.id, theirs.id)
+    return { db, app: await buildApp(users, db), owner, kid, friend }
+  }
+
+  it('hides a profile of another household from a member', async () => {
+    const { db, app, kid, friend } = await twoHouseholds()
+    const res = await app.inject({ method: 'GET', url: `/users/${kid.id}`, headers: hdr(db, friend.id) })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('shows a profile of the caller\'s own household, and themselves', async () => {
+    const { db, app, owner, kid, friend } = await twoHouseholds()
+    expect((await app.inject({ method: 'GET', url: `/users/${owner.id}`, headers: hdr(db, kid.id) })).statusCode).toBe(200)
+    expect((await app.inject({ method: 'GET', url: `/users/${friend.id}`, headers: hdr(db, friend.id) })).statusCode).toBe(200)
+  })
+
+  it('lets the server owner look up anyone', async () => {
+    const { db, app, owner, friend } = await twoHouseholds()
+    expect((await app.inject({ method: 'GET', url: `/users/${friend.id}`, headers: hdr(db, owner.id) })).statusCode).toBe(200)
+  })
+})

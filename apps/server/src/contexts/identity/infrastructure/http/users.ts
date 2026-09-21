@@ -123,8 +123,13 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
   })
 
   app.get<{ Params: { id: string } }>('/users/:id', async (req, reply) => {
+    const caller = resolveCallerRole(req)
+    if (!caller) return badRequest(reply, ErrorCodes.NO_USER, 'Authentication required')
     const u = users.get(req.params.id)
-    if (!u) return sendNotFound(reply, ErrorCodes.USER_NOT_FOUND, 'User not found')
+    // A profile of another household answers like one that does not exist, so its id cannot be probed.
+    const sameHousehold = u?.id === caller.id || (u?.householdId != null && u.householdId === users.get(caller.id)?.householdId)
+    const serverAdmin = caller.role === 'owner' || caller.role === 'admin'
+    if (!u || !(sameHousehold || serverAdmin)) return sendNotFound(reply, ErrorCodes.USER_NOT_FOUND, 'User not found')
     return u
   })
 
