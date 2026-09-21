@@ -22,7 +22,7 @@ class ModelsTest {
     @Test fun `mediaItem decodes show row with null file-backed fields`() {
         val raw = """
             {"id":"s1","kind":"show","title":"Show","parentId":null,
-             "sortYear":null,"season":null,"episode":null,
+             "year":null,"season":null,"episode":null,
              "durationSec":null,"resolution":null,"videoCodec":null,
              "container":null,"hdr":null,"audioTracks":null,
              "subtitleTracks":null,"externalIds":null,

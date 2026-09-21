@@ -29,6 +29,8 @@ class ProgressSocket(
     /** Opens a WebSocket for [wsUrl] with [listener]. Defaults to OkHttp.
      *  Injectable so tests can simulate failures without a real network. */
     private val connector: Connector = OkHttpConnector(client),
+    /** Headers for the upgrade request; the server authenticates the socket like any other call. */
+    private val authHeaders: () -> Map<String, String> = { emptyMap() },
 ) {
     /** Abstraction over delayed execution so tests can drive time deterministically. */
     interface Scheduler {
@@ -41,20 +43,25 @@ class ProgressSocket(
 
     /** Abstraction over opening a WebSocket so tests can avoid a real network. */
     fun interface Connector {
-        fun open(wsUrl: String, listener: WebSocketListener): WebSocket
+        fun open(wsUrl: String, headers: Map<String, String>, listener: WebSocketListener): WebSocket
     }
 
-    private val json = Json { encodeDefaults = true }
+    private val json = Json { encodeDefaults = true; explicitNulls = false; ignoreUnknownKeys = true }
     private var socket: WebSocket? = null
 
     // Reconnect state.
     private var wsPath: String? = null
+    private var reconnectToken: String? = null
+    private var onSessionReady: ((String) -> Unit)? = null
     private var reconnectAttempt = 0
     private var pendingReconnect: Cancellable? = null
 
-    fun connect(wsPath: String) {
+    /** [onSessionReady] receives the reconnect token once the server reports the session ready. */
+    fun connect(wsPath: String, onSessionReady: ((reconnectToken: String) -> Unit)? = null) {
         // A fresh caller-initiated connection resets backoff state.
         this.wsPath = wsPath
+        this.reconnectToken = null
+        this.onSessionReady = onSessionReady
         reconnectAttempt = 0
         openSocket(wsPath)
     }
@@ -66,10 +73,21 @@ class ProgressSocket(
         val wsUrl = baseHttpUrl
             .replaceFirst("http://", "ws://")
             .replaceFirst("https://", "wss://") + wsPath
-        socket = connector.open(wsUrl, object : WebSocketListener() {
+        socket = connector.open(wsUrl, authHeaders(), object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: okhttp3.Response) {
                 // Connection confirmed — clear any accumulated backoff.
                 reconnectAttempt = 0
+                // The server ignores every command, progress included, until it has seen a hello.
+                // The token is unknown on the first attach and proves knowledge on a reconnect.
+                ws.send(json.encodeToString(HelloMessage.serializer(), HelloMessage(reconnectToken = reconnectToken)))
+            }
+
+            override fun onMessage(ws: WebSocket, text: String) {
+                val ready = runCatching { json.decodeFromString(SessionReadyMessage.serializer(), text) }.getOrNull()
+                val token = ready?.takeIf { it.type == "session-ready" }?.reconnectToken ?: return
+                val first = reconnectToken == null
+                reconnectToken = token
+                if (first) onSessionReady?.invoke(token)
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, r: okhttp3.Response?) {
@@ -136,8 +154,8 @@ class ProgressSocket(
 
 /** Default connector backed by OkHttp. */
 private class OkHttpConnector(private val client: OkHttpClient) : ProgressSocket.Connector {
-    override fun open(wsUrl: String, listener: WebSocketListener): WebSocket {
-        val req = Request.Builder().url(wsUrl).build()
+    override fun open(wsUrl: String, headers: Map<String, String>, listener: WebSocketListener): WebSocket {
+        val req = Request.Builder().url(wsUrl).apply { headers.forEach { (name, value) -> header(name, value) } }.build()
         return client.newWebSocket(req, listener)
     }
 }

@@ -19,6 +19,7 @@ class HealthProbeTest {
         val result = probeHealth(OkHttpClient(), url, Source.Sweep)
         assertEquals("Den", result?.name)
         assertEquals("id-1", result?.instanceId)
+        assertEquals("/api/health", server.takeRequest().path)
         server.shutdown()
     }
 

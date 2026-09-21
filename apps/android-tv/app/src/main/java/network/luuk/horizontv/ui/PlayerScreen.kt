@@ -31,7 +31,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -58,6 +60,7 @@ fun PlayerScreen(
     var startMs by remember { mutableStateOf(0) }
     var session by remember { mutableStateOf<SessionInfo?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var sessionToken by remember { mutableStateOf<String?>(null) }
 
     // Fetch saved progress once.
     LaunchedEffect(mediaId) {
@@ -115,7 +118,9 @@ fun PlayerScreen(
             .build()
     }
 
-    val socket = remember { ProgressSocket(state.api!!.okHttp, state.serverUrl!!) }
+    val socket = remember {
+        ProgressSocket(state.api!!.okHttp, state.serverUrl!!, authHeaders = { state.api!!.sessionHeaders(null) })
+    }
 
     val sess = session
     LaunchedEffect(sess, phase) {
@@ -123,10 +128,20 @@ fun PlayerScreen(
         if (sess == null) return@LaunchedEffect
         val streamUrl = if (sess.streamUrl.startsWith("http")) sess.streamUrl
                         else state.serverUrl!! + sess.streamUrl
-        player.setMediaItem(MediaItem.fromUri(streamUrl))
-        player.prepare()
-        player.playWhenReady = true
-        socket.connect(sess.wsUrl)
+        // The stream needs the reconnect token, and the server only hands that out in session-ready.
+        socket.connect(sess.wsUrl) { reconnectToken ->
+            scope.launch {
+                sessionToken = reconnectToken
+                // The default data source cannot send the session bearer or the reconnect token.
+                val dataSource = OkHttpDataSource.Factory(state.api!!.okHttp)
+                    .setDefaultRequestProperties(state.api!!.sessionHeaders(reconnectToken))
+                val source = DefaultMediaSourceFactory(dataSource).createMediaSource(MediaItem.fromUri(streamUrl))
+                // A resumed session has no segments before its start, and a direct-play file starts at zero on its own.
+                player.setMediaSource(source, startMs.toLong())
+                player.prepare()
+                player.playWhenReady = true
+            }
+        }
     }
 
     // Socket lifecycle is decoupled from the player lifecycle. The socket is
@@ -176,7 +191,7 @@ fun PlayerScreen(
             socket.disconnect()
             val id = session?.sessionId
             if (id != null) {
-                scope.launch { runCatching { state.api!!.destroySession(id) } }
+                scope.launch { runCatching { state.api!!.destroySession(id, sessionToken) } }
             }
         }
     }

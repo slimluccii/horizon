@@ -59,10 +59,29 @@ class ProgressSocketTest {
         val openedUrls = mutableListOf<String>()
         val listeners = mutableListOf<WebSocketListener>()
 
-        override fun open(wsUrl: String, listener: WebSocketListener): WebSocket {
+        val openedHeaders = mutableListOf<Map<String, String>>()
+        val sent = mutableListOf<String>()
+        private val socket = object : WebSocket by NoopWebSocket {
+            override fun send(text: String): Boolean { sent += text; return true }
+        }
+
+        override fun open(wsUrl: String, headers: Map<String, String>, listener: WebSocketListener): WebSocket {
             openedUrls += wsUrl
+            openedHeaders += headers
             listeners += listener
-            return NoopWebSocket
+            return socket
+        }
+
+        /** Simulate a text frame from the server. */
+        fun receiveLast(text: String) {
+            listeners.last().onMessage(socket, text)
+        }
+
+        /** Simulate the server accepting the upgrade. */
+        fun openLast() {
+            listeners.last().onOpen(socket, okhttp3.Response.Builder()
+                .request(Request.Builder().url("http://localhost/").build())
+                .protocol(okhttp3.Protocol.HTTP_1_1).code(101).message("Switching Protocols").build())
         }
 
         /** Simulate the underlying socket failing. */
@@ -88,6 +107,7 @@ class ProgressSocketTest {
         baseHttpUrl = "http://host:7777",
         scheduler = scheduler,
         connector = connector,
+        authHeaders = { mapOf("Authorization" to "Bearer tok") },
     )
 
     @Test fun `connect maps http base to ws and opens once`() {
@@ -187,4 +207,46 @@ class ProgressSocketTest {
             .code(101)
             .message("Switching Protocols")
             .build()
+
+    @Test fun `opens the socket with the session credentials`() {
+        val conn = FakeConnector()
+        newSocket(FakeScheduler(), conn).connect("/api/sessions/abc/ws")
+        assertEquals("ws://host:7777/api/sessions/abc/ws", conn.openedUrls.single())
+        assertEquals(mapOf("Authorization" to "Bearer tok"), conn.openedHeaders.single())
+    }
+
+    @Test fun `says hello before anything else, without a token on the first attach`() {
+        val conn = FakeConnector()
+        val socket = newSocket(FakeScheduler(), conn)
+        socket.connect("/api/sessions/abc/ws")
+        conn.openLast()
+        socket.reportProgress(5_000, 60_000)
+        assertEquals(2, conn.sent.size)
+        assertEquals("""{"type":"hello"}""", conn.sent[0])
+        assertEquals(true, conn.sent[1].contains(""""type":"progress""""))
+    }
+
+    @Test fun `hands over the reconnect token the server sends in session-ready`() {
+        val conn = FakeConnector()
+        val tokens = mutableListOf<String>()
+        val socket = newSocket(FakeScheduler(), conn)
+        socket.connect("/api/sessions/abc/ws") { tokens += it }
+        conn.openLast()
+        conn.receiveLast("""{"type":"quality-changed","profile":{"videoBitrate":1,"audioBitrate":1},"reason":"x"}""")
+        conn.receiveLast("not json")
+        conn.receiveLast("""{"type":"session-ready","method":"transcode","streamUrl":"/api/sessions/abc/stream.m3u8","profile":null,"reconnectToken":"rt"}""")
+        assertEquals(listOf("rt"), tokens)
+    }
+
+    @Test fun `proves it knows the token when it says hello again after a reconnect`() {
+        val sched = FakeScheduler()
+        val conn = FakeConnector()
+        newSocket(sched, conn).connect("/api/sessions/abc/ws") { }
+        conn.openLast()
+        conn.receiveLast("""{"type":"session-ready","reconnectToken":"rt"}""")
+        conn.failLast()
+        sched.fireLast()
+        conn.openLast()
+        assertEquals("""{"type":"hello","reconnectToken":"rt"}""", conn.sent.last())
+    }
 }
