@@ -1,14 +1,18 @@
 import type { FastifyInstance } from 'fastify'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, rename } from 'node:fs/promises'
+import { mkdir, rename, unlink } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import type { Config } from '../../../../platform/config/config.ts'
 import { imageCachePath, fileExists } from '../tmdb/cache.ts'
-import { sendNotFound, badRequest, serverError, ErrorCodes } from '../../../../platform/http/errors.ts'
+import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p'
+
+/** Largest image the proxy will fetch and cache. An `original` backdrop is a few MB. */
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+const UPSTREAM_TIMEOUT_MS = 15_000
 
 /** Allowed TMDB image widths. Keep this small + explicit so users can't pull
  *  arbitrary sizes that bypass our cache (each size is a separate URL). */
@@ -60,11 +64,17 @@ export function registerMetadata(app: FastifyInstance, cfg: Config): void {
       if (!sourceUrl) return badRequest(reply, ErrorCodes.INVALID_PATH, 'Invalid image path')
       const cachePath = await imageCachePath(cfg.cacheDir, sourceUrl)
 
-      reply.header('Cache-Control', 'public, max-age=2592000, immutable')
-      reply.header('Content-Type', guessContentType(tail))
+      // Only a success may be cached by the browser: an `immutable` 404 would
+      // keep a poster broken on that device for a month after one upstream hiccup.
+      reply.header('Cache-Control', 'no-store')
+      const cacheable = () => {
+        reply.header('Cache-Control', 'public, max-age=2592000, immutable')
+        reply.header('Content-Type', guessContentType(tail))
+      }
 
       // Cache hit: serve directly from disk.
       if (await fileExists(cachePath)) {
+        cacheable()
         return reply.send(createReadStream(cachePath))
       }
 
@@ -74,7 +84,7 @@ export function registerMetadata(app: FastifyInstance, cfg: Config): void {
       // on disk first.
       let upstream: Response
       try {
-        upstream = await fetch(sourceUrl)
+        upstream = await fetch(sourceUrl, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) })
       } catch (err) {
         console.warn(`Image proxy fetch failed: ${(err as Error).message}`)
         return serverError(reply, ErrorCodes.FETCH_FAILED, 'Image fetch failed')
@@ -84,6 +94,11 @@ export function registerMetadata(app: FastifyInstance, cfg: Config): void {
       }
 
       const upstreamLen = upstream.headers.get('content-length')
+      if (upstreamLen && Number(upstreamLen) > MAX_IMAGE_BYTES) {
+        await upstream.body.cancel()
+        return errorReply(reply, 502, ErrorCodes.FETCH_FAILED, 'Image too large')
+      }
+      cacheable()
       if (upstreamLen) reply.header('Content-Length', upstreamLen)
 
       // Tee the web ReadableStream into two independent streams.
@@ -104,16 +119,23 @@ async function persistImage(stream: ReadableStream<Uint8Array>, finalPath: strin
   const tmpPath = `${finalPath}.${crypto.randomBytes(6).toString('hex')}.tmp`
   const out = createWriteStream(tmpPath)
   const reader = stream.getReader()
+  let written = 0
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
+      written += value.byteLength
+      // An upstream that did not announce its size is only caught here.
+      if (written > MAX_IMAGE_BYTES) throw new Error(`image exceeds ${MAX_IMAGE_BYTES} bytes`)
       if (!out.write(value)) await new Promise<void>(res => out.once('drain', () => res()))
     }
     await new Promise<void>(res => out.end(() => res()))
     await rename(tmpPath, finalPath)
   } catch (err) {
-    out.destroy()
+    // Wait for the stream to let go of the file, or the unlink can run before the file exists.
+    await new Promise<void>(res => { out.once('close', () => res()); out.destroy() })
+    await reader.cancel().catch(() => {})
+    await unlink(tmpPath).catch(() => {})
     throw err
   }
 }

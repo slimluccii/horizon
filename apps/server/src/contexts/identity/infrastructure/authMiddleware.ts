@@ -77,10 +77,6 @@ export const AUTH_ALLOWLIST: ReadonlyArray<string> = [
 export const AUTH_ALLOWLIST_PREFIXES: ReadonlyArray<string> = [
   '/assets/',
   '/dev/',
-  // Poster/backdrop image proxy. Served to <img> tags (which can't send a
-  // bearer) and to external caches; the content is non-secret artwork keyed by
-  // opaque TMDB/mock paths, so it's safe to leave unauthenticated.
-  '/metadata/',
 ]
 
 /** Method-specific exemptions. */
