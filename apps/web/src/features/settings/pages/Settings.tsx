@@ -14,6 +14,7 @@ import { SUPPORTED_LANGUAGES } from '@horizon/sdk'
 import type { Preferences } from '@horizon/sdk'
 import LargeTopNav from '../../../shared/ui/chrome/LargeTopNav.tsx'
 import DevicePanel from '../../identity/components/DevicePanel.tsx'
+import ProfilePinPanel from '../../identity/components/ProfilePinPanel.tsx'
 type Tab = 'Personal' | 'Household' | 'Server' | 'Profiles'
 
 // ---- Personal tab helpers --------------------------------------------
@@ -255,6 +256,7 @@ export default function Settings() {
             </div>
 
             <DevicePanel />
+            <ProfilePinPanel />
 
             <SecurityPanel
               onToast={showToast}
