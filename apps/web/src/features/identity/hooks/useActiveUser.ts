@@ -1,22 +1,25 @@
 import { useEffect, useState, useCallback } from 'react'
 import { horizon } from '../../../shared/horizon.ts'
-import type { User } from '@horizon/sdk'
+import type { DeviceSession, ProfileSummary, User } from '@horizon/sdk'
+import { pickedProfile, rememberPickedProfile } from '../device.ts'
 
 /**
- * Identity is now owned by the server session, not the client. The web rides
- * the httpOnly `hz_session` cookie (set by `auth.login`), so the active user is
- * whatever `auth.me()` resolves — there is no `X-Horizon-User` id to stash.
+ * Identity is owned by the server session. The web rides the httpOnly
+ * `hz_session` cookie (set by `auth.login`), and `auth.session()` says who
+ * logged in on this device, which profile is in use and which can be picked.
+ * `user` is the profile in use, carrying the role the session really has, so a
+ * shared device never shows admin screens.
  *
  * A single module-level cache + listener set keeps every consumer
  * (`<ProfileBadgeButton />`, `<Library />`, `<Player />`, settings) in sync
- * without prop-drilling, mirroring the previous hook's fan-out. `me()` runs once
- * at module load so the first paint can already have an identity in flight; a
- * 401 leaves `cachedUser` null and `loading` false, which is the Guard's signal
- * to redirect to /login.
+ * without prop-drilling. The session is read once at module load so the first
+ * paint can already have an identity in flight; a 401 leaves `cachedUser` null
+ * and `loading` false, which is the Guard's signal to redirect to /login.
  */
 
 let cachedUser: User | null = null
-let loaded = false               // has the initial me() settled at least once?
+let cachedSession: DeviceSession | null = null
+let loaded = false               // has the initial session read settled at least once?
 let inflight: Promise<void> | null = null
 const listeners = new Set<() => void>()
 
@@ -36,6 +39,25 @@ function applyTheme(user: User | null) {
   }
 }
 
+function apply(session: DeviceSession | null) {
+  cachedSession = session
+  cachedUser = session ? { ...session.profile, role: session.role } : null
+  applyTheme(cachedUser)
+}
+
+async function loadSession(): Promise<DeviceSession> {
+  horizon.setProfile(pickedProfile())
+  try {
+    return await horizon.auth.session()
+  } catch (err) {
+    // The remembered profile may have left the household; fall back to the person who logged in.
+    if (!pickedProfile()) throw err
+    rememberPickedProfile(null)
+    horizon.setProfile(null)
+    return horizon.auth.session()
+  }
+}
+
 /**
  * Resolve the caller from the session cookie/bearer. A 401 (or any failure)
  * clears the cached user — the Guard then redirects to /login. De-duplicated so
@@ -43,9 +65,9 @@ function applyTheme(user: User | null) {
  */
 function refreshGlobal(): Promise<void> {
   if (inflight) return inflight
-  inflight = horizon.auth.me()
-    .then(u => { cachedUser = u; applyTheme(u) })
-    .catch(() => { cachedUser = null; applyTheme(null) })
+  inflight = loadSession()
+    .then(apply)
+    .catch(() => apply(null))
     .finally(() => { loaded = true; inflight = null; emit() })
   return inflight
 }
@@ -55,13 +77,21 @@ function refreshGlobal(): Promise<void> {
 void refreshGlobal()
 
 /**
- * Active-user state sourced from `auth.me()`. `userId`/`user`/`loading` keep
- * their previous shape so existing consumers are unchanged; identity now flows
- * from the server session rather than localStorage.
+ * Active-user state sourced from `auth.session()`. `userId`/`user`/`loading`
+ * keep their previous shape so existing consumers are unchanged.
  */
 export function useActiveUser(): {
   user: User | null
   userId: string | null
+  /** Who logged in on this device; on a shared device not necessarily the profile in use. */
+  principal: User | null
+  shared: boolean
+  canShare: boolean
+  /** Every profile that can be picked on this device. */
+  profiles: ProfileSummary[]
+  /** True on a shared device until someone has picked a profile in this tab. */
+  needsProfilePick: boolean
+  pickProfile: (id: string) => Promise<void>
   loading: boolean
   refresh: () => Promise<void>
   logout: () => Promise<void>
@@ -86,8 +116,9 @@ export function useActiveUser(): {
     try {
       await horizon.auth.logout()
     } finally {
-      cachedUser = null
-      applyTheme(null)
+      rememberPickedProfile(null)
+      horizon.setProfile(null)
+      apply(null)
       emit()
     }
   }, [])
@@ -96,10 +127,16 @@ export function useActiveUser(): {
     try {
       await horizon.auth.logoutAll()
     } finally {
-      cachedUser = null
-      applyTheme(null)
+      rememberPickedProfile(null)
+      horizon.setProfile(null)
+      apply(null)
       emit()
     }
+  }, [])
+
+  const pickProfile = useCallback(async (id: string) => {
+    rememberPickedProfile(id)
+    await refreshGlobal()
   }, [])
 
   const setUserId = useCallback((id: string | null) => {
@@ -110,6 +147,12 @@ export function useActiveUser(): {
   return {
     user: cachedUser,
     userId: cachedUser?.id ?? null,
+    principal: cachedSession?.principal ?? null,
+    shared: cachedSession?.shared ?? false,
+    canShare: cachedSession?.canShare ?? false,
+    profiles: cachedSession?.profiles ?? [],
+    needsProfilePick: !!cachedSession?.shared && !pickedProfile(),
+    pickProfile,
     loading: !loaded,
     refresh,
     logout,

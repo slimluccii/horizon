@@ -11,6 +11,7 @@ import { SUPPORTED_LANGUAGES, isRoleChangedError } from '@horizon/sdk'
 import type { Preferences, User, ServerSettings, ScanStatusResponse } from '@horizon/sdk'
 import { FolderBrowser, type LibraryTag } from '../../../shared/ui/FolderBrowser/FolderBrowser.tsx'
 import LargeTopNav from '../../../shared/ui/chrome/LargeTopNav.tsx'
+import DevicePanel from '../../identity/components/DevicePanel.tsx'
 type Tab = 'Personal' | 'Household' | 'Server' | 'Profiles'
 
 function ProfilesPanel({
@@ -1227,6 +1228,8 @@ export default function Settings() {
                 {busy ? 'Saving…' : 'Save'}
               </button>
             </div>
+
+            <DevicePanel />
 
             <SecurityPanel
               onToast={showToast}

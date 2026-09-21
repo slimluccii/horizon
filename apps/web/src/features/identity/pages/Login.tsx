@@ -1,77 +1,48 @@
-import { useEffect, useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { horizon } from '../../../shared/horizon.ts'
 import { useActiveUser } from '../hooks/useActiveUser.ts'
 import HorizonMark from '../../../shared/ui/chrome/HorizonMark.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
 import type { User } from '@horizon/sdk'
-/** Generic, non-enumerating message for any login failure (wrong password,
- *  unknown user, lockout). The server is deliberately vague; the UI matches. */
-const LOGIN_ERROR = 'Incorrect password, or the account is temporarily locked. Try again shortly.'
+import { wasDeviceAsked } from '../device.ts'
+
+/** One message for every failure: unknown name, wrong password or lockout. The server is as vague on purpose. */
+const LOGIN_ERROR = 'Incorrect name or password, or the account is temporarily locked.'
 
 /**
- * Login screen. Two phases:
- *
- *  1. Profile picker — pick a profile, then enter its password → `auth.login`,
- *     which sets the httpOnly `hz_session` cookie and lands you home.
- *  2. Forced set-password — if `auth.me()` already resolves a user who has never
- *     set a password (a migrated owner or an admin-created member), we render a
- *     set-password form instead. Completing it re-issues the session and enters
- *     the app.
- *
- * Replaces the old localStorage profile picker: identity now lives in the
- * server session, not an `X-Horizon-User` header.
+ * Login screen. Nobody is listed before login: you type your name and password.
+ * A user who is logged in but never set a password gets the set-password form.
  */
 export default function Login() {
   const navigate = useNavigate()
-  const { user, loading: meLoading, refresh } = useActiveUser()
-
-  const [users, setUsers] = useState<User[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<User | null>(null)
+  const { principal, loading, refresh } = useActiveUser()
+  const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    horizon.users.list()
-      .then(setUsers)
-      .catch(() => setError('Could not load profiles. Is the server reachable?'))
-      .finally(() => setLoading(false))
-  }, [])
-
-  // An authenticated user who has never set a password is forced through the
-  // set-password screen below — don't show the picker.
-  const forceSetPassword = !!user && !user.hasPassword
-
-  async function login() {
-    if (!selected || !password) return
+  async function login(e: FormEvent) {
+    e.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      await horizon.auth.login(selected.name, password)
+      const { canShareDevice } = await horizon.auth.login(name.trim(), password)
       await refresh()
-      navigate('/', { replace: true })
+      navigate(canShareDevice && !wasDeviceAsked() ? '/device' : '/', { replace: true })
     } catch {
-      // Never distinguish wrong-user from wrong-password from lockout.
       setError(LOGIN_ERROR)
       setBusy(false)
     }
   }
 
-  if (loading || meLoading) {
-    return (
-      <div>
-        <div>Loading…</div>
-      </div>
-    )
-  }
+  if (loading) return <p>Loading…</p>
 
-  if (forceSetPassword && user) {
+  if (principal && !principal.hasPassword) {
     return (
       <main>
         <ForcedSetPassword
-          user={user}
+          user={principal}
           onDone={async () => { await refresh(); navigate('/', { replace: true }) }}
         />
       </main>
@@ -82,53 +53,20 @@ export default function Login() {
     <main>
       <HorizonMark size={44} />
       <h1>Welcome back</h1>
-      <p>
-        {selected ? `Enter ${selected.name}'s password` : 'Choose a profile to sign in'}
-      </p>
-
-      {!selected ? (
-        <ul>
-          {users.map(u => {
-            const initial = u.avatar ?? u.name.charAt(0).toUpperCase()
-            return (
-              <li key={u.id}>
-                <button
-                  onClick={() => { setSelected(u); setPassword(''); setError(null) }}
-                >
-                  <span aria-hidden="true">{initial}</span>
-                  <span>{u.name}</span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      ) : (
-        <div>
-          <span aria-hidden="true">
-            {selected.avatar ?? selected.name.charAt(0).toUpperCase()}
-          </span>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Password"
-              autoFocus
-              autoComplete="current-password"
-              onKeyDown={e => e.key === 'Enter' && login()}
-            />
-            {error && <p role="alert">{error}</p>}
-            <button disabled={busy || !password} onClick={login}>
-              {busy ? 'Signing in…' : <>Sign in <Icon name="chevron-right" size={14} /></>}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => { setSelected(null); setPassword(''); setError(null) }}
-            >
-              Choose a different profile
-            </button>
-        </div>
-      )}
+      <form onSubmit={login}>
+        <p>
+          <label htmlFor="login-name">Name</label>
+          <input id="login-name" value={name} onChange={e => setName(e.target.value)} autoComplete="username" autoFocus required />
+        </p>
+        <p>
+          <label htmlFor="login-password">Password</label>
+          <input id="login-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required />
+        </p>
+        {error && <p role="alert">{error}</p>}
+        <button type="submit" disabled={busy}>
+          {busy ? 'Signing in…' : <>Sign in <Icon name="chevron-right" size={14} /></>}
+        </button>
+      </form>
     </main>
   )
 }
