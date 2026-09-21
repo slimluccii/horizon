@@ -133,10 +133,15 @@ test.describe('mock scenarios', () => {
     expect(await cards.count()).toBeGreaterThan(5)
   })
 
-  test('image proxy: mock poster returns a real image', async ({ request }) => {
+  test('image proxy: mock poster returns a real image', async ({ request, playwright }) => {
     await seed(request, 'tiny')
-    // Image proxy is unauthenticated (cacheable static-ish asset).
-    const res = await request.get(`${APP}/api/metadata/image/w342/mock/poster/neon-horizon.jpg`)
+    const url = `${APP}/api/metadata/image/w342/mock/poster/neon-horizon.jpg`
+    // The proxy fetches and caches on request, so it is only for someone who is logged in.
+    // A context of its own: `request` may already hold a session cookie from an earlier call.
+    const stranger = await playwright.request.newContext()
+    expect((await stranger.get(url)).status()).toBe(401)
+    await stranger.dispose()
+    const res = await request.get(url, { headers: bearer(await ensureOwner(request)) })
     expect(res.status()).toBe(200)
     expect(res.headers()['content-type']).toMatch(/^image\//)
     expect((await res.body()).byteLength).toBeGreaterThan(1000)
