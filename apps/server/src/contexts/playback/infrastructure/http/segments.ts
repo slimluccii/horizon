@@ -10,7 +10,7 @@ import type { MediaRepo } from '../../../library/index.ts'
 import type { UserRepo } from '../../../identity/index.ts'
 import { waitForSegment, waitForInit } from '../ffmpeg/ffmpeg.ts'
 import { sendNotFound, badRequest, serverError, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
-import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
+import { resolveCallerRole, callerCanAccessSession } from '../../../identity/index.ts'
 import { segmentName } from '../../domain/segments.ts'
 
 const INIT_WAIT_MS = 30_000
@@ -87,7 +87,7 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
-      if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+      if (!callerCanAccessSession(req, session.userId)) {
         return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
       }
       if (!/^\d+$/.test(req.params.r)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid rendition')
@@ -147,7 +147,7 @@ export function registerSegments(
     const session = sessions.get(req.params.id)
     if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
     if (!requireReconnectToken(session, req, reply)) return
-    if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+    if (!callerCanAccessSession(req, session.userId)) {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
     }
 
@@ -178,7 +178,7 @@ export function registerSegments(
       const session = sessions.get(req.params.id)
       if (!session) return sendNotFound(reply, ErrorCodes.SESSION_NOT_FOUND, 'Session not found')
       if (!requireReconnectToken(session, req, reply)) return
-      if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+      if (!callerCanAccessSession(req, session.userId)) {
         return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
       }
       if (!/^\d+$/.test(req.params.trackIdx)) return badRequest(reply, ErrorCodes.INVALID_INPUT, 'Invalid track index')

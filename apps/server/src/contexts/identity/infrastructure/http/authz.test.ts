@@ -72,3 +72,21 @@ describe('canAccessSession', () => {
     expect(canAccessSession('u-other', member)).toBe(false)
   })
 })
+
+describe('canAccessSession with profiles', () => {
+  // A friend runs their own household: server role member, with a TV paired for their kids' profiles.
+  const friend: AuthedUser = { id: 'u-friend', role: 'member' }
+
+  it('lets a member reach a session that plays as a profile they were granted', () => {
+    expect(canAccessSession('u-friend-kid', friend, ['u-friend', 'u-friend-kid'])).toBe(true)
+  })
+
+  it('keeps a member out of a session of a profile outside their grant', () => {
+    expect(canAccessSession('u-luuk-kid', friend, ['u-friend', 'u-friend-kid'])).toBe(false)
+  })
+
+  it('still lets a member reach their own session without any grant', () => {
+    expect(canAccessSession('u-friend', friend)).toBe(true)
+    expect(canAccessSession('u-friend-kid', friend)).toBe(false)
+  })
+})

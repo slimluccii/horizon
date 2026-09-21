@@ -5,7 +5,7 @@ import crypto from 'node:crypto'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
 import type { HouseholdRepo } from '../persistence/householdRepo.ts'
-import { SESSION_COOKIE, tokenFromRequest, setSessionCookie } from '../authMiddleware.ts'
+import { SESSION_COOKIE, tokenFromRequest, setSessionCookie, grantedProfiles } from '../authMiddleware.ts'
 import { hash as hashPassword, verify as verifyPassword } from '../password.ts'
 import { badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { IpRateLimiter } from '../../../../platform/http/rateLimit.ts'
@@ -360,12 +360,7 @@ export async function registerAuth(
     if (!caller) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
     const token = tokenFromRequest(req)
     const session = token ? sessions.resolve(token) : null
-    const grant = session?.grant ?? [caller.id]
-    const me = users.get(caller.id)
-    const householdId = me?.householdId
-    const profiles = grant
-      .map(id => users.get(id))
-      .filter((u): u is NonNullable<typeof u> => !!u && u.householdId === householdId)
+    const profiles = grantedProfiles(session?.grant, caller.id, users)
       .map(u => ({ id: u.id, name: u.name, avatar: u.avatar }))
     return { profiles }
   })

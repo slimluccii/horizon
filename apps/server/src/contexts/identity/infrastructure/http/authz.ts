@@ -27,7 +27,9 @@ export function resolveCallerRole(req: FastifyRequest): AuthedUser | null {
  *  - A headless session (userId unset) is accessible to anyone — there is no
  *    owner to protect, matching the progress-flush no-op contract.
  *  - owner/admin may access any session (household-wide control).
- *  - a member may access only a session they own (caller.id === userId).
+ *  - a member may access a session they own, or one that plays as a profile
+ *    they are granted: a session belongs to the acted-as profile, while the
+ *    caller is the login that paired the device.
  *
  * `caller` is the resolved `req.user` identity, or null when no session is
  * attached. A null caller can only reach headless sessions.
@@ -35,11 +37,17 @@ export function resolveCallerRole(req: FastifyRequest): AuthedUser | null {
 export function canAccessSession(
   sessionUserId: string | undefined,
   caller: AuthedUser | null,
+  grantedProfileIds: string[] = [],
 ): boolean {
   if (!sessionUserId) return true
   if (!caller) return false
   if (caller.role === 'owner' || caller.role === 'admin') return true
-  return caller.id === sessionUserId
+  return caller.id === sessionUserId || grantedProfileIds.includes(sessionUserId)
+}
+
+/** canAccessSession for the caller of this request, with the profiles their login may act as. */
+export function callerCanAccessSession(req: FastifyRequest, sessionUserId: string | undefined): boolean {
+  return canAccessSession(sessionUserId, resolveCallerRole(req), req.grantedProfileIds)
 }
 
 /**

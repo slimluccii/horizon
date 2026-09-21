@@ -12,7 +12,7 @@ import { handleWsMessage, resetWsAuth } from '../ws/handler.ts'
 import { createProgressFlusher } from '../ws/progress-flusher.ts'
 import { sessionReadyMessage } from '../ws/messages.ts'
 import { sendNotFound, overCapacity, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
-import { resolveCallerRole, canAccessSession } from '../../../identity/index.ts'
+import { resolveCallerRole, callerCanAccessSession } from '../../../identity/index.ts'
 import { requireReconnectToken } from './segments.ts'
 
 const WS_PING_INTERVAL_MS = 15_000
@@ -163,7 +163,7 @@ export function registerSessions(
     // Ownership gate on top of the token: a member who somehow holds a token
     // for another user's session still may not tear it down. owner/admin may
     // destroy any session; headless sessions are destroyable by anyone.
-    if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+    if (!callerCanAccessSession(req, session.userId)) {
       return errorReply(reply, 403, ErrorCodes.CALLER_FORBIDDEN, 'Not authorized for this session')
     }
     await sessions.destroy(req.params.id)
@@ -183,7 +183,7 @@ export function registerSessions(
     // the WS upgrade) must also be entitled to this session: a member may attach
     // only to their own session, owner/admin to any, and a headless session
     // (no userId) to any authenticated user. 4001 = unauthorized close code.
-    if (!canAccessSession(session.userId, resolveCallerRole(req))) {
+    if (!callerCanAccessSession(req, session.userId)) {
       socket.close(4001, ErrorCodes.UNAUTHORIZED)
       return
     }
