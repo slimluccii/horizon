@@ -298,8 +298,32 @@ HORIZON_RESET_OWNER_PASSWORD=1
 |------|-----|
 | **Update server** | `cd /mnt/<pool>/apps/horizon-src && git pull && docker build -f apps/server/Dockerfile -t horizon:latest . && (in Dockge) restart stack` |
 | **View logs** | Dockge → `horizon` stack → Logs tab |
-| **Re-scan library** | `curl -XPOST http://<truenas-ip>:7777/library/rescan -H "Authorization: Bearer <session-token>"` (owner/admin only). Get a token via `POST /auth/login`. Also runs at boot and nightly at `HORIZON_SCAN_CRON_HOUR`. |
+| **Re-scan library** | `curl -XPOST http://<truenas-ip>:7777/api/library/rescan -H "Authorization: Bearer <session-token>"` (owner/admin only). Get a token via `POST /api/auth/login`. Also runs at boot and nightly at `HORIZON_SCAN_CRON_HOUR`. |
 | **Reset state** | Stop stack → `rm -rf /mnt/<pool>/apps/horizon/config/*` → start stack |
+
+#### Backups and going back to a previous release
+
+Everything Horizon knows lives in one SQLite file, `horizon.db` in the config
+folder. Two kinds of copies are kept in `backups/` next to it:
+
+- `horizon-YYYY-MM-DD.db`: a nightly snapshot, the newest 7 are kept.
+- `horizon-pre-migration-vN.db`: taken at boot, right before a new release
+  changes the database schema. `N` is the schema version the copy holds. The
+  newest 3 are kept.
+
+Both live on the same disk as the database, so they protect against a bad
+release or a corrupt file, not against losing the disk. Copy the folder
+elsewhere if that matters to you.
+
+A schema change cannot be undone, and an older release refuses to start on a
+newer database. To go back to the previous release:
+
+1. Stop the stack.
+2. Replace `horizon.db` with the `horizon-pre-migration-vN.db` that release
+   left behind (and delete `horizon.db-wal` and `horizon.db-shm` if present).
+3. Pin the previous image tag in the compose file and start the stack.
+
+Anything watched or changed after the upgrade is lost with the newer file.
 
 ### 9. Troubleshooting
 

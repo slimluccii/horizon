@@ -2,7 +2,7 @@ import { loadConfig } from '../config/config.ts'
 import { detectHwAccel } from '../../contexts/playback/index.ts'
 import { openDatabase } from '../db/connection.ts'
 import { migrate } from '../db/migrations.ts'
-import { runBackup } from '../db/backup.ts'
+import { runBackup, snapshotBeforeMigrate } from '../db/backup.ts'
 import { createUserRepo, createSessionRepo, createHouseholdRepo, createInviteRepo, ensureHouseholds } from '../../contexts/identity/index.ts'
 import { createProgressRepo } from '../../contexts/playback/index.ts'
 import { createServerSettings } from '../../contexts/settings/index.ts'
@@ -45,6 +45,9 @@ export async function bootstrap() {
   }
 
   const db = openDatabase(cfg.dbPath)
+  // Migrations cannot be undone, so an existing database is copied before one runs.
+  // A failed snapshot stops the boot: better not to start than to migrate without a way back.
+  snapshotBeforeMigrate(db, cfg.dbPath)
   migrate(db)
   const identity = loadIdentity(db, { serverName: cfg.serverName })
   const mediaRepo = createMediaRepo(db)
