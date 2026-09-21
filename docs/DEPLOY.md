@@ -40,6 +40,12 @@ End-to-end instructions for two things:
 > rights: use a personal device to change server or household settings. Friends
 > get their own household through an invite and never see yours.
 >
+> **Profile PIN (optional):** under Settings → Personal → Profile PIN you can give
+> your profile a PIN of 4 to 8 digits, and as head of the household anyone's. A
+> shared device then asks for it before that profile can be picked. No PIN is
+> fine too, and your own devices never ask. A paired TV is a shared device, so
+> it asks as well.
+>
 > **TVs and other 10-foot devices** don't type passwords well, so they use a
 > **device-pairing flow** instead: the TV shows a short code, you open `/link` on
 > a phone or laptop that's already logged in, enter the code, and approve it. The
