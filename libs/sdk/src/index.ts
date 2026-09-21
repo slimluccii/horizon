@@ -24,7 +24,7 @@ export type {
   MovieMetadata, ShowMetadataInfo, EpisodeMetadata, Person,
 } from './metadata/metadata.ts'
 export type {
-  User, AuthSession, SetPasswordResult, PairStartResult, PairPollResult,
+  User, AuthSession, DeviceMode, DeviceSession, ProfileSummary, SetPasswordResult, PairStartResult, PairPollResult,
 } from './identity/user.ts'
 export type { HouseholdView, InviteKind, InviteResult } from './identity/household.ts'
 export type {

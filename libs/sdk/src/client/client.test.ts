@@ -371,3 +371,32 @@ describe('auth.pairApprove grant', () => {
     expect(JSON.parse((fn.mock.calls[0][1] as RequestInit).body as string)).toEqual({ code: 'ABCD-1234', grant: ['u1', 'u2'] })
   })
 })
+
+describe('device mode and profiles', () => {
+  const headersOf = (fn: ReturnType<typeof spyFetch>, call = 0) => (fn.mock.calls[call][1]?.headers ?? {}) as Record<string, string>
+
+  it('sends the picked profile on every request, and stops when it is cleared', async () => {
+    const fn = spyFetch([])
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    client.setProfile('kid')
+    await client.library.listMovies()
+    expect(headersOf(fn)['X-Horizon-Profile']).toBe('kid')
+    client.setProfile(null)
+    await client.library.listMovies()
+    expect(headersOf(fn, 1)['X-Horizon-Profile']).toBeUndefined()
+  })
+
+  it('reads the session, sets the device mode and asks the pre-login state', async () => {
+    const fn = spyFetch({})
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    await client.auth.session()
+    await client.auth.setDeviceMode('shared')
+    await client.auth.setDeviceMode('personal', 'pw')
+    await client.auth.state()
+    expect(fn.mock.calls.map(c => String(c[0]))).toEqual([
+      'http://x/api/auth/session', 'http://x/api/auth/device', 'http://x/api/auth/device', 'http://x/api/auth/state',
+    ])
+    expect(JSON.parse(String(fn.mock.calls[1][1]?.body))).toEqual({ mode: 'shared' })
+    expect(JSON.parse(String(fn.mock.calls[2][1]?.body))).toEqual({ mode: 'personal', password: 'pw' })
+  })
+})

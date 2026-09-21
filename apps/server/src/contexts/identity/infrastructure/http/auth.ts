@@ -263,6 +263,20 @@ export async function registerAuth(
     return user
   })
 
+  // GET /auth/session — what this device is: who logged in, which profile is
+  // picked, which profiles can be picked, and the role the session really has.
+  app.get('/auth/session', async (req, reply) => {
+    const caller = req.user
+    const principal = caller ? users.get(caller.id) : null
+    const profile = users.get(req.profileUserId ?? caller?.id ?? '')
+    if (!caller || !principal || !profile) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    const token = tokenFromRequest(req)
+    const session = token ? sessions.resolve(token) : null
+    const profiles = grantedProfiles(session?.grant, caller.id, users)
+      .map(u => ({ id: u.id, name: u.name, avatar: u.avatar }))
+    return { principal, profile, role: caller.role, shared: caller.shared, canShare: householdGrant(caller.id).length > 1, profiles }
+  })
+
   // POST /auth/set-password — self (with old password once one is set) OR
   // owner/admin resetting another user (no old password). First-boot owner is
   // forced through here: a caller whose own password_set_at is null may set
