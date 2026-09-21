@@ -87,6 +87,23 @@ class HorizonApi(
 
     suspend fun getGrant(): GrantResult = get("/auth/grant", serializer())
 
+    /** Enter a profile's PIN. Sent without the active profile, which may be the locked one. */
+    suspend fun unlockProfile(profileId: String, pin: String): PinResult = withContext(Dispatchers.IO) {
+        val payload = json.encodeToString(serializer(), UnlockBody(profileId, pin))
+        val req = Request.Builder().url(apiUrl + "/auth/profile-unlock").post(payload.toRequestBody(jsonMedia))
+        token?.let { req.header("Authorization", "Bearer $it") }
+        okHttp.newCall(req.build()).execute().use { resp ->
+            val parsed = runCatching { json.decodeFromString(ErrorBody.serializer(), resp.body?.string().orEmpty()) }.getOrNull()
+            when {
+                resp.isSuccessful -> PinResult.Unlocked
+                parsed?.code == "invalid-pin" -> PinResult.Wrong
+                parsed?.code == "pin-locked" -> PinResult.TooManyTries
+                resp.code == 401 -> throw Unauthorized(parsed?.code, parsed?.error ?: "Unauthorized")
+                else -> throw ApiException(resp.code, parsed?.code, parsed?.error ?: "HTTP ${resp.code}")
+            }
+        }
+    }
+
     // ----- generic helpers --------------------------------------------------
 
     private suspend fun <T> get(path: String, ser: KSerializer<T>): T =
@@ -163,6 +180,11 @@ class Unauthorized(code: String?, message: String) : ApiException(401, code, mes
 
 @kotlinx.serialization.Serializable
 data class PairPollBody(val code: String)
+
+@kotlinx.serialization.Serializable
+data class UnlockBody(val profileId: String, val pin: String)
+
+enum class PinResult { Unlocked, Wrong, TooManyTries }
 
 sealed interface PairPoll {
     data object Pending : PairPoll

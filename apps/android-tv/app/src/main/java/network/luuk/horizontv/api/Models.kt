@@ -205,7 +205,7 @@ data class ErrorBody(val error: String? = null, val code: String? = null)
 // ---------- auth ------------------------------------------------------------
 
 @Serializable
-data class Profile(val id: String, val name: String, val avatar: String? = null)
+data class Profile(val id: String, val name: String, val avatar: String? = null, val hasPin: Boolean = false)
 
 @Serializable
 data class PairStartResult(val code: String, val expiresAt: Long)
