@@ -74,4 +74,19 @@ describe('waitForSegment (issue #57: early exit on ffmpeg failure)', () => {
     const ok = await p
     expect(ok).toBe(true)
   })
+
+  it('finds a segment that a short run finished writing just before it exited', async () => {
+    // A stability check that sees the file still growing must not give up just
+    // because ffmpeg has exited by the time the check ends: from then on the
+    // file is final. The writes are timed to land inside the periodic check, so
+    // the outcome does not depend on how fast the OS delivers file events.
+    const proc: FakeProc = { exitCode: null, signalCode: null, killed: false }
+    const session = fakeSession(dir, proc)
+    const segPath = path.join(dir, 'r0', segmentName(0))
+    await writeFile(segPath, 'a')
+    setTimeout(() => { void writeFile(segPath, 'ab') }, 50)
+    setTimeout(() => { void writeFile(segPath, 'abc, the complete segment').then(() => { proc.exitCode = 0 }) }, 380)
+
+    expect(await waitForSegment(session, 0, 0, 5_000)).toBe(true)
+  })
 })
