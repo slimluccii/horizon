@@ -22,6 +22,31 @@ export interface User {
 export interface AuthSession {
   token: string
   user: User
+  /** True for the head of a household with more than one profile, who may set this device up for everyone. */
+  canShareDevice?: boolean
+}
+
+export type DeviceMode = 'personal' | 'shared'
+
+export interface ProfileSummary {
+  id: string
+  name: string
+  avatar: string | null
+}
+
+/** What this device is, as the server sees it. */
+export interface DeviceSession {
+  /** Who logged in on this device. */
+  principal: User
+  /** The profile that is being used right now; the principal unless another one was picked. */
+  profile: User
+  /** The role this session really has. A shared device is always `member`. */
+  role: User['role']
+  shared: boolean
+  /** True when the person who logged in may set this device up for their whole household. */
+  canShare: boolean
+  /** Every profile that can be picked on this device. */
+  profiles: ProfileSummary[]
 }
 
 /** Result of `auth.setPassword`: a self-change re-issues a session (token +

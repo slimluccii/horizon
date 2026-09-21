@@ -2,7 +2,7 @@
 import type { SessionInfo, ActiveSessionSummary } from '../playback/session.ts'
 import type { ClientCapabilities } from '../playback/capabilities.ts'
 import type { MediaItem, ShowSummary, SeasonSummary } from '../library/mediaItem.ts'
-import type { User, AuthSession, SetPasswordResult, PairStartResult, PairPollResult } from '../identity/user.ts'
+import type { User, AuthSession, DeviceMode, DeviceSession, SetPasswordResult, PairStartResult, PairPollResult } from '../identity/user.ts'
 import type { HouseholdView, InviteKind, InviteResult } from '../identity/household.ts'
 import type { WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, ScanStatusResponse } from '../shared/http.ts'
 import type { Preferences } from '../identity/preferences.ts'
@@ -90,6 +90,7 @@ export class HorizonClient {
    *  `Authorization: Bearer`. Null on the web, where identity rides the
    *  httpOnly `hz_session` cookie instead — set via `auth.login`. */
   private token: string | null = null
+  private profileId: string | null = null
 
   constructor(opts: HorizonClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '')
@@ -106,8 +107,16 @@ export class HorizonClient {
     return this.token
   }
 
+  /** Act as this profile from now on; null goes back to the person who logged in. */
+  setProfile(profileId: string | null): void {
+    this.profileId = profileId
+  }
+
   private authHeaders(): Record<string, string> {
-    return this.token ? { Authorization: `Bearer ${this.token}` } : {}
+    return {
+      ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      ...(this.profileId ? { 'X-Horizon-Profile': this.profileId } : {}),
+    }
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -284,6 +293,13 @@ export class HorizonClient {
     /** The SDK's identity source — resolves the caller from cookie/bearer. A
      *  401 here is the web's signal to redirect to /login. */
     me: () => this.fetch<User>('/auth/me'),
+    /** All a client may know before login: whether the first account still has to be made. */
+    state: () => this.fetch<{ setupRequired: boolean }>('/auth/state'),
+    session: () => this.fetch<DeviceSession>('/auth/session'),
+    /** `shared` lets this device act as every profile of the household. Needs the
+     *  password unless the login is only minutes old. */
+    setDeviceMode: (mode: DeviceMode, password?: string) =>
+      this.fetch<{ mode: DeviceMode }>('/auth/device', { method: 'POST', body: JSON.stringify({ mode, password }) }),
     /**
      * Set or change a password. Self-service supplies `oldPassword` once one is
      * set (omitted on first-boot / forced set). Owner/admin reset another user

@@ -5,7 +5,7 @@ import { migrate } from '../../../../platform/db/migrations.ts'
 import { createUserRepo, type UserRepo } from '../persistence/userRepo.ts'
 import { createSessionRepo, type SessionRepo } from '../persistence/sessionRepo.ts'
 import { createHouseholdRepo, type HouseholdRepo } from '../persistence/householdRepo.ts'
-import { makeRequireAuth, SESSION_COOKIE } from '../authMiddleware.ts'
+import { makeRequireAuth, makeResolveProfile, SESSION_COOKIE } from '../authMiddleware.ts'
 import { registerAuth, validateGrant } from './auth.ts'
 import { registerUsers } from './users.ts'
 import { hash } from '../password.ts'
@@ -19,6 +19,7 @@ async function buildApp(db: DatabaseSync, users: UserRepo, sessions: SessionRepo
   const app = Fastify({ logger: false })
   await registerAuth(app, users, sessions, households)
   app.addHook('onRequest', makeRequireAuth(sessions, users))
+  app.addHook('preHandler', makeResolveProfile(sessions, users))
   // A trivial protected route to exercise cookie/bearer auth end-to-end.
   app.get('/protected', async req => ({ id: req.user?.id }))
   app.get('/whoami', async req => ({ role: req.user?.role, shared: req.user?.shared }))
@@ -365,6 +366,31 @@ describe('auth routes', () => {
       expect(await role()).toEqual({ role: 'owner', shared: false })
       await device(token, { mode: 'shared' })
       expect(await role()).toEqual({ role: 'member', shared: true })
+    })
+  })
+
+  describe('GET /auth/session', () => {
+    it('describes a personal device: one profile, the real role', async () => {
+      const luuk = await makeUserWithPassword(users, 'Luuk', 'luuk password')
+      const token = sessions.issue(luuk.id, null, [luuk.id]).token
+      const body = (await app.inject({ method: 'GET', url: '/auth/session', headers: { authorization: `Bearer ${token}` } })).json()
+      expect(body).toMatchObject({ role: 'owner', shared: false, canShare: false, principal: { id: luuk.id }, profile: { id: luuk.id } })
+      expect(body.profiles.map((p: { name: string }) => p.name)).toEqual(['Luuk'])
+    })
+
+    it('describes a shared device: every profile, the picked one, and never an admin role', async () => {
+      const luuk = await makeUserWithPassword(users, 'Luuk', 'luuk password')
+      const kid = users.create({ name: 'Kid' })
+      const house = households.create('Home', luuk.id)
+      users.setHousehold(luuk.id, house.id)
+      users.setHousehold(kid.id, house.id)
+      const token = sessions.issue(luuk.id, null, [luuk.id, kid.id]).token
+      const body = (await app.inject({
+        method: 'GET', url: '/auth/session',
+        headers: { authorization: `Bearer ${token}`, 'x-horizon-profile': kid.id },
+      })).json()
+      expect(body).toMatchObject({ role: 'member', shared: true, canShare: true, principal: { id: luuk.id }, profile: { id: kid.id, name: 'Kid' } })
+      expect(body.profiles.map((p: { name: string }) => p.name).sort()).toEqual(['Kid', 'Luuk'])
     })
   })
 
