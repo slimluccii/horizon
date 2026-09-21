@@ -70,6 +70,14 @@ const SetPasswordBody = z.object({
   newPassword: z.string().min(MIN_PASSWORD_LEN).max(1024),
 }).strict()
 
+const DeviceBody = z.object({
+  mode: z.enum(['personal', 'shared']),
+  password: z.string().min(1).max(1024).optional(),
+}).strict()
+
+/** How long after logging in the device mode can be chosen without typing the password again. */
+const FRESH_LOGIN_MS = 10 * 60 * 1000
+
 const PairApproveBody = z.object({
   code: z.string().min(1).max(32),
   grant: z.array(z.string()).optional(),
@@ -183,7 +191,47 @@ export async function registerAuth(
     const { token } = sessions.issue(auth.id, typeof ua === 'string' ? ua : null, [auth.id])
     setSessionCookie(reply, req, token)
     const user = users.get(auth.id)
-    return { token, user }
+    return { token, user, canShareDevice: householdGrant(auth.id).length > 1 }
+  })
+
+  // GET /auth/state — unauthenticated (allowlisted). All a client may know before
+  // login: whether the first account still has to be created. No names.
+  app.get('/auth/state', async () => ({ setupRequired: users.list().length === 0 }))
+
+  /** Every profile the head of a household may put on a shared device; just the caller for anyone else. */
+  function householdGrant(userId: string): string[] {
+    const me = users.get(userId)
+    const household = me?.householdId ? households.get(me.householdId) : null
+    if (!me?.householdId || household?.ownerUserId !== userId) return [userId]
+    return users.listByHousehold(me.householdId).map(u => u.id)
+  }
+
+  // POST /auth/device — who uses this device. `shared` lets it act as every
+  // profile of the caller's household with a picker and no password per profile;
+  // `personal` is the caller alone. Asked once right after login, so a fresh
+  // session may choose freely; later it takes the password.
+  app.post('/auth/device', async (req, reply) => {
+    const caller = req.user
+    const token = tokenFromRequest(req)
+    const session = token ? sessions.resolve(token) : null
+    if (!caller || !session) return errorReply(reply, 401, ErrorCodes.UNAUTHORIZED, 'Authentication required')
+    const parse = DeviceBody.safeParse(req.body)
+    if (!parse.success) return badRequest(reply, ErrorCodes.INVALID_INPUT, parse.error.message)
+
+    if (Date.now() - session.createdAt > FRESH_LOGIN_MS) {
+      if (!parse.data.password) return badRequest(reply, ErrorCodes.PASSWORD_REQUIRED, 'Password required')
+      const hash = users.getAuthById(caller.id)?.passwordHash
+      if (!hash || !(await verifyPassword(hash, parse.data.password))) {
+        return errorReply(reply, 401, ErrorCodes.INVALID_CREDENTIALS, 'Password is incorrect')
+      }
+    }
+
+    const grant = parse.data.mode === 'shared' ? householdGrant(caller.id) : [caller.id]
+    if (parse.data.mode === 'shared' && grant.length < 2) {
+      return errorReply(reply, 403, ErrorCodes.GRANT_FORBIDDEN, 'Only the head of a household can share a device')
+    }
+    sessions.setGrant(session.id, grant)
+    return { mode: parse.data.mode }
   })
 
   // POST /auth/logout — revoke the current session + clear the cookie.
@@ -320,7 +368,8 @@ export async function registerAuth(
     const memberIds = users.listByHousehold(approver.householdId).map(u => u.id)
     const check = validateGrant({
       approverId: caller.id,
-      isHouseholdOwner: household?.ownerUserId === caller.id,
+      // A shared device cannot hand its household to yet another device.
+      isHouseholdOwner: !caller.shared && household?.ownerUserId === caller.id,
       householdMemberIds: memberIds,
       requested: parse.data.grant,
     })

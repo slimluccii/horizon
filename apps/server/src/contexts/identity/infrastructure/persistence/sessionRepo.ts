@@ -33,6 +33,8 @@ export interface SessionRepo {
    *  expiry). On an expired hit, deletes the row and returns null. */
   resolve(token: string): Session | null
   /** Revoke a single session by id. Returns true if a row was removed. */
+  /** Replace the profiles this session may act as. */
+  setGrant(id: string, grant: string[]): void
   revoke(id: string): boolean
   /** Revoke every session belonging to a user (e.g. logout-all, password reset). */
   revokeAllForUser(userId: string): number
@@ -124,6 +126,10 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
       db.prepare('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?')
         .run(now, expiresAt, row.id)
       return rowToSession({ ...row, last_seen_at: now, expires_at: expiresAt })
+    },
+
+    setGrant(id, grant) {
+      db.prepare('UPDATE sessions SET grant_user_ids = ? WHERE id = ?').run(JSON.stringify(grant), id)
     },
 
     revoke(id) {

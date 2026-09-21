@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { UserRepo } from '../persistence/userRepo.ts'
 import type { SessionRepo } from '../persistence/sessionRepo.ts'
 import type { HouseholdRepo } from '../persistence/householdRepo.ts'
-import { setSessionCookie, tokenFromRequest } from '../authMiddleware.ts'
+import { setSessionCookie, tokenFromRequest, type AuthedUser } from '../authMiddleware.ts'
 import { sendNotFound, badRequest, errorReply, ErrorCodes } from '../../../../platform/http/errors.ts'
 import { resolveCallerRole } from './authz.ts'
 import { PreferencesSchema } from '@horizon/sdk/preferences'
@@ -29,7 +29,9 @@ export function registerUsers(app: FastifyInstance, users: UserRepo, sessions: S
    *    target must belong to that same household.
    * Members who do not own their household cannot manage anyone.
    */
-  function canManageUser(caller: { id: string; role: 'owner' | 'admin' | 'member' }, targetId: string): boolean {
+  function canManageUser(caller: AuthedUser, targetId: string): boolean {
+    // Anyone can pick the head's profile on a shared device, so it manages nobody.
+    if (caller.shared) return false
     if (caller.role === 'owner' || caller.role === 'admin') return true
     const me = users.get(caller.id)
     if (!me?.householdId) return false

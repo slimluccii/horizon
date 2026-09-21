@@ -21,6 +21,7 @@ async function buildApp(db: DatabaseSync, users: UserRepo, sessions: SessionRepo
   app.addHook('onRequest', makeRequireAuth(sessions, users))
   // A trivial protected route to exercise cookie/bearer auth end-to-end.
   app.get('/protected', async req => ({ id: req.user?.id }))
+  app.get('/whoami', async req => ({ role: req.user?.role, shared: req.user?.shared }))
   await app.ready()
   return app
 }
@@ -283,6 +284,95 @@ describe('auth routes', () => {
       users.update(admin.id, { role: 'admin' })
       expect((await reset(owner.id, admin.id)).statusCode).toBe(200)
       expect((await reset(admin.id, member.id)).statusCode).toBe(200)
+    })
+  })
+
+  describe('device mode', () => {
+    // Luuk heads a household with a kid who has no password; a friend heads their own.
+    async function home() {
+      const luuk = await makeUserWithPassword(users, 'Luuk', 'luuk password')
+      const kid = users.create({ name: 'Kid' })
+      const partner = await makeUserWithPassword(users, 'Partner', 'partner password')
+      const house = households.create('Home', luuk.id)
+      for (const u of [luuk, kid, partner]) users.setHousehold(u.id, house.id)
+      return { luuk, kid, partner }
+    }
+    const login = (name: string, password: string) =>
+      app.inject({ method: 'POST', url: '/auth/login', payload: { name, password } })
+    const device = (token: string, payload: object) =>
+      app.inject({ method: 'POST', url: '/auth/device', headers: { authorization: `Bearer ${token}` }, payload })
+    const grant = async (token: string) =>
+      ((await app.inject({ method: 'GET', url: '/auth/grant', headers: { authorization: `Bearer ${token}` } })).json().profiles as { name: string }[])
+        .map(p => p.name).sort()
+
+    it('tells the household head at login that this device can be shared, and nobody else', async () => {
+      await home()
+      expect((await login('Luuk', 'luuk password')).json().canShareDevice).toBe(true)
+      expect((await login('Partner', 'partner password')).json().canShareDevice).toBe(false)
+    })
+
+    it('a shared device may act as every profile of the household, including one without a password', async () => {
+      await home()
+      const { token } = (await login('Luuk', 'luuk password')).json()
+      expect(await grant(token)).toEqual(['Luuk'])
+      expect((await device(token, { mode: 'shared' })).statusCode).toBe(200)
+      expect(await grant(token)).toEqual(['Kid', 'Luuk', 'Partner'])
+    })
+
+    it('a personal device goes back to just the person who logged in', async () => {
+      await home()
+      const { token } = (await login('Luuk', 'luuk password')).json()
+      await device(token, { mode: 'shared' })
+      expect((await device(token, { mode: 'personal', password: 'luuk password' })).statusCode).toBe(200)
+      expect(await grant(token)).toEqual(['Luuk'])
+    })
+
+    it('only the household head can share a device', async () => {
+      await home()
+      const { token } = (await login('Partner', 'partner password')).json()
+      const res = await device(token, { mode: 'shared' })
+      expect(res.statusCode).toBe(403)
+      expect(res.json().code).toBe('grant-forbidden')
+    })
+
+    it('asks for the password again once the login is no longer fresh', async () => {
+      const { luuk } = await home()
+      const { token, session } = sessions.issue(luuk.id, null, [luuk.id])
+      db.prepare('UPDATE sessions SET created_at = ? WHERE id = ?').run(Date.now() - 60 * 60 * 1000, session.id)
+      expect((await device(token, { mode: 'shared' })).json().code).toBe('password-required')
+      expect((await device(token, { mode: 'shared', password: 'wrong' })).statusCode).toBe(401)
+      expect((await device(token, { mode: 'shared', password: 'luuk password' })).statusCode).toBe(200)
+    })
+
+    it('a shared device cannot pair another device for the whole household', async () => {
+      const { kid } = await home()
+      const { token } = (await login('Luuk', 'luuk password')).json()
+      await device(token, { mode: 'shared' })
+      const { code } = (await app.inject({ method: 'POST', url: '/auth/pair/start' })).json()
+      const res = await app.inject({
+        method: 'POST', url: '/auth/pair/approve',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { code, grant: [kid.id] },
+      })
+      expect(res.statusCode).toBe(403)
+      expect(res.json().code).toBe('grant-forbidden')
+    })
+
+    it('a shared device never has admin rights, whoever is picked on it', async () => {
+      await home()
+      const { token } = (await login('Luuk', 'luuk password')).json()
+      const role = async () => (await app.inject({ method: 'GET', url: '/whoami', headers: { authorization: `Bearer ${token}` } })).json()
+      expect(await role()).toEqual({ role: 'owner', shared: false })
+      await device(token, { mode: 'shared' })
+      expect(await role()).toEqual({ role: 'member', shared: true })
+    })
+  })
+
+  describe('before login', () => {
+    it('says whether the server still needs its first account, without listing anyone', async () => {
+      expect((await app.inject({ method: 'GET', url: '/auth/state' })).json()).toEqual({ setupRequired: true })
+      await makeUserWithPassword(users, 'Luuk', 'luuk password')
+      expect((await app.inject({ method: 'GET', url: '/auth/state' })).json()).toEqual({ setupRequired: false })
     })
   })
 
