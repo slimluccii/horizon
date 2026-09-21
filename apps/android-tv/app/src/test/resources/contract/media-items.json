@@ -1,0 +1,114 @@
+[
+  {
+    "id": "movie1",
+    "kind": "movie",
+    "parentId": null,
+    "title": "Dune",
+    "year": 2021,
+    "season": null,
+    "episode": null,
+    "episodeEnd": null,
+    "durationSec": 9300.5,
+    "resolution": "3840x2160",
+    "videoCodec": "hevc",
+    "videoBitrate": 58000000,
+    "container": "matroska,webm",
+    "hdr": {
+      "dv": false,
+      "hdr10": true,
+      "hdr10plus": false
+    },
+    "audioTracks": [
+      {
+        "index": 0,
+        "codec": "eac3",
+        "channels": 6,
+        "language": "eng",
+        "title": "Surround",
+        "default": true
+      }
+    ],
+    "subtitleTracks": [
+      {
+        "index": 0,
+        "codec": "subrip",
+        "language": "nld",
+        "forced": false,
+        "embeddable": true
+      }
+    ],
+    "externalIds": {
+      "tmdb": 438631
+    },
+    "metadata": {
+      "kind": "movie",
+      "tmdbId": 438631,
+      "title": "Dune",
+      "overview": "Spice.",
+      "posterPath": "/dune.jpg"
+    }
+  },
+  {
+    "id": "show1",
+    "kind": "show",
+    "parentId": null,
+    "title": "Frieren",
+    "year": null,
+    "season": null,
+    "episode": null,
+    "episodeEnd": null,
+    "durationSec": null,
+    "resolution": null,
+    "videoCodec": null,
+    "videoBitrate": null,
+    "container": null,
+    "hdr": null,
+    "audioTracks": null,
+    "subtitleTracks": null,
+    "externalIds": {
+      "tvdb": 424536
+    },
+    "metadata": null
+  },
+  {
+    "id": "ep1",
+    "kind": "episode",
+    "parentId": "show1",
+    "title": "The Journey's End",
+    "year": null,
+    "season": 1,
+    "episode": 1,
+    "episodeEnd": 2,
+    "durationSec": 1500,
+    "resolution": "1920x1080",
+    "videoCodec": "h264",
+    "videoBitrate": null,
+    "container": "matroska,webm",
+    "hdr": {
+      "dv": false,
+      "hdr10": true,
+      "hdr10plus": false
+    },
+    "audioTracks": [
+      {
+        "index": 0,
+        "codec": "eac3",
+        "channels": 6,
+        "language": "eng",
+        "title": "Surround",
+        "default": true
+      }
+    ],
+    "subtitleTracks": [
+      {
+        "index": 0,
+        "codec": "subrip",
+        "language": "nld",
+        "forced": false,
+        "embeddable": true
+      }
+    ],
+    "externalIds": {},
+    "metadata": null
+  }
+]
