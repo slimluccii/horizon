@@ -69,8 +69,8 @@ test.describe('first-boot setup', () => {
 
   test('owner can log in with the password set during setup', async ({ page }) => {
     await page.goto('/login')
-    await page.getByRole('button', { name: OWNER }).click()
-    await page.getByPlaceholder('Password').fill(PASSWORD)
+    await page.getByLabel('Name').fill(OWNER)
+    await page.getByLabel('Password').fill(PASSWORD)
     await page.getByRole('button', { name: /sign in/i }).click()
     await expect(page).not.toHaveURL(/\/login$/)
     // Profile badge in the nav has the accessible name of the owner.
@@ -79,10 +79,10 @@ test.describe('first-boot setup', () => {
 
   test('wrong password is rejected with a generic error', async ({ page }) => {
     await page.goto('/login')
-    await page.getByRole('button', { name: OWNER }).click()
-    await page.getByPlaceholder('Password').fill('definitely-wrong')
+    await page.getByLabel('Name').fill(OWNER)
+    await page.getByLabel('Password').fill('definitely-wrong')
     await page.getByRole('button', { name: /sign in/i }).click()
     await expect(page).toHaveURL(/\/login$/)
-    await expect(page.getByText(/incorrect password/i)).toBeVisible()
+    await expect(page.getByText(/incorrect name or password/i)).toBeVisible()
   })
 })

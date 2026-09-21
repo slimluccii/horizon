@@ -8,20 +8,21 @@ import Search from '../features/library/pages/Search.tsx'
 import Setup from '../features/identity/pages/Setup.tsx'
 import Login from '../features/identity/pages/Login.tsx'
 import Link from '../features/identity/pages/Link.tsx'
+import Device from '../features/identity/pages/Device.tsx'
+import Profiles from '../features/identity/pages/Profiles.tsx'
 import Redeem from '../features/identity/pages/Redeem.tsx'
 import Settings from '../features/settings/pages/Settings.tsx'
 import { useActiveUser } from '../features/identity/hooks/useActiveUser.ts'
 import { horizon } from './horizon.ts'
 
 function Guard({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useActiveUser()
+  const { user, principal, needsProfilePick, loading } = useActiveUser()
   const [hasUsers, setHasUsers] = useState<boolean | null>(null)
   const location = useLocation()
 
-  // The user list drives the first-run /setup gate. It's an unauthenticated
-  // allowlisted read on the server, so it resolves even before login.
+  // All the server tells anyone before login is whether the first account still has to be made.
   useEffect(() => {
-    horizon.users.list().then(list => setHasUsers(list.length > 0)).catch(() => setHasUsers(false))
+    horizon.auth.state().then(s => setHasUsers(!s.setupRequired)).catch(() => setHasUsers(true))
   }, [user])
 
   // Routes reachable without a session. `/join` lets an invited friend create
@@ -37,8 +38,12 @@ function Guard({ children }: { children: React.ReactNode }) {
   }
   // Authenticated but never set a password (migrated owner / admin-created member)
   // → forced set-password screen, served by /login.
-  if (user && !user.hasPassword && !PUBLIC.includes(location.pathname)) {
+  // This is about the person who logged in: a profile without a password is fine on a shared device.
+  if (principal && !principal.hasPassword && !PUBLIC.includes(location.pathname)) {
     return <Navigate to="/login" replace />
+  }
+  if (user && needsProfilePick && !['/profiles', '/device'].includes(location.pathname)) {
+    return <Navigate to="/profiles" replace />
   }
   return <>{children}</>
 }
@@ -49,6 +54,8 @@ export default function App() {
       <Route path="/setup" element={<Setup />} />
       <Route path="/login" element={<Login />} />
       <Route path="/join" element={<Redeem />} />
+      <Route path="/device" element={<Guard><Device /></Guard>} />
+      <Route path="/profiles" element={<Guard><Profiles /></Guard>} />
       <Route path="/link" element={<Guard><Link /></Guard>} />
       <Route path="/" element={<Guard><Library /></Guard>} />
       <Route path="/show/:showId" element={<Guard><Show /></Guard>} />

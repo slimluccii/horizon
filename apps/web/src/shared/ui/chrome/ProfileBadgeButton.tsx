@@ -6,7 +6,7 @@ import { horizon } from '../../horizon.ts'
  *  sign-out / delete. Hidden when no active user — the Guard redirects to /login
  *  before any screen that shows this chrome mounts. */
 export default function ProfileBadgeButton() {
-  const { user, logout } = useActiveUser()
+  const { user, shared, logout } = useActiveUser()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -63,10 +63,15 @@ export default function ProfileBadgeButton() {
           <button onClick={() => { setOpen(false); navigate('/settings') }}>
             Settings
           </button>
+          {shared && (
+            <button onClick={() => { setOpen(false); navigate('/profiles') }}>
+              Switch profile
+            </button>
+          )}
           <button onClick={signOut}>
             Sign out
           </button>
-          {user.role !== 'owner' && (
+          {user.role !== 'owner' && !shared && (
             <button onClick={deleteProfile}>
               Delete profile
             </button>

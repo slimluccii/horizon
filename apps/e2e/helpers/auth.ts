@@ -135,11 +135,11 @@ export async function scanMoviesRoot(
   }
 }
 
-/** Log in through the UI login page (profile picker + password). */
+/** Log in through the UI login page (typed name + password; nobody is listed). */
 export async function loginUi(page: Page, name: string, password = PASSWORD): Promise<void> {
   await page.goto(`${APP}/login`)
-  await page.getByRole('button', { name }).click()
-  await page.getByPlaceholder('Password').fill(password)
+  await page.getByLabel('Name').fill(name)
+  await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: /sign in/i }).click()
   await expect(page).not.toHaveURL(/\/login$/)
 }
