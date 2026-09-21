@@ -35,7 +35,17 @@ of a household can share a device (`POST /auth/device`), freely right after
 login and with the password later. The acting profile travels in
 `X-Horizon-Profile` and is checked against the grant and the household on every
 request. Nobody is listed before login; `GET /auth/state` only says whether the
-first account still has to be made. See
+first account still has to be made.
+
+A **profile PIN** is optional and guards only the picker of a shared device. A
+profile with a PIN is locked on a shared session until the PIN is entered there
+(`POST /auth/profile-unlock`); the unlock lives on that session and is dropped
+everywhere when the PIN changes. While locked, the profile is refused with
+`profile-locked`, and a request that names no profile acts as nobody when the
+person who logged in is the locked one. Five wrong PINs make that device wait
+five minutes. A personal device never asks, because its owner typed a password.
+Anyone sets their own PIN, the head of a household anyone's in it, always with
+their password and never from a shared device (`POST /auth/profile-pin`). See
 [apps/server/src/contexts/identity/infrastructure/http/auth.ts](apps/server/src/contexts/identity/infrastructure/http/auth.ts).
 
 ## Configuration

@@ -100,6 +100,10 @@ export function registerSessions(
     // `userId`, if sent, must agree with it: the client may not assert a
     // different identity in the body than the profile it activated.
     const actingUserId = req.profileUserId
+    // A shared device only lacks an active profile while the one it would fall back to is locked.
+    if (!actingUserId && caller.shared) {
+      return errorReply(reply, 403, ErrorCodes.PROFILE_LOCKED, 'Pick a profile first')
+    }
     if (actingUserId) {
       if (requestedUserId && requestedUserId !== actingUserId) {
         return errorReply(reply, 403, ErrorCodes.USER_MISMATCH, 'Profile mismatch')

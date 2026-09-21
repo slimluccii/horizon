@@ -11,6 +11,8 @@ export interface Session {
   userAgent: string | null
   /** User ids this session may act as (X-Horizon-Profile). Defaults to [userId]. */
   grant: string[]
+  /** PIN-protected profiles that were unlocked on this device. */
+  unlocked: string[]
 }
 
 /** A TV device-pairing code, in domain shape. */
@@ -35,6 +37,10 @@ export interface SessionRepo {
   /** Revoke a single session by id. Returns true if a row was removed. */
   /** Replace the profiles this session may act as. */
   setGrant(id: string, grant: string[]): void
+  /** Remember that a PIN-protected profile was unlocked on this device. */
+  unlockProfile(id: string, userId: string): void
+  /** Forget every unlock of a profile, so a new PIN has to be entered everywhere. */
+  relockProfile(userId: string): void
   revoke(id: string): boolean
   /** Revoke every session belonging to a user (e.g. logout-all, password reset). */
   revokeAllForUser(userId: string): number
@@ -73,6 +79,7 @@ function rowToSession(row: {
   last_seen_at: number
   user_agent: string | null
   grant_user_ids: string | null
+  unlocked_user_ids: string | null
 }): Session {
   return {
     id: row.id,
@@ -82,6 +89,7 @@ function rowToSession(row: {
     lastSeenAt: row.last_seen_at,
     userAgent: row.user_agent,
     grant: row.grant_user_ids ? (JSON.parse(row.grant_user_ids) as string[]) : [row.user_id],
+    unlocked: row.unlocked_user_ids ? (JSON.parse(row.unlocked_user_ids) as string[]) : [],
   }
 }
 
@@ -105,7 +113,7 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
         token,
         session: {
           id, userId, createdAt: now, expiresAt, lastSeenAt: now,
-          userAgent: userAgent ?? null, grant: grant && grant.length ? grant : [userId],
+          userAgent: userAgent ?? null, grant: grant && grant.length ? grant : [userId], unlocked: [],
         },
       }
     },
@@ -113,7 +121,7 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
     resolve(token) {
       const tokenHash = hashToken(token)
       const row = db.prepare('SELECT * FROM sessions WHERE token_hash = ?').get(tokenHash) as
-        | { id: string; user_id: string; created_at: number; expires_at: number; last_seen_at: number; user_agent: string | null; grant_user_ids: string | null }
+        | { id: string; user_id: string; created_at: number; expires_at: number; last_seen_at: number; user_agent: string | null; grant_user_ids: string | null; unlocked_user_ids: string | null }
         | undefined
       if (!row) return null
       const now = Date.now()
@@ -126,6 +134,23 @@ export function createSessionRepo(db: DatabaseSync): SessionRepo {
       db.prepare('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?')
         .run(now, expiresAt, row.id)
       return rowToSession({ ...row, last_seen_at: now, expires_at: expiresAt })
+    },
+
+    unlockProfile(id, userId) {
+      const row = db.prepare('SELECT unlocked_user_ids FROM sessions WHERE id = ?').get(id) as { unlocked_user_ids: string | null } | undefined
+      if (!row) return
+      const unlocked = new Set<string>(row.unlocked_user_ids ? JSON.parse(row.unlocked_user_ids) : [])
+      unlocked.add(userId)
+      db.prepare('UPDATE sessions SET unlocked_user_ids = ? WHERE id = ?').run(JSON.stringify([...unlocked]), id)
+    },
+
+    relockProfile(userId) {
+      const rows = db.prepare('SELECT id, unlocked_user_ids FROM sessions WHERE unlocked_user_ids LIKE ?')
+        .all(`%"${userId}"%`) as Array<{ id: string; unlocked_user_ids: string }>
+      for (const row of rows) {
+        const rest = (JSON.parse(row.unlocked_user_ids) as string[]).filter(id => id !== userId)
+        db.prepare('UPDATE sessions SET unlocked_user_ids = ? WHERE id = ?').run(JSON.stringify(rest), row.id)
+      }
     },
 
     setGrant(id, grant) {

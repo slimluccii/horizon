@@ -399,4 +399,18 @@ describe('device mode and profiles', () => {
     expect(JSON.parse(String(fn.mock.calls[1][1]?.body))).toEqual({ mode: 'shared' })
     expect(JSON.parse(String(fn.mock.calls[2][1]?.body))).toEqual({ mode: 'personal', password: 'pw' })
   })
+
+  it('sets, clears and enters a profile pin', async () => {
+    const fn = spyFetch({})
+    const client = new HorizonClient({ baseUrl: 'http://x' })
+    await client.auth.setProfilePin({ userId: 'kid', pin: '1234', password: 'pw' })
+    await client.auth.setProfilePin({ pin: null, password: 'pw' })
+    await client.auth.unlockProfile('kid', '1234')
+    expect(fn.mock.calls.map(c => String(c[0]))).toEqual([
+      'http://x/api/auth/profile-pin', 'http://x/api/auth/profile-pin', 'http://x/api/auth/profile-unlock',
+    ])
+    expect(JSON.parse(String(fn.mock.calls[0][1]?.body))).toEqual({ userId: 'kid', pin: '1234', password: 'pw' })
+    expect(JSON.parse(String(fn.mock.calls[1][1]?.body))).toEqual({ pin: null, password: 'pw' })
+    expect(JSON.parse(String(fn.mock.calls[2][1]?.body))).toEqual({ profileId: 'kid', pin: '1234' })
+  })
 })

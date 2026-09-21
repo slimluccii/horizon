@@ -7,7 +7,7 @@ describe('UserRowSchema', () => {
       id: 'u1', name: 'Luuk', avatar: '🐼', preferences: '{}',
       role: 'member',
       password_hash: null, password_set_at: null, failed_attempts: 0, locked_until: null,
-      household_id: null,
+      household_id: null, pin_hash: null,
       created_at: 1, updated_at: 2,
     })
     expect(row.name).toBe('Luuk')
@@ -19,7 +19,7 @@ describe('UserRowSchema', () => {
       id: 'u1', name: 'x', avatar: null, preferences: '{}',
       role: 'owner',
       password_hash: null, password_set_at: null, failed_attempts: 0, locked_until: null,
-      household_id: null,
+      household_id: null, pin_hash: null,
       created_at: 1, updated_at: 1,
     })
     expect(row.avatar).toBeNull()
@@ -30,7 +30,7 @@ describe('UserRowSchema', () => {
       id: 'u1', name: 'x', avatar: null, preferences: '{}',
       role: 'owner',
       password_hash: '$argon2id$abc', password_set_at: 123, failed_attempts: 3, locked_until: 999,
-      household_id: 'h1',
+      household_id: 'h1', pin_hash: null,
       created_at: 1, updated_at: 1,
     })
     expect(row.password_hash).toBe('$argon2id$abc')

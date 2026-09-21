@@ -272,6 +272,12 @@ CREATE TABLE keyframe_index (
 );
 `
 
+// An optional PIN per profile for shared devices, and the profiles a session has unlocked with it.
+const V8_SQL = `
+ALTER TABLE users ADD COLUMN pin_hash TEXT;
+ALTER TABLE sessions ADD COLUMN unlocked_user_ids TEXT;
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
@@ -280,6 +286,7 @@ const MIGRATIONS: Migration[] = [
   { version: 5, sql: V5_SQL },
   { version: 6, sql: V6_SQL },
   { version: 7, sql: V7_SQL },
+  { version: 8, sql: V8_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

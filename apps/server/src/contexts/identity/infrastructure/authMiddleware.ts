@@ -203,11 +203,23 @@ export function makeResolveProfile(sessionRepo: SessionRepo, userRepo: UserRepo)
 
     const token = tokenFromRequest(req)
     const session = token ? sessionRepo.resolve(token) : null
-    req.grantedProfileIds = grantedProfiles(session?.grant, req.user.id, userRepo).map(u => u.id)
-    if (!target) { req.profileUserId = req.user.id; return }
+    const granted = grantedProfiles(session?.grant, req.user.id, userRepo)
+    // A PIN only guards the picker of a shared device; whoever logged in on a personal one proved more.
+    const locked = (u: { id: string; hasPin: boolean }) => req.user!.shared && u.hasPin && !session?.unlocked.includes(u.id)
+    req.grantedProfileIds = granted.filter(u => !locked(u)).map(u => u.id)
+    if (!target) {
+      // Without a header a locked principal is nobody, so skipping the header does not skip the PIN.
+      if (req.grantedProfileIds.includes(req.user.id)) req.profileUserId = req.user.id
+      return
+    }
 
-    if (!req.grantedProfileIds.includes(target)) {
+    const profile = granted.find(u => u.id === target)
+    if (!profile) {
       await reply.status(403).send({ error: 'Profile not granted', code: ErrorCodes.PROFILE_NOT_GRANTED })
+      return
+    }
+    if (locked(profile)) {
+      await reply.status(403).send({ error: 'Profile is locked', code: ErrorCodes.PROFILE_LOCKED })
       return
     }
     req.profileUserId = target

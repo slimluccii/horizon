@@ -9,6 +9,8 @@ export interface User {
   /** Whether this user has a password set. False until first-set (e.g. the
    *  migrated owner before completing the forced set-password step). */
   hasPassword: boolean
+  /** Whether a shared device asks for a PIN before this profile can be picked. */
+  hasPin: boolean
   createdAt: number
   updatedAt: number
 }
@@ -32,14 +34,15 @@ export interface ProfileSummary {
   id: string
   name: string
   avatar: string | null
+  hasPin: boolean
 }
 
 /** What this device is, as the server sees it. */
 export interface DeviceSession {
   /** Who logged in on this device. */
   principal: User
-  /** The profile that is being used right now; the principal unless another one was picked. */
-  profile: User
+  /** The profile in use: the principal unless another was picked, `null` while the principal is locked behind a PIN. */
+  profile: User | null
   /** The role this session really has. A shared device is always `member`. */
   role: User['role']
   shared: boolean

@@ -12,6 +12,8 @@ export interface User {
   /** Derived: whether `password_hash` is set. The hash itself never leaves the
    *  repo — only this boolean is exposed on the wire-safe User shape. */
   hasPassword: boolean
+  /** Derived: whether an optional PIN guards this profile on shared devices. The hash never leaves the repo. */
+  hasPin: boolean
   /** When the user last set a password (ms epoch), or null if never set. A null
    *  value flags a forced first-boot set-password (migrated owner / new member). */
   passwordSetAt: number | null
@@ -31,6 +33,7 @@ export interface UserAuth {
   name: string
   role: 'owner' | 'admin' | 'member'
   passwordHash: string | null
+  pinHash: string | null
   passwordSetAt: number | null
   failedAttempts: number
   lockedUntil: number | null
@@ -65,6 +68,8 @@ export interface UserRepo {
   /** Set (or reset) a user's password hash, stamp `password_set_at`, and clear
    *  any lockout/failed-attempt state. Returns false if no such user. */
   setPassword(id: string, passwordHash: string): boolean
+  /** Set the PIN hash, or clear it with null. */
+  setPin(id: string, pinHash: string | null): boolean
   /** Record a failed login: bump `failed_attempts` and, once past the threshold,
    *  set `locked_until` to `now + lockMs`. Returns the new failed-attempt count. */
   recordFailedLogin(id: string, lockedUntil: number | null): number
@@ -92,6 +97,7 @@ function rowToUser(raw: unknown): User {
     preferences: JSON.parse(row.preferences) as Record<string, unknown>,
     role: row.role,
     hasPassword: row.password_hash != null,
+    hasPin: row.pin_hash != null,
     passwordSetAt: row.password_set_at,
     householdId: row.household_id,
     createdAt: row.created_at,
@@ -106,6 +112,7 @@ function rowToUserAuth(raw: unknown): UserAuth {
     name: row.name,
     role: row.role,
     passwordHash: row.password_hash,
+    pinHash: row.pin_hash,
     passwordSetAt: row.password_set_at,
     failedAttempts: row.failed_attempts,
     lockedUntil: row.locked_until,
@@ -228,6 +235,10 @@ export function createUserRepo(db: DatabaseSync): UserRepo {
       // Case-insensitive to match the unique-name contract enforced on create.
       const row = db.prepare('SELECT * FROM users WHERE lower(name) = lower(?) LIMIT 1').get(name)
       return row ? rowToUserAuth(row) : null
+    },
+
+    setPin(id, pinHash) {
+      return db.prepare('UPDATE users SET pin_hash = ?, updated_at = ? WHERE id = ?').run(pinHash, Date.now(), id).changes > 0
     },
 
     setPassword(id, passwordHash) {
