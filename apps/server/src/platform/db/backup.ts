@@ -5,10 +5,13 @@
  * snapshot without blocking readers.
  */
 import { mkdir, readdir, unlink } from 'node:fs/promises'
+import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import type { DatabaseSync } from './connection.ts'
+import { LATEST_SCHEMA_VERSION, schemaVersion } from './migrations.ts'
 
 export const BACKUP_RETENTION = 7
+export const PRE_MIGRATION_RETENTION = 3
 
 const BACKUP_NAME_RE = /^horizon-(\d{4}-\d{2}-\d{2})\.db$/
 
@@ -44,6 +47,33 @@ export async function runBackup(
     console.error(`DB backup failed (${target}):`, err)
     return false
   }
+}
+
+const PRE_MIGRATION_NAME_RE = /^horizon-pre-migration-v(\d+)\.db$/
+
+/**
+ * Snapshot an existing database right before a release migrates it, named after
+ * the schema version it holds. Migrations have no downgrade path, so this file
+ * is the way back to the previous release. Synchronous, because it has to be
+ * done before migrate() runs at boot. Returns the snapshot path, or null when
+ * there is nothing to protect (new, up to date or in-memory database).
+ */
+export function snapshotBeforeMigrate(db: DatabaseSync, dbPath: string): string | null {
+  const current = schemaVersion(db)
+  if (dbPath === ':memory:' || current === 0 || current >= LATEST_SCHEMA_VERSION) return null
+  const dir = backupDir(dbPath)
+  const target = path.join(dir, `horizon-pre-migration-v${current}.db`)
+  mkdirSync(dir, { recursive: true })
+  rmSync(target, { force: true })
+  db.exec(`VACUUM INTO '${target.replaceAll("'", "''")}'`)
+  const older = readdirSync(dir)
+    .map(name => ({ name, version: Number(PRE_MIGRATION_NAME_RE.exec(name)?.[1]) }))
+    .filter(f => Number.isFinite(f.version))
+    .sort((a, b) => b.version - a.version)
+    .slice(PRE_MIGRATION_RETENTION)
+  for (const f of older) rmSync(path.join(dir, f.name), { force: true })
+  console.log(`DB snapshot before migrating from v${current}: ${target}`)
+  return target
 }
 
 async function pruneOldBackups(dir: string): Promise<void> {

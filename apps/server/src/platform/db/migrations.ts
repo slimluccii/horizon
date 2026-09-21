@@ -285,8 +285,21 @@ const MIGRATIONS: Migration[] = [
 /** Apply any migrations whose version is greater than PRAGMA user_version.
  *  Each migration runs in its own transaction; failure rolls back and
  *  leaves user_version at the previous version. */
+export const LATEST_SCHEMA_VERSION = Math.max(...MIGRATIONS.map(m => m.version))
+
+export function schemaVersion(db: DatabaseSync): number {
+  return (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+}
+
 export function migrate(db: DatabaseSync): void {
-  const current = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+  const current = schemaVersion(db)
+  // An older release would read and write a schema it does not know. Restore the pre-migration snapshot to go back.
+  if (current > LATEST_SCHEMA_VERSION) {
+    throw new Error(
+      `Database is at schema v${current}, written by a newer release; this release knows up to v${LATEST_SCHEMA_VERSION}. ` +
+      'Run the newer release, or restore a pre-migration snapshot from the backups folder.',
+    )
+  }
   const pending = MIGRATIONS
     .filter(m => m.version > current)
     .sort((a, b) => a.version - b.version)
