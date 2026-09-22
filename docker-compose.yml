@@ -25,10 +25,14 @@ services:
     # Override via .env. The media mount is read-only so its ownership doesn't matter.
     user: "${PUID:-568}:${PGID:-568}"
 
-    ports:
-      - "${HORIZON_PORT:-7777}:7777"
+    # A bridged network drops multicast, which silences the mDNS advert TV
+    # clients discover the server with. Host networking keeps it on the LAN.
+    # There is no port mapping as a result: the server binds HORIZON_PORT on the
+    # host itself, so that port must be free.
+    network_mode: host
 
     environment:
+      HORIZON_PORT: "${HORIZON_PORT:-7777}"
       # Everything below is OPTIONAL — the image ships sensible defaults (port
       # 7777, DB + cache under /config, web UI on). A minimal stack needs only
       # the two volume mounts. Library folders are picked at runtime in the web

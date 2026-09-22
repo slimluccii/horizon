@@ -168,6 +168,13 @@ In the Dockge web UI:
 
 4. Click **Save** then **Start**.
 
+The stack runs with `network_mode: host` so the server's mDNS advert reaches the
+LAN and the TV app can discover it by itself. That means there is no port
+mapping: the server binds `HORIZON_PORT` on the NAS directly, so nothing else on
+the host may already own it. Switch back to a `ports:` mapping if you prefer the
+container isolated, and expect the TV app to find the server by subnet scan or
+manual entry instead.
+
 ### 5. Verify the server is up
 
 ```bash
@@ -339,7 +346,7 @@ Anything watched or changed after the upgrade is lost with the newer file.
 | `Library shows 0 items` | No library folders configured yet, or media base mount empty inside container | First check you've added folders in the web UI (Settings → Library folders). Then `docker exec horizon ls /media` — should list your media tree. If empty, fix the `HORIZON_MEDIA_HOST` path. |
 | `ffmpeg not found in PATH` | Image built without ffmpeg layer | Re-build; ensure no override of the runtime stage. |
 | Playback stutters on Shield | Software transcode on a slow CPU | See **GPU passthrough** below, or transcode fewer renditions: `HORIZON_MAX_RENDITIONS=2`. |
-| `EADDRINUSE: 7777` | Another app on the host owns 7777 | Change `HORIZON_PORT` in `.env` (host side only — internal port stays 7777). |
+| `EADDRINUSE: 7777` | Another app on the host owns 7777 | Change `HORIZON_PORT` in `.env`. With host networking the server binds that port on the NAS itself, so there is no separate internal port. |
 | Owner locked out / forgot password | Too many failed logins, or password lost | Boot once with `HORIZON_RESET_OWNER_PASSWORD=1`, then unset it. See [Owner lockout escape hatch](#owner-lockout-escape-hatch). |
 | Session cookie not sticking over HTTPS | Server doesn't see `X-Forwarded-Proto=https` from the proxy | Make the reverse proxy / tunnel forward `X-Forwarded-Proto`; the server only marks the cookie `Secure` when it sees `https` there. |
 
