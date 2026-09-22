@@ -54,6 +54,7 @@ const plan: PlaybackPlan = {
 const hwAccel: HwAccel = {
   ffmpegVersion: '6.0', encoder: 'videotoolbox', h264Encoder: 'h264_videotoolbox',
   hevcEncoder: 'hevc_videotoolbox', hwaccelDecode: ['-hwaccel', 'videotoolbox'],
+  h264SupportsA53cc: true,
 }
 
 describe('ffmpeg exit reporting', () => {

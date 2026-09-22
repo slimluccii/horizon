@@ -6,6 +6,7 @@ import type { HwAccel } from './hwaccel.ts'
 const hwAccel: HwAccel = {
   ffmpegVersion: '6.0', encoder: 'videotoolbox', h264Encoder: 'h264_videotoolbox',
   hevcEncoder: 'hevc_videotoolbox', hwaccelDecode: ['-hwaccel', 'videotoolbox'],
+  h264SupportsA53cc: true,
 }
 
 const toneMap = { operator: 'hable' as const, postCorrection: true }
