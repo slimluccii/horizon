@@ -219,6 +219,8 @@ function codecArgs(rendition: Rendition, i: number, hwAccel: HwAccel): string[] 
   const p = rendition.profile
   return [
     `-c:v:${i}`, hwAccel.h264Encoder,
+    // h264_videotoolbox fails every frame when it embeds A53 captions, and Horizon serves subtitles as WebVTT.
+    ...(hwAccel.h264SupportsA53cc ? [`-a53cc:v:${i}`, '0'] : []),
     `-b:v:${i}`, `${p.videoBitrate}k`,
     `-maxrate:v:${i}`, `${Math.round(p.videoBitrate * 1.1)}k`,
     `-bufsize:v:${i}`, `${p.videoBitrate * 2}k`,

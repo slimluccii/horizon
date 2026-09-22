@@ -5,6 +5,7 @@ import type { HwAccel } from '../domain/hwaccel.ts'
 
 const hwAccel: HwAccel = {
   ffmpegVersion: 'x', encoder: 'cpu', h264Encoder: 'libx264', hevcEncoder: 'libx265', hwaccelDecode: [],
+  h264SupportsA53cc: true,
 }
 
 const ctx: RenderContext = {

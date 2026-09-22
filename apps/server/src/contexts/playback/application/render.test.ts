@@ -7,7 +7,10 @@ import type { HwAccel } from '../domain/hwaccel.ts'
 const hwAccel: HwAccel = {
   ffmpegVersion: '6.0', encoder: 'videotoolbox', h264Encoder: 'h264_videotoolbox',
   hevcEncoder: 'hevc_videotoolbox', hwaccelDecode: ['-hwaccel', 'videotoolbox'],
+  h264SupportsA53cc: true,
 }
+
+const hwAccelWithoutA53cc: HwAccel = { ...hwAccel, h264SupportsA53cc: false }
 
 const ctx: RenderContext = {
   sourceFilePath: '/movies/film.mkv',
@@ -118,6 +121,17 @@ describe('renderArgs', () => {
       expect(args).toEqual(expect.arrayContaining(['-pix_fmt:v:0', 'yuv420p']))
       expect(args).toEqual(expect.arrayContaining(['-color_primaries:v:0', 'bt709']))
       expect(args).toEqual(expect.arrayContaining(['-color_trc:v:1', 'bt709']))
+    })
+
+    it('turns off A53 caption embedding per rendition when the encoder takes the option', () => {
+      const { args } = renderArgs(transcodePlan, ctx, hwAccel)
+      expect(args).toEqual(expect.arrayContaining(['-a53cc:v:0', '0']))
+      expect(args).toEqual(expect.arrayContaining(['-a53cc:v:1', '0']))
+    })
+
+    it('omits the option entirely on an encoder that does not have it', () => {
+      const { args } = renderArgs(transcodePlan, ctx, hwAccelWithoutA53cc)
+      expect(args.some(a => a.startsWith('-a53cc'))).toBe(false)
     })
   })
 

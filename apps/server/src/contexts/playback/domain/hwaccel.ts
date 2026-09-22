@@ -9,6 +9,9 @@ export interface HwAccel {
   h264Encoder: string
   hevcEncoder: string
   hwaccelDecode: string[]
+  /** Whether the chosen H.264 encoder accepts `-a53cc`. Not every encoder has
+   *  the option, and ffmpeg rejects the whole command for one it does not know. */
+  h264SupportsA53cc: boolean
 }
 
 const ENCODER_PRIORITY: Array<{
@@ -83,18 +86,34 @@ async function encoderWorks(name: string): Promise<boolean> {
   }
 }
 
+/**
+ * Whether an encoder exposes a private option in this ffmpeg build. `-h
+ * encoder=…` exits 0 even for an encoder it does not recognise, so the option
+ * line itself is the only signal. Help goes to stderr on some builds.
+ */
+async function encoderHasOption(name: string, option: string): Promise<boolean> {
+  try {
+    const { stdout, stderr } = await execFileAsync('ffmpeg', ['-hide_banner', '-h', `encoder=${name}`])
+    return new RegExp(`^\\s*-${option}\\s`, 'm').test(stdout + stderr)
+  } catch {
+    return false
+  }
+}
+
 export async function detectHwAccel(forceEncoder?: string): Promise<HwAccel> {
   const ffmpegVersion = await getFFmpegVersion()
   const available = await getAvailableEncoders()
 
   if (forceEncoder) {
     console.log(`Using forced encoder: ${forceEncoder}`)
+    const h264Encoder = forceEncoder.includes('h264') ? forceEncoder : 'libx264'
     return {
       ffmpegVersion,
       encoder: forceEncoder,
-      h264Encoder: forceEncoder.includes('h264') ? forceEncoder : 'libx264',
+      h264Encoder,
       hevcEncoder: forceEncoder.includes('hevc') ? forceEncoder : 'libx265',
       hwaccelDecode: [],
+      h264SupportsA53cc: await encoderHasOption(h264Encoder, 'a53cc'),
     }
   }
 
@@ -107,13 +126,15 @@ export async function detectHwAccel(forceEncoder?: string): Promise<HwAccel> {
     const hevcOk = available.has(opt.hevc) && await encoderWorks(opt.hevc)
     if (h264Ok || hevcOk) {
       console.log(`Hardware acceleration: ${opt.name} (h264=${h264Ok ? opt.h264 : 'libx264'}, hevc=${hevcOk ? opt.hevc : 'libx265'})`)
+      const h264Encoder = h264Ok ? opt.h264 : 'libx264'
       return {
         ffmpegVersion,
         encoder: opt.name,
-        h264Encoder: h264Ok ? opt.h264 : 'libx264',
+        h264Encoder,
         hevcEncoder: hevcOk ? opt.hevc : 'libx265',
         // Only advertise hw decode when we actually selected this hw family.
         hwaccelDecode: opt.decode,
+        h264SupportsA53cc: await encoderHasOption(h264Encoder, 'a53cc'),
       }
     }
   }
@@ -125,5 +146,6 @@ export async function detectHwAccel(forceEncoder?: string): Promise<HwAccel> {
     h264Encoder: 'libx264',
     hevcEncoder: 'libx265',
     hwaccelDecode: [],
+    h264SupportsA53cc: await encoderHasOption('libx264', 'a53cc'),
   }
 }

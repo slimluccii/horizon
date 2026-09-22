@@ -21,7 +21,7 @@ function input(overrides: Partial<PlanInput> = {}): PlanInput {
     probe: probe(),
     // Capabilities that would allow direct-play of the probe above.
     capabilities: { videoCodecs: ['h264'], audioCodecs: ['aac'], hdr: [], maxBitrate: 0, container: ['mkv'] },
-    hwAccel: { ffmpegVersion: 'x', encoder: 'cpu', h264Encoder: 'libx264', hevcEncoder: 'libx265', hwaccelDecode: [] },
+    hwAccel: { ffmpegVersion: 'x', encoder: 'cpu', h264Encoder: 'libx264', hevcEncoder: 'libx265', hwaccelDecode: [], h264SupportsA53cc: true },
     audioTrackIndex: 0,
     maxRenditions: 3,
     toneMap: { operator: 'hable', postCorrection: true },
