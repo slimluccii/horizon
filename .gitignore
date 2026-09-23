@@ -25,6 +25,8 @@ media/
 **/.idea/
 **/build/
 **/local.properties
+# Gradle suggests committing this; it would pin the daemon JDK for everyone.
+**/gradle-daemon-jvm.properties
 **/captures/
 **/*.iml
 
