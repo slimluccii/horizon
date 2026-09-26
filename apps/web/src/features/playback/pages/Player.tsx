@@ -7,8 +7,8 @@ import VideoPlayer from '../components/VideoPlayer.tsx'
 import QualityOverlay from '../components/QualityOverlay.tsx'
 import TrackSelector from '../components/TrackSelector.tsx'
 import Icon from '../../../shared/ui/chrome/Icon.tsx'
-import { pickInitialTracks, isImageSubtitle, preferredQualityMaxBitrate } from '@horizon/sdk'
-import type { PlaybackSession, QualityProfile, MediaItem } from '@horizon/sdk'
+import { pickInitialTracks, isImageSubtitle, preferredQualityMaxBitrate, skippableAt } from '@horizon/sdk'
+import type { PlaybackSession, QualityProfile, MediaItem, Marker } from '@horizon/sdk'
 /** Delay (ms) after a reloadKey bump before clearing resumeAtSec. Must outlast
  *  VideoPlayer applying the value to the fresh hls.js instance (which happens
  *  synchronously on the reload render) yet be short enough that a subsequent
@@ -21,6 +21,8 @@ export default function Player() {
   const { user, userId, loading: userLoading } = useActiveUser()
   const [session, setSession] = useState<PlaybackSession | null>(null)
   const [media, setMedia] = useState<MediaItem | null>(null)
+  const [markers, setMarkers] = useState<Marker[]>([])
+  const [skippable, setSkippable] = useState<Marker | null>(null)
   const [currentProfile, setCurrentProfile] = useState<QualityProfile | null>(null)
   const [bufferSeconds, setBufferSeconds] = useState(0)
   const [qualityLog, setQualityLog] = useState<{ profile: QualityProfile; reason: string; time: Date }[]>([])
@@ -100,6 +102,10 @@ export default function Player() {
     let cancelled = false
     setPostPlay(false)
     setNextEpisode(null)
+    setMarkers([])
+    horizon.library.getMarkers(mediaId)
+      .then(m => { if (!cancelled) setMarkers(m) })
+      .catch(() => {})
     horizon.library.getMedia(mediaId)
       .then(m => {
         if (cancelled) return
@@ -228,6 +234,15 @@ export default function Player() {
   // burned into the video by the server.
   const textSubtitleTrack = subtitleTrack && subtitleTrack.embeddable ? subtitleTrack : null
 
+  useEffect(() => {
+    const video = videoRef.current
+    if (!ready || !video) return
+    const update = () => setSkippable(skippableAt(markers, video.currentTime * 1000))
+    update()
+    video.addEventListener('timeupdate', update)
+    return () => { video.removeEventListener('timeupdate', update); setSkippable(null) }
+  }, [ready, reloadKey, markers])
+
   return (
     <div>
       <button
@@ -278,6 +293,14 @@ export default function Player() {
             setQualityLog(log => [...log, { profile, reason, time: new Date() }])
           }}
         />
+      )}
+
+      {ready && skippable && (
+        <button
+          onClick={() => { if (videoRef.current) videoRef.current.currentTime = skippable.endMs / 1000 }}
+        >
+          Skip {skippable.kind}
+        </button>
       )}
 
       {ready && session && currentProfile && (
