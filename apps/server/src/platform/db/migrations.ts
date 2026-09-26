@@ -278,6 +278,23 @@ ALTER TABLE users ADD COLUMN pin_hash TEXT;
 ALTER TABLE sessions ADD COLUMN unlocked_user_ids TEXT;
 `
 
+// Where the intro, recap and credits of a file start and end, per source that
+// found them. mtime_ms and size_bytes tie a row to the version of the file it
+// was read from.
+const V9_SQL = `
+CREATE TABLE media_markers (
+  media_id   TEXT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK(kind IN ('intro','credits','recap')),
+  source     TEXT NOT NULL CHECK(source IN ('chapter','fingerprint')),
+  start_ms   INTEGER NOT NULL,
+  end_ms     INTEGER NOT NULL CHECK(end_ms > start_ms),
+  mtime_ms   INTEGER NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (media_id, kind, source)
+);
+`
+
 const MIGRATIONS: Migration[] = [
   { version: 1, sql: V1_SQL },
   { version: 2, sql: V2_SQL },
@@ -287,6 +304,7 @@ const MIGRATIONS: Migration[] = [
   { version: 6, sql: V6_SQL },
   { version: 7, sql: V7_SQL },
   { version: 8, sql: V8_SQL },
+  { version: 9, sql: V9_SQL },
 ]
 
 /** Apply any migrations whose version is greater than PRAGMA user_version.

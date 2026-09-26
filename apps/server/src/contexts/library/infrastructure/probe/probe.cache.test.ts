@@ -10,6 +10,11 @@ import { probe } from './probe.ts'
 // at exactly the path probe() will read. If this drifts, the cache-hit test
 // fails loudly — which is the intent.
 function cacheKey(filePath: string, mtimeMs: number, size: number): string {
+  return crypto.createHash('sha1').update(`${filePath}:${mtimeMs}:${size}:v2`).digest('hex')
+}
+
+// The key format before chapters were part of the probe result.
+function legacyCacheKey(filePath: string, mtimeMs: number, size: number): string {
   return crypto.createHash('sha1').update(`${filePath}:${mtimeMs}:${size}`).digest('hex')
 }
 
@@ -21,6 +26,7 @@ const FAKE_RESULT = {
   hdr: { dv: false, hdr10: false, hdr10plus: false },
   audioTracks: [],
   subtitleTracks: [],
+  chapters: [],
   container: 'matroska',
 }
 
@@ -66,6 +72,18 @@ describe('probe cache uses the full SHA1 key (#87)', () => {
     // filename `abcd1234.json` and clobber each other.
     expect(existsSync(path.join(cacheDir, `${keyA}.json`))).toBe(true)
     expect(existsSync(path.join(cacheDir, `${keyB}.json`))).toBe(true)
+  })
+})
+
+describe('probe cache ignores entries from before chapters were probed', () => {
+  it('does not use an entry stored under the pre-chapters key', async () => {
+    const s = statSync(mediaFile)
+    const key = legacyCacheKey(mediaFile, s.mtimeMs, s.size)
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(path.join(cacheDir, `${key}.json`), JSON.stringify({ key, result: FAKE_RESULT }))
+
+    // A miss spawns ffprobe on a one-byte file, which fails either way.
+    await expect(probe(mediaFile, cacheDir)).rejects.toThrow()
   })
 })
 

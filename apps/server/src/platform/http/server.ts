@@ -7,7 +7,7 @@ import type { ProgressRepo } from '../../contexts/playback/index.ts'
 import type { ServerSettings } from '../../contexts/settings/index.ts'
 import type { SessionManager } from '../../contexts/playback/index.ts'
 import type { MediaRepo, CollectionsRepo, ScanHistoryRepo, ScanManager, WebhookKeyRepo } from '../../contexts/library/index.ts'
-import { registerLibrary, registerArrWebhook } from '../../contexts/library/index.ts'
+import { registerLibrary, registerMarkers, registerArrWebhook, type MarkersRepo } from '../../contexts/library/index.ts'
 import type { MetadataRefreshWorker } from '../../contexts/metadata/index.ts'
 import type { PlaybackOrchestrator } from '../../contexts/playback/index.ts'
 import type { ActivityBus } from '../../contexts/activity/index.ts'
@@ -28,6 +28,7 @@ import type { DatabaseSync } from '../db/connection.ts'
 
 export interface Repos {
   mediaRepo: MediaRepo
+  markersRepo: MarkersRepo
   collectionsRepo: CollectionsRepo
   userRepo: UserRepo
   sessionRepo: SessionRepo
@@ -97,6 +98,7 @@ export async function buildServer(
 
     registerHealth(api, hwAccel, identity)
     registerLibrary(api, repos.mediaRepo, repos.collectionsRepo, workers, repos.userRepo, cfg)
+    registerMarkers(api, repos.mediaRepo, repos.markersRepo)
     registerArrWebhook(api, {
       keys: repos.webhookKeyRepo,
       users: repos.userRepo,

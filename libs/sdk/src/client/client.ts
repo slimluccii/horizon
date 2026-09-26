@@ -2,6 +2,7 @@
 import type { SessionInfo, ActiveSessionSummary } from '../playback/session.ts'
 import type { ClientCapabilities } from '../playback/capabilities.ts'
 import type { MediaItem, ShowSummary, SeasonSummary } from '../library/mediaItem.ts'
+import type { Marker } from '../library/markers.ts'
 import type { User, AuthSession, DeviceMode, DeviceSession, SetPasswordResult, PairStartResult, PairPollResult } from '../identity/user.ts'
 import type { HouseholdView, InviteKind, InviteResult } from '../identity/household.ts'
 import type { WatchProgress, ContinueWatchingItem, ServerSettings, ServerSettingsPatch, BrowseResult, ScanStatusResponse } from '../shared/http.ts'
@@ -159,6 +160,7 @@ export class HorizonClient {
       ),
     listMovies: () => this.fetch<MediaItem[]>('/library/movies'),
     getMedia: (id: string) => this.fetch<MediaItem>(`/library/media/${id}`),
+    getMarkers: (id: string) => this.fetch<Marker[]>(`/library/media/${id}/markers`),
     search: (query: string) => this.fetch<MediaItem[]>(`/library/search?q=${encodeURIComponent(query)}`),
     getNextEpisode: (id: string) =>
       this.fetch<{ next: MediaItem | null }>(`/library/media/${id}/next`).then(r => r.next),

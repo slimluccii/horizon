@@ -108,6 +108,15 @@ The pipeline that walks `HORIZON_MOVIES_ROOT` / `HORIZON_SHOWS_ROOT`, probes
 files with ffprobe, derives IDs, and upserts MediaItems. Triggered on boot,
 nightly via the Scheduler, by manual API call, or by the optional Watcher.
 
+### Marker
+Where the intro, recap or credits of a file start and end. A Scan reads them
+from the file's chapter names, and a later source may detect them from audio. A
+marker is tied to the file's mtime and size like the keyframe index, so a
+replaced file has none until it is scanned again. A chapter marker beats a
+marker of the same kind from any other source. Players offer a skip for intro
+and recap, never for credits. See
+[apps/server/src/contexts/library/domain/markers.ts](apps/server/src/contexts/library/domain/markers.ts).
+
 ### MetadataRefresh
 The worker that backfills TMDB metadata onto MediaItems whose enrichment is
 stale, missing, or invalidated by the TMDB changes feed. Independent of Scan

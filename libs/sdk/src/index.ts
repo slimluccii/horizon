@@ -38,5 +38,6 @@ export { PreferencesSchema, SUPPORTED_LANGUAGES, trackMatchesLanguage, preferred
 export { pickInitialTracks, isImageSubtitle, type InitialTracks } from './playback/trackSelection.ts'
 export type { Preferences } from './identity/preferences.ts'
 export * from './library/collections.ts'
+export { skippableAt, type Marker, type MarkerKind } from './library/markers.ts'
 export * from './activity/activity.ts'
 export * from './activity/activityReducer.ts'

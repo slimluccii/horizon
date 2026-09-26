@@ -42,6 +42,11 @@ const FAKE_PROBE_OUTPUT = JSON.stringify({
       disposition: { forced: 0 },
     },
   ],
+  chapters: [
+    { id: 0, start_time: '0.000000', end_time: '51.000000', tags: { title: 'Scene 1' } },
+    { id: 1, start_time: '51.000000', end_time: '96.500000', tags: { title: 'Intro' } },
+    { id: 2, start_time: '96.500000', end_time: '1204.000000' },
+  ],
   format: {
     duration: '9000.5',
     bit_rate: '42000000',
@@ -83,6 +88,22 @@ describe('parseProbeOutput', () => {
     const result = parseProbeOutput(FAKE_PROBE_OUTPUT)
     const srt = result.subtitleTracks.find(s => s.codec === 'subrip')
     expect(srt?.embeddable).toBe(true)
+  })
+})
+
+describe('parseProbeOutput — chapters', () => {
+  it('extracts chapters in seconds, with an empty title when the chapter has none', () => {
+    expect(parseProbeOutput(FAKE_PROBE_OUTPUT).chapters).toEqual([
+      { title: 'Scene 1', startSec: 0, endSec: 51 },
+      { title: 'Intro', startSec: 51, endSec: 96.5 },
+      { title: '', startSec: 96.5, endSec: 1204 },
+    ])
+  })
+
+  it('has no chapters when ffprobe reports none', () => {
+    const out = JSON.parse(FAKE_PROBE_OUTPUT)
+    delete out.chapters
+    expect(parseProbeOutput(JSON.stringify(out)).chapters).toEqual([])
   })
 })
 

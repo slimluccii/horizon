@@ -11,6 +11,7 @@ function probe(overrides: Partial<ProbeResult> = {}): ProbeResult {
     hdr: { dv: false, hdr10: false, hdr10plus: false },
     audioTracks: [{ index: 0, codec: 'aac', channels: 2, language: 'eng', title: '', default: true }],
     subtitleTracks: [],
+    chapters: [],
     container: 'matroska,webm',
     ...overrides,
   }

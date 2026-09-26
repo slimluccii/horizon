@@ -354,6 +354,7 @@ function mediaItemToProbeView(item: MediaItemRow): ProbeResult {
     videoBitrate: sourceVideoBitrate(item),
     hdr: item.hdr ?? { dv: false, hdr10: false, hdr10plus: false },
     audioTracks: item.audioTracks ?? [],
+    chapters: [],
     subtitleTracks: item.subtitleTracks ?? [],
     container: item.container ?? '',
   }

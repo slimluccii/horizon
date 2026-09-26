@@ -162,7 +162,7 @@ export function createScanManager(cfg: ScanConfig, deps: ScanManagerDeps): ScanM
     const errors: string[] = []
     let result: ScanResult
     try {
-      result = await runScan(scope, liveCfg(), { media: deps.media, collections: deps.collections, bus: deps.bus }, progress)
+      result = await runScan(scope, liveCfg(), { media: deps.media, collections: deps.collections, markers: deps.markers, bus: deps.bus }, progress)
     } catch (err) {
       errors.push((err as Error).message)
       result = {
