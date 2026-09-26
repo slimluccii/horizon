@@ -10,6 +10,8 @@ import { walkVideoFiles } from '../infrastructure/fs/walker.ts'
 import { discoverSidecarSubtitles, mergeSidecarTracks } from '../infrastructure/fs/sidecars.ts'
 import type { MediaRepo, MovieUpsert, EpisodeUpsert } from '../infrastructure/persistence/media.ts'
 import type { CollectionsRepo, Collection } from '../infrastructure/persistence/collections.ts'
+import type { MarkersRepo } from '../infrastructure/persistence/markers.ts'
+import { markersFromChapters } from '../domain/markers.ts'
 import type { ActivityBus } from '../../activity/index.ts'
 
 export interface ScanConfig {
@@ -26,6 +28,7 @@ export interface ScanConfig {
 export interface ScanDeps {
   media: MediaRepo
   collections: CollectionsRepo
+  markers?: MarkersRepo
   bus?: ActivityBus
 }
 
@@ -142,10 +145,10 @@ export function classifyPath(p: string, cfg: ScanConfig): 'movies' | 'shows' | n
 async function scanMoviesPath(
   pathToScan: string,
   cfg: ScanConfig,
-  media: MediaRepo,
+  deps: ScanDeps,
   progress: ScanProgressReporter,
-  bus?: ActivityBus,
 ): Promise<{ seen: Set<string>; added: number; failed: number; duplicates: string[]; unmatched: string[] }> {
+  const { media, markers, bus } = deps
   const seen = new Set<string>()
   let added = 0
   let failed = 0
@@ -192,6 +195,7 @@ async function scanMoviesPath(
       metadata: null,
     }
     media.upsertMovie(upsert)
+    markers?.replace(id, 'chapter', { mtimeMs: st.mtimeMs, sizeBytes: st.size, markers: markersFromChapters(p.chapters) })
     seen.add(id)
     if (!existed) added++
     bus?.emit({ kind: 'scan:detected', mediaKind: 'movie', title, message: `Detected movie "${title}"` })
@@ -203,10 +207,10 @@ async function scanMoviesPath(
 async function scanShowsPath(
   pathToScan: string,
   cfg: ScanConfig,
-  media: MediaRepo,
+  deps: ScanDeps,
   progress: ScanProgressReporter,
-  bus?: ActivityBus,
 ): Promise<{ seen: Set<string>; added: number; failed: number; shows: number; episodes: number; duplicates: string[]; unmatched: string[] }> {
+  const { media, markers, bus } = deps
   const seen = new Set<string>()
   let added = 0
   let failed = 0
@@ -294,6 +298,7 @@ async function scanShowsPath(
       metadata: null,
     }
     media.upsertEpisode(insert)
+    markers?.replace(id, 'chapter', { mtimeMs: st.mtimeMs, sizeBytes: st.size, markers: markersFromChapters(p.chapters) })
     seen.add(id)
     if (!existed) added++
     progress.tick()
@@ -362,7 +367,7 @@ export async function runScan(
   const scannable = (p: string) => !unavailableRoots.some(root => isUnder(p, root))
 
   for (const p of scope.moviesPaths.filter(scannable)) {
-    const r = await scanMoviesPath(p, cfg, deps.media, progress, deps.bus)
+    const r = await scanMoviesPath(p, cfg, deps, progress)
     for (const id of r.seen) seen.add(id)
     added += r.added
     failed += r.failed
@@ -371,7 +376,7 @@ export async function runScan(
     movieCount += r.seen.size
   }
   for (const p of scope.showsPaths.filter(scannable)) {
-    const r = await scanShowsPath(p, cfg, deps.media, progress, deps.bus)
+    const r = await scanShowsPath(p, cfg, deps, progress)
     for (const id of r.seen) seen.add(id)
     added += r.added
     failed += r.failed

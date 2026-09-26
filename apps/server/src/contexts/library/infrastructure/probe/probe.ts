@@ -3,6 +3,7 @@ import { promisify } from 'node:util'
 import { readFile, writeFile, mkdir, stat, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import type { Chapter } from '../../domain/markers.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -15,6 +16,8 @@ const PROBE_TIMEOUT_MS = 60_000
  *  throws ENOBUFS past this, which the caller's .catch() handles like any
  *  other probe failure. */
 const PROBE_MAX_BUFFER = 10 * 1024 * 1024
+// Part of the cache key, so a cached result from before a field was added is probed again.
+const PROBE_FORMAT_VERSION = 'v2'
 
 export interface AudioTrack {
   index: number
@@ -54,6 +57,7 @@ export interface ProbeResult {
   hdr: HdrInfo
   audioTracks: AudioTrack[]
   subtitleTracks: SubtitleTrack[]
+  chapters: Chapter[]
   container: string
 }
 
@@ -77,7 +81,8 @@ interface FfprobeStream {
   tags?: FfprobeTags
 }
 interface FfprobeFormat { duration?: string; bit_rate?: string; format_name?: string }
-interface FfprobeJson { streams?: FfprobeStream[]; format?: FfprobeFormat }
+interface FfprobeChapter { start_time?: string; end_time?: string; tags?: { title?: string } }
+interface FfprobeJson { streams?: FfprobeStream[]; format?: FfprobeFormat; chapters?: FfprobeChapter[] }
 
 const SIDE_DATA = {
   DOVI: 'DOVI configuration record',
@@ -137,6 +142,11 @@ export function parseProbeOutput(stdout: string): ProbeResult {
       forced: s.disposition?.forced === 1,
       embeddable: TEXT_SUB_CODECS.has(s.codec_name ?? ''),
     })),
+    chapters: (data.chapters ?? []).map(c => ({
+      title: c.tags?.title ?? '',
+      startSec: parseFloat(c.start_time ?? '0') || 0,
+      endSec: parseFloat(c.end_time ?? '0') || 0,
+    })),
     container: format.format_name ?? 'unknown',
   }
 }
@@ -145,7 +155,7 @@ interface CacheEntry { key: string; result: ProbeResult }
 
 function cacheKey(filePath: string, mtimeMs: number, size: number) {
   return crypto.createHash('sha1')
-    .update(`${filePath}:${mtimeMs}:${size}`)
+    .update(`${filePath}:${mtimeMs}:${size}:${PROBE_FORMAT_VERSION}`)
     .digest('hex')
 }
 
@@ -189,6 +199,7 @@ export async function probe(filePath: string, cacheDir: string): Promise<ProbeRe
     '-print_format', 'json',
     '-show_streams',
     '-show_format',
+    '-show_chapters',
     filePath,
   ], { timeout: PROBE_TIMEOUT_MS, maxBuffer: PROBE_MAX_BUFFER })
 

@@ -63,6 +63,9 @@ export { probe, parseProbeOutput, type ProbeResult, type AudioTrack, type Subtit
 
 // HTTP adapter.
 export { registerLibrary, sseFrame } from './infrastructure/http/library.ts'
+export { registerMarkers } from './infrastructure/http/markers.ts'
+export { createMarkersRepo, type MarkersRepo, type MarkerSource } from './infrastructure/persistence/markers.ts'
+export { markersFromChapters, type Chapter } from './domain/markers.ts'
 export { createKeyframeIndexer, type KeyframeIndexer } from './application/keyframeIndexer.ts'
 export { createKeyframeIndexRepo, type KeyframeIndexRepo } from './infrastructure/persistence/keyframeIndex.ts'
 export { extractKeyframes, type Keyframe } from './infrastructure/probe/keyframes.ts'

@@ -7,6 +7,7 @@ import { migrate } from '../../../platform/db/migrations.ts'
 import { createMediaRepo } from '../infrastructure/persistence/media.ts'
 import { createCollectionsRepo } from '../infrastructure/persistence/collections.ts'
 import { createChangesCursorRepo } from '../infrastructure/persistence/scanState.ts'
+import { createMarkersRepo } from '../infrastructure/persistence/markers.ts'
 import { createMetadataRefreshWorker, DEFAULT_REFRESH_CONFIG } from '../../metadata/index.ts'
 import { rescan, runScan, fullScope } from './runScan.ts'
 
@@ -23,6 +24,7 @@ function fakeProbe(_filePath: string) {
     hdr: { dv: false, hdr10: false, hdr10plus: false },
     audioTracks: [],
     subtitleTracks: [],
+    chapters: [],
     container: 'matroska',
   }
 }
@@ -78,6 +80,35 @@ describe('rescan (integration)', () => {
     // only episode removed, the show folder holds no episodes, so the show row
     // is soft-deleted along with the episode.
     expect(media.listShows()).toHaveLength(0)
+  })
+
+  it('stores the intro and credits markers named by a file\'s chapters', async () => {
+    const root = path.join(tmpRoot, 'shows')
+    mkdirSync(path.join(root, 'Friends', 'Season 01'), { recursive: true })
+    writeFileSync(path.join(root, 'Friends', 'Season 01', 'S01E06.mkv'), 'x')
+    vi.spyOn(probeMod, 'probe').mockImplementation(async (p: string) => ({
+      ...fakeProbe(p),
+      chapters: [
+        { title: 'Scene 1', startSec: 0, endSec: 51 },
+        { title: 'Intro', startSec: 51, endSec: 96 },
+        { title: 'Credits', startSec: 1204, endSec: 1243 },
+      ],
+    }) as any)
+
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const media = createMediaRepo(db)
+    const collections = createCollectionsRepo(db)
+    const markers = createMarkersRepo(db)
+
+    const cfg = { showsRoots: [root], moviesRoots: [], cacheDir: tmpRoot, scanConcurrency: 2 }
+    await runScan(fullScope(cfg), cfg, { media, collections, markers })
+
+    const [episode] = media.getEpisodes(media.listShows()[0].id)
+    expect(markers.get(episode.id)).toEqual([
+      { kind: 'intro', startMs: 51_000, endMs: 96_000 },
+      { kind: 'credits', startMs: 1_204_000, endMs: 1_243_000 },
+    ])
   })
 
   it('detects shows nested below a category folder, not the wrapper', async () => {

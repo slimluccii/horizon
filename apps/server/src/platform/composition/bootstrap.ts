@@ -19,6 +19,7 @@ import {
   createWebhookKeyRepo,
   createKeyframeIndexRepo,
   createKeyframeIndexer,
+  createMarkersRepo,
   extractKeyframes,
 } from '../../contexts/library/index.ts'
 import { startDailySchedule, type DailyScheduleHandle } from '../scheduler/scheduler.ts'
@@ -137,9 +138,11 @@ export async function bootstrap() {
     return [...movies, ...shows]
   }
 
+  const markersRepo = createMarkersRepo(db)
   const scanManager = createScanManager(cfg, {
     media: mediaRepo,
     collections: collectionsRepo,
+    markers: markersRepo,
     scanRoots: scanRootsRepo,
     scanHistory: scanHistoryRepo,
     // After a scan, drain the whole metadata queue so newly-indexed items get
@@ -170,7 +173,7 @@ export async function bootstrap() {
   const app = await buildServer(
     cfg,
     hwAccel,
-    { mediaRepo, collectionsRepo, userRepo, sessionRepo, householdRepo, inviteRepo, progressRepo, serverSettings, webhookKeyRepo: createWebhookKeyRepo(db) },
+    { mediaRepo, collectionsRepo, markersRepo, userRepo, sessionRepo, householdRepo, inviteRepo, progressRepo, serverSettings, webhookKeyRepo: createWebhookKeyRepo(db) },
     sessions,
     { scanManager, refreshWorker, scanHistory: scanHistoryRepo, activityBus },
     orchestrator,
