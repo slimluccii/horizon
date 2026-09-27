@@ -47,6 +47,7 @@ class HorizonApi(
     suspend fun getShow(id: String): ShowSummary = get("/library/shows/$id", serializer())
     suspend fun listEpisodes(showId: String, season: Int): List<MediaItem> =
         get("/library/shows/$showId/seasons/$season", serializer())
+    suspend fun getMarkers(mediaId: String): List<Marker> = get("/library/media/$mediaId/markers", serializer())
 
     // ----- progress -----
     suspend fun continueWatching(userId: String): List<ContinueWatchingItem> =

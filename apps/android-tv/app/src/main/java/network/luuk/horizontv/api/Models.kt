@@ -110,6 +110,14 @@ data class Collection(
     val movies: List<MediaItem>,
 )
 
+/** Where a skippable part of a file starts and ends. kind is intro, recap or credits. */
+@Serializable
+data class Marker(
+    val kind: String,
+    val startMs: Int,
+    val endMs: Int,
+)
+
 // ---------- progress --------------------------------------------------------
 
 @Serializable
